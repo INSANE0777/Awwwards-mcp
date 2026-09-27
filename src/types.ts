@@ -41,3 +41,61 @@ export interface ElementMedia {
   title: string;
   mediaPath: string; // e.g. "element/2026/08/<hash>.mp4" or ".jpg"
 }
+
+export interface GalleryItem {
+  slug: string; // e.g. "about-page-realevate"
+  title: string | null; // e.g. "About Page"
+  author: string | null; // "from X" attribution, e.g. "Realevate"
+  builtWith: string[]; // "This element was built with" tag list
+  related: string[]; // related-element permalink slugs on the page
+  mediaPath: string | null; // assets.awwwards.com path (reuse elementUrl for full URL)
+  mediaType: "video" | "image" | null; // .mp4 → video, .jpg → image
+  category: string | null; // e.g. "micro-interactions"; null when page has no /elements/<cat>/ breadcrumb
+}
+
+// Motion DNA result (Task 7): reduced view of a runtime page scan for the
+// gallery/motion tooling. Aggregated by reduceScan from a MotionScan
+// (src/motion-dna.ts) captured with MOTION_SNIPPET via page.evaluate.
+export interface MotionDna {
+  url: string;
+  stack: {
+    libs: string[];
+    render: string[];
+    scrollModel: "lenis" | "locomotive" | "native" | "unknown";
+  };
+  scroll: {
+    triggerCount: number;
+    scrubCount: number;
+    pinCount: number;
+    scrubRatio: number; // scrubCount / triggerCount; 0 when no triggers
+    sample: {
+      start: string | null;
+      end: string | null;
+      scrub: boolean;
+      pin: boolean;
+      duration: number | null; // seconds (gsap convention)
+      ease: string | null;
+    }[];
+  };
+  easingVocab: { token: string; bezier: number[] | null; uses: number }[];
+  durationVocab: { p25: number; median: number; p75: number } | null; // milliseconds
+  capturedAt: number; // Date.now() at capture
+}
+
+// Stored version of a gallery item (Cache / elements table). GalleryItem is
+// what the parsers emit; cacheUpdaters add cid/source/projectId/fetchedAt.
+export interface ElementRecord {
+  slug: string;
+  title: string;
+  cid: string; // normalized category id (Task 5 fills the taxonomy; raw title until then)
+  category: string;
+  author: string;
+  builtWith: string[];
+  related: string[];
+  mediaPath: string;
+  mediaType: "video" | "image" | null;
+  /** Tier A source="gallery" | Tier B source="site" (from a site detail's Elements section) */
+  source: "gallery" | "site";
+  projectId: string | null;
+  fetchedAt: number;
+}

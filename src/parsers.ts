@@ -1,4 +1,4 @@
-import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, ElementMedia, GalleryItem, SiteDetails, SiteSummary } from "./types.js";
 
 const ENTITIES: Record<string, string> = {
   "&quot;": '"',
@@ -245,4 +245,84 @@ export function parseElements(html: string): ElementMedia[] | null {
     }
   }
   return elements;
+}
+
+// /elements/ gallery listing: element tiles deep-link to
+// /inspiration/<slug> pages (live-verified 2026-09-28, e.g.
+// /inspiration/about-page-realevate).
+// null = no /inspiration/ href anywhere (drift or empty body);
+// [] = page parsed but gallery has zero tiles (legitimate empty).
+export function parseElementsGallery(html: string): string[] | null {
+  const matches = [...html.matchAll(/href="\/inspiration\/([\w-]+)\/?"/g)].map((m) => m[1]);
+  if (matches.length === 0) return html.length === 0 ? null : [];
+  return [...new Set(matches)];
+}
+
+// Element detail page (/inspiration/<slug>). Anchor notes verified against the
+// committed fixture test/fixtures/elements-item.html (2026-09-28, slug
+// "about-page-realevate"):
+// - og:url is ABSENT on element pages; the canonical link carries the
+//   permalink: <link rel="canonical" href="https://www.awwwards.com/inspiration/<slug>" />.
+// - Title/author: <h1 class="gallery-element__title">About Page
+//   <small>from</small> <a href="/sites/realevate">Realevate</a></h1> — the
+//   word "from" is wrapped in <small>, so the anchor is "from</small>".
+// - builtWith: <p class="subtitle-center">This element was built with...</p>
+//   followed by <strong class="button button--tag no-pointer">interaction</strong>.
+// - Collectable blob attributes close with a raw `"` then newline+`>`, so the
+//   stop marker is the first `"` after the split.
+// - No /elements/<category>/ breadcrumb on this page shape → category null.
+export function parseElementGalleryPage(html: string): GalleryItem | null {
+  const allSlugs = parseElementsGallery(html) ?? [];
+  const slug =
+    html.match(/rel="canonical" href="[^"]*?\/inspiration\/([\w-]+)\/?"/)?.[1] ?? allSlugs[0] ?? null;
+  if (!slug) return null;
+
+  const title = html
+    .match(/<h1[^>]*>\s*([\s\S]{2,200}?)\s*(?:<small>from<\/small>|<\/h1>)/)?.[1]
+    ?.replace(/<[^>]+>/g, "")
+    .trim() ?? null;
+
+  // "from</small> <a ...>Author</a>" inside the h1. The anchor's attributes
+  // contain ">" inside quoted values (data-action="click->preview#preview"),
+  // so the tag body must be quote-aware, not [^>]*.
+  const author =
+    html.match(
+      /from<\/small>\s*<a(?:[^>"']|"[^"]*"|'[^']*')*>\s*([\s\S]{2,120}?)<\/a>/,
+    )?.[1]?.replace(/<[^>]+>/g, "").trim() ?? null;
+
+  // "This element was built with" section: tag chips until the section closes.
+  const builtWith: string[] = [];
+  const builtI = html.indexOf('was built with...</p>');
+  if (builtI >= 0) {
+    const chunk = html.slice(builtI, builtI + 2000);
+    for (const t of chunk.matchAll(/button--tag[^>]*>([^<]{2,30})</g)) {
+      const v = t[1].trim();
+      if (v && !builtWith.includes(v)) builtWith.push(v);
+    }
+  }
+
+  const related = allSlugs.filter((s) => s !== slug);
+
+  // Media: same collectable blob scheme as site details.
+  let mediaPath: string | null = null;
+  let mediaType: "video" | "image" | null = null;
+  for (const part of html.split('data-collectable-model-value="').slice(1)) {
+    const stop = part.indexOf('"');
+    if (stop < 0) continue;
+    try {
+      const blob = JSON.parse(decodeEntities(part.slice(0, stop))) as { collectableImage?: string };
+      if (blob?.collectableImage) {
+        mediaPath = blob.collectableImage;
+        mediaType = mediaPath.endsWith(".mp4") ? "video" : "image";
+        break;
+      }
+    } catch {
+      /* blob variants without media are fine */
+    }
+  }
+
+  // Category: breadcrumb link into /elements/<category>/.
+  const category = html.match(/href="\/elements\/([\w-]+)\/"/)?.[1] ?? null;
+
+  return { slug, title, author, builtWith, related, mediaPath, mediaType, category };
 }

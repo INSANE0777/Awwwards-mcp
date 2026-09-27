@@ -10,7 +10,7 @@ import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
-import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
@@ -64,6 +64,11 @@ export type MotionFn = (
     viewport?: ViewportName;
   },
 ) => Promise<{ file: string; base64: string; frames: number } | { error: string }>;
+
+export type MotionDnaFn = (
+  url: string,
+  opts?: { viewport?: ViewportName },
+) => Promise<MotionDna>;
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -143,6 +148,13 @@ export interface Handlers {
   compare_sites(args: { slugs: string[] }): Promise<ToolResponse>;
   get_index_status(): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
+  search_elements(args: {
+    query?: string;
+    category?: string;
+    stack?: string[];
+    limit?: number;
+  }): Promise<ToolResponse>;
+  get_element(args: { id: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
   capture_live_site(args: {
     url: string;
@@ -161,7 +173,18 @@ export interface Handlers {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
   }): Promise<ToolResponse>;
+  get_motion_dna(args: { url: string; recapture?: boolean }): Promise<ToolResponse>;
+  search_motion(args: {
+    lib?: string;
+    scrubOnly?: boolean;
+    hasPins?: boolean;
+    limit?: number;
+  }): Promise<ToolResponse>;
 }
+
+// Freshness window for cached Motion DNA rows; records older than this are
+// re-captured live by get_motion_dna.
+export const MOTION_DNA_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 export function createHandlers(deps: {
   client: AwwwardsClient;
@@ -169,6 +192,7 @@ export function createHandlers(deps: {
   captureFn?: CaptureFn;
   analyzeFn?: AnalyzeFn;
   motionFn?: MotionFn;
+  motionDnaFn?: MotionDnaFn;
 }): Handlers {
   const { client, cache } = deps;
 
@@ -663,6 +687,86 @@ export function createHandlers(deps: {
     }
   }
 
+  // Compact payload per hit. mediaPath is coalesced to "" by rowToElement; an
+  // empty path would yield a garbage "assets.awwwards.com/awards/" URL, so
+  // mediaUrl/posterUrl render as null instead.
+  function compactElement(r: ElementRecord) {
+    return {
+      slug: r.slug,
+      title: r.title,
+      category: r.category,
+      author: r.author,
+      mediaUrl: r.mediaPath ? elementUrl(r.mediaPath) : null,
+      posterUrl: r.mediaPath ? elementUrl(elementPosterPath(r.mediaPath)) : null,
+      source: r.source,
+      projectId: r.projectId,
+    };
+  }
+
+  async function search_elements(args: {
+    query?: string; category?: string; stack?: string[]; limit?: number;
+  }): Promise<ToolResponse> {
+    try {
+      // Empty corpus → best-effort auto-index (gallery crawl is small and
+      // one-shot; identical UX to the sites index auto-run).
+      if (cache.countElements() === 0) {
+        const { runElementsIndexer } = await import("./elements-indexer.js");
+        try {
+          await runElementsIndexer({ client, cache, maxItems: 48 });
+        } catch (err) {
+          return {
+            content: [
+              text(
+                `Element index is empty and the gallery crawl failed (${err instanceof Error ? err.message : String(err)}). Try again later or run get_index_status.`,
+              ),
+            ],
+            isError: true,
+          };
+        }
+      }
+      // Tokens exist but no query → no FTS call at all (searchElements with an
+      // empty MATCH string would error). No-query searches list recent rows.
+      const ftsQuery = args.query
+        ? tokenizeQuery(args.query).map((t) => `"${t}"*`).join(" ")
+        : null;
+      const rows = ftsQuery
+        ? cache.searchElements(ftsQuery, 100)
+        : cache.listElements(200);
+
+      const stackWords = (args.stack ?? []).map((s) => s.toLowerCase());
+      const hits = rows
+        .filter((r) => (args.category ? r.cid === args.category : true))
+        .filter((r) => {
+          if (stackWords.length === 0) return true;
+          const hay = r.builtWith.map((b) => b.toLowerCase()).join(" ");
+          return stackWords.every((w) => hay.includes(w));
+        })
+        .slice(0, args.limit ?? 8)
+        .map(compactElement);
+      return { content: [text(JSON.stringify({ count: hits.length, results: hits }, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function get_element(args: { id: string }): Promise<ToolResponse> {
+    try {
+      const [record] = cache.getElements([args.id]);
+      if (!record) {
+        return { content: [text(`Unknown element id: ${args.id}`)], isError: true };
+      }
+      // One batched lookup resolves every related slug's title.
+      const bySlug = new Map(cache.getElements(record.related).map((r) => [r.slug, r]));
+      const related = record.related.map((slug) => {
+        const r = bySlug.get(slug);
+        return { slug, title: r?.title ?? "" };
+      });
+      return { content: [text(JSON.stringify({ ...record, related }, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function list_categories(): Promise<ToolResponse> {
     try {
       let cats = cache.getMeta<Categories>("categories", CATEGORY_TTL_MS);
@@ -801,15 +905,64 @@ export function createHandlers(deps: {
     }
   }
 
+  async function get_motion_dna(args: { url: string; recapture?: boolean }): Promise<ToolResponse> {
+    try {
+      const cached = args.recapture ? null : cache.getMotionDna(args.url);
+      if (cached && Date.now() - cached.capturedAt < MOTION_DNA_TTL_MS) {
+        return { content: [text(JSON.stringify(cached, null, 1))] };
+      }
+      // Lazy default: playwright is only touched when the tool actually runs.
+      const capture =
+        deps.motionDnaFn ??
+        ((url: string, opts?: { viewport?: ViewportName }) =>
+          import("./motion-dna.js").then((m) => m.captureMotionDna(url, opts)));
+      const dna = await capture(args.url, { viewport: "desktop" });
+      cache.upsertMotionDna(dna);
+      return { content: [text(JSON.stringify(dna, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  // Compact payloads only: the full record lives in the corpus under its url.
+  async function search_motion(args: {
+    lib?: string;
+    scrubOnly?: boolean;
+    hasPins?: boolean;
+    limit?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const hits = cache
+        .searchMotion(args)
+        .slice(0, args.limit ?? 20)
+        .map((d) => ({
+          url: d.url,
+          libs: d.stack.libs,
+          scrollModel: d.stack.scrollModel,
+          triggerCount: d.scroll.triggerCount,
+          scrubCount: d.scroll.scrubCount,
+          pinCount: d.scroll.pinCount,
+          topEasing: d.easingVocab[0]?.token ?? null,
+        }));
+      return { content: [text(JSON.stringify({ count: hits.length, results: hits }, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   return {
     search_sites,
     get_site_details,
     compare_sites,
     get_index_status,
     get_site_elements,
+    search_elements,
+    get_element,
     list_categories,
     capture_live_site,
     analyze_page_structure,
     record_site_motion,
+    get_motion_dna,
+    search_motion,
   };
 }

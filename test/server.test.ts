@@ -6,7 +6,7 @@ import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/s
 import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
-import type { SiteSummary } from "../src/types.js";
+import type { ElementRecord, SiteSummary } from "../src/types.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 const listingHtml = readFileSync(join(FIXTURES, "listing.html"), "utf8");
@@ -1135,5 +1135,156 @@ describe("viewport threading", () => {
     expect(captured.capture).toMatchObject({ viewport: "desktop" });
     expect(captured.analyze).toMatchObject({ viewport: "desktop" });
     expect(captured.motion).toMatchObject({ viewport: "desktop" });
+  });
+});
+
+// ---- search_elements / get_element handlers ----
+
+const elementFixture: ElementRecord = {
+  slug: "footers-editorial-studio", title: "Editorial Footer", cid: "footers",
+  category: "Footers", author: "Studio X", builtWith: ["GSAP", "Lenis"],
+  related: ["footers-editorial-studio-2"], mediaPath: "element/2025/11/e.jpg",
+  mediaType: "image", source: "gallery", projectId: null, fetchedAt: Date.now(),
+};
+const elementFixture2: ElementRecord = {
+  ...elementFixture, slug: "footers-editorial-studio-2", title: "Second Footer",
+};
+
+describe("search_elements handler", () => {
+  it("returns facet-filtered compact payloads with media URLs (no base64)", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementFixture, elementFixture2]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "footer", category: "footers", limit: 10 });
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.results.length).toBe(2);
+    expect(body.results[0].mediaUrl).toContain("assets.awwwards.com");
+    expect(JSON.stringify(res)).not.toContain("base64");
+  });
+
+  it("stack facet rejects records missing a requested token", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementFixture, elementFixture2]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "footer", stack: ["lenis", "webgl"], limit: 10 });
+    expect(JSON.parse((res.content[0] as any).text).results).toHaveLength(0);
+  });
+
+  it("serves an empty corpus without a query via listElements (no FTS call)", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementFixture, elementFixture2]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ category: "footers", limit: 1 });
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.count).toBe(1);
+    expect(body.results[0].slug).toBe("footers-editorial-studio");
+  });
+
+  it("renders mediaUrl/posterUrl null when mediaPath is empty (no garbage URL)", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const noMedia: ElementRecord = { ...elementFixture, mediaPath: "" };
+    cache.upsertElements([noMedia]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "footer", limit: 5 });
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.results[0].mediaUrl).toBeNull();
+    expect(body.results[0].posterUrl).toBeNull();
+  });
+});
+
+describe("get_element handler", () => {
+  it("returns full record with resolved related titles", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementFixture, elementFixture2]);
+    const h = createHandlers({ client, cache });
+    const res = await h.get_element({ id: "footers-editorial-studio" });
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.slug).toBe("footers-editorial-studio");
+    expect(body.related).toEqual([{ slug: "footers-editorial-studio-2", title: "Second Footer" }]);
+  });
+
+  it("reports a clean error for an unknown id", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.get_element({ id: "nope" });
+    expect(res.isError).toBe(true);
+  });
+});
+
+describe("get_motion_dna handler", () => {
+  const dnaFixture = {
+    url: "https://example.com/a",
+    stack: { libs: ["gsap", "scrolltrigger"], render: ["webgl", "three"], scrollModel: "native" as const },
+    scroll: { triggerCount: 6, scrubCount: 3, pinCount: 2, scrubRatio: 0.5, sample: [] },
+    easingVocab: [{ token: "power4.out", bezier: [0.23, 1, 0.32, 1], uses: 9 }],
+    durationVocab: { p25: 400, median: 700, p75: 1200 },
+    capturedAt: Date.now(),
+  };
+
+  it("serves cached records under 90 days", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertMotionDna({ ...dnaFixture, capturedAt: Date.now() });
+    const captured = vi.fn();
+    const h = createHandlers({ client, cache, motionDnaFn: async (u: string) => { captured(u); return dnaFixture; } });
+    const res = await h.get_motion_dna({ url: dnaFixture.url });
+    expect(JSON.parse((res.content[0] as any).text).url).toBe(dnaFixture.url);
+    expect(captured).not.toHaveBeenCalled();
+  });
+
+  it("live-captures and upserts on a cache miss, surfacing failure as clean error", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache, motionDnaFn: async () => { throw new Error("boom"); } });
+    const miss = await h.get_motion_dna({ url: "https://unreachable.example" });
+    expect(miss.isError).toBe(true);
+    expect((miss.content[0] as any).text).toContain("boom");
+  });
+});
+
+describe("search_motion handler", () => {
+  const dnaFixture = {
+    url: "https://example.com/a",
+    stack: { libs: ["gsap"], render: ["webgl"], scrollModel: "lenis" as const },
+    scroll: { triggerCount: 10, scrubCount: 4, pinCount: 3, scrubRatio: 0.4, sample: [] },
+    easingVocab: [{ token: "power2.out", bezier: null, uses: 5 }],
+    durationVocab: null,
+    capturedAt: Date.now(),
+  };
+
+  it("returns compact payloads and honors limit", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertMotionDna(dnaFixture);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_motion({});
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.count).toBe(1);
+    expect(body.results[0]).toEqual({
+      url: "https://example.com/a", libs: ["gsap"], scrollModel: "lenis",
+      triggerCount: 10, scrubCount: 4, pinCount: 3, topEasing: "power2.out",
+    });
+  });
+
+  it("filters on lib, scrubOnly and hasPins", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const quiet = { ...dnaFixture, url: "https://example.com/quiet",
+      scroll: { triggerCount: 2, scrubCount: 0, pinCount: 0, scrubRatio: 0, sample: [] } };
+    cache.upsertMotionDna(quiet);
+    cache.upsertMotionDna(dnaFixture);
+    const h = createHandlers({ client, cache });
+    const urls = async (args: Parameters<ReturnType<typeof createHandlers>["search_motion"]>[0]) =>
+      JSON.parse(((await h.search_motion(args)).content[0] as any).text).results.map((r: any) => r.url);
+    expect(await urls({ scrubOnly: true })).toEqual(["https://example.com/a"]);
+    expect(await urls({ hasPins: true })).toEqual(["https://example.com/a"]);
+    // lib matches both rows; insertion order is preserved
+    expect(await urls({ lib: "gsap" })).toEqual(["https://example.com/quiet", "https://example.com/a"]);
   });
 });

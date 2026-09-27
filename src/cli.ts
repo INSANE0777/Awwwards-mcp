@@ -133,6 +133,33 @@ server.tool(
 );
 
 server.tool(
+  "search_elements",
+  "Search Awwwards' curated element gallery — award-grade UI components (footers, menus, loaders, transitions, micro-interactions…). " +
+    "Usage: pass query text and at most one of category/stack; every result links back to its source element page and parent project.",
+  {
+    query: z.string().describe("Free text: what the component is or does").optional(),
+    category: z
+      .string()
+      .describe("Normalized category id, e.g. 'footers', 'micro-interactions'")
+      .optional(),
+    stack: z.array(z.string()).describe("Built-with tokens, e.g. ['gsap', 'webgl']").optional(),
+    limit: z.number().int().min(1).max(20).default(8),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.search_elements(args)),
+);
+
+server.tool(
+  "get_element",
+  "Get one Awwwards element in full: title, author, built-with stack, media URLs, related elements and the parent award-winning project. Use search_elements first for ids.",
+  {
+    id: z.string().describe("Element slug from search_elements"),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.get_element(args)),
+);
+
+server.tool(
   "list_categories",
   "List the filter taxonomy available on Awwwards: color hexes and tag/technology slugs usable with search_sites.",
   {},
@@ -178,6 +205,30 @@ server.tool(
     viewport: viewportSchema,
   },
   (args) => asMcpResult(handlers.record_site_motion(args)),
+);
+
+server.tool(
+  "get_motion_dna",
+  "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Serves the corpus first; live-captures unseen URLs (headless browser required).",
+  {
+    url: z.string().url().describe("Absolute site URL"),
+    recapture: z.boolean().default(false).describe("Force a fresh live capture even if a recent record exists"),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.get_motion_dna(args)),
+);
+
+server.tool(
+  "search_motion",
+  "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
+  {
+    lib: z.string().describe("Library token, e.g. 'gsap', 'lenis', 'webgl'").optional(),
+    scrubOnly: z.boolean().default(false).describe("Only sites with substantial scroll-scrubbed animation"),
+    hasPins: z.boolean().default(false).describe("Only sites that pin sections"),
+    limit: z.number().int().min(1).max(50).default(20),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.search_motion(args)),
 );
 
 // Auto-refresh: if the index is stale (or absent) and no crawl is running,
