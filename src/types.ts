@@ -41,3 +41,14 @@ export interface ElementMedia {
   title: string;
   mediaPath: string; // e.g. "element/2026/08/<hash>.mp4" or ".jpg"
 }
+
+export interface GalleryItem {
+  slug: string; // e.g. "about-page-realevate"
+  title: string | null; // e.g. "About Page"
+  author: string | null; // "from X" attribution, e.g. "Realevate"
+  builtWith: string[]; // "This element was built with" tag list
+  related: string[]; // related-element permalink slugs on the page
+  mediaPath: string | null; // assets.awwwards.com path (reuse elementUrl for full URL)
+  mediaType: "video" | "image" | null; // .mp4 → video, .jpg → image
+  category: string | null; // e.g. "micro-interactions"; null when page has no /elements/<cat>/ breadcrumb
+}
