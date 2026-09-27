@@ -1,6 +1,6 @@
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
 import { normalizeEasing, quartiles } from "./easings.js";
-import { preScroll } from "./structure.js";
+import { installSnippetShims, preScroll } from "./structure.js";
 import { resolveViewport, type ViewportName } from "./viewport.js";
 import type { MotionDna } from "./types.js";
 
@@ -215,6 +215,7 @@ export async function captureMotionDna(
     // scroll-through so lazy sections and ScrollTrigger registrations exist.
     const { width, height, ...contextOpts } = resolveViewport(opts.viewport);
     const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
+    await installSnippetShims(page);
     await page.goto(url, { waitUntil: "load", timeout: opts.timeoutMs ?? 45_000 });
     // "load" can fire before late XHRs settle (see structure.ts).
     await page.waitForTimeout(3000);

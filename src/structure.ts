@@ -183,6 +183,18 @@ export interface WaitOpts {
   viewport?: ViewportName;
 }
 
+// tsx (esbuild keepNames) injects __name()/__defProp helpers at module scope;
+// page.evaluate serializes only the snippet function body, so those helper
+// references would be undefined in the page (tsc dist never injects them).
+// Install a no-op shim before navigation so tsx-run captures behave like
+// compiled ones. Only snippets serialized via page.evaluate need this.
+export async function installSnippetShims(page: any): Promise<void> {
+  if (typeof page.addInitScript !== "function") return; // fake pages in tests
+  await page.addInitScript(
+    `globalThis.__name = (target, name) => { try { Object.defineProperty(target, "name", { value: name, configurable: true }); } catch {} return target; };`,
+  );
+}
+
 // Scroll through the page so lazy-rendered sections have layout before a
 // screenshot or band scan (spec requirement; 450px steps, brief settle, back
 // to top). Shared by captureLiveSite and analyzePageStructure — this is the
@@ -225,6 +237,7 @@ export async function analyzePageStructure(
     // fields, so the default call shape is unchanged.
     const { width, height, ...contextOpts } = resolveViewport(opts?.viewport);
     const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
+    await installSnippetShims(page);
     await page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 });
     // "load" can fire before late XHRs settle, so give the page a fixed
     // settle window; networkidle already means the network went quiet.
