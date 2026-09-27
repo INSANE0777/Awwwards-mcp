@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import { AwwwardsClient } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
+import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
 import type { SiteSummary } from "../src/types.js";
 
 const FIXTURES = join(__dirname, "fixtures");
@@ -238,6 +239,178 @@ describe("get_site_details", () => {
     const res = await h.get_site_details({ slug: "l-i-s-a" });
     // the l-i-s-a fixture (detail.html) has a c-heading-score block
     expect((res.content[0] as any).text).toMatch(/Jury score: \d\.\d{1,2}\/10/);
+  });
+});
+
+describe("compare_sites", () => {
+  it("compares cached details and summary fallbacks without any HTTP or CDN requests", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "first", title: "Fallback title", liveUrl: "https://fallback.test", awards: ["Site of the Day"] })]);
+    const base = {
+      title: null, description: null, palette: ["#123456"], technologies: ["WebGL"],
+      elements: ["3D"], awards: [], score: 7.5, ogImage: null, liveUrl: null,
+    };
+    cache.setMeta("detail:first", { ...base, slug: "first", juryDimensions: { design: 8, usability: 7, creativity: 9, content: 6 } });
+    cache.setMeta("detail:second", { ...base, slug: "second", title: "Second", liveUrl: "https://second.test", awards: [{ title: "Developer Award", date: "2026-09-01" }] });
+    cache.setMeta("detail:third", { ...base, slug: "third", title: "Third", score: null });
+    const { client, fetchFn } = fakeClient();
+    const res = await createHandlers({ client, cache }).compare_sites({ slugs: ["first", "second", "third"] });
+    expect(res.isError).toBeUndefined();
+    expect(res.content).toHaveLength(1);
+    const { sites } = JSON.parse((res.content[0] as any).text);
+    expect(sites.map((s: any) => s.slug)).toEqual(["first", "second", "third"]);
+    expect(sites[0]).toMatchObject({
+      title: "Fallback title", liveUrl: "https://fallback.test", palette: ["#123456"],
+      technologies: ["WebGL"], elements: ["3D"], awards: [{ title: "Site of the Day", date: "" }],
+      score: 7.5, juryDimensions: { design: 8, usability: 7, creativity: 9, content: 6 },
+    });
+    expect(sites[1]).toMatchObject({ title: "Second", liveUrl: "https://second.test", awards: [{ title: "Developer Award", date: "2026-09-01" }] });
+    expect(sites[2].juryDimensions).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("fetches only missing details from /sites/{slug}, seeds elements, then serves cache", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("detail:cached", {
+      slug: "cached", title: "Cached", description: "hello", palette: [], technologies: [],
+      elements: [], awards: [], score: null, ogImage: null, liveUrl: null,
+    });
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const first = await h.compare_sites({ slugs: ["cached", "l-i-s-a"] });
+    expect(first.isError).toBeUndefined();
+    const { sites } = JSON.parse((first.content[0] as any).text);
+    expect(sites[1].palette.length).toBeGreaterThan(0);
+    expect(sites[1].technologies).toContain("WebGL");
+    expect(sites[1].score).toBeGreaterThan(0);
+    expect(cache.getMeta<any[]>("elements:l-i-s-a", SITE_TTL)).not.toBeNull();
+    await h.compare_sites({ slugs: ["l-i-s-a", "cached"] });
+    await h.get_site_details({ slug: "l-i-s-a" });
+    expect(fetchFn.mock.calls.map((call: any[]) => String(call[0]))).toEqual(["https://www.awwwards.com/sites/l-i-s-a"]);
+  });
+
+  it("fetches each missing slug once and shares parsed details with get_site_details", async () => {
+    const cache = new Cache(tmpDir());
+    const html = readFileSync(join(FIXTURES, "detail.html"), "utf8");
+    const fetchFn = vi.fn(async () => new Response(html, { status: 200 }));
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const h = createHandlers({ client, cache });
+    const res = await h.compare_sites({ slugs: ["one", "two"] });
+    expect(res.isError).toBeUndefined();
+    expect(JSON.parse((res.content[0] as any).text).sites).toHaveLength(2);
+    await h.get_site_details({ slug: "one" });
+    await h.compare_sites({ slugs: ["two", "one"] });
+    expect(fetchFn.mock.calls.map((call: any[]) => String(call[0]))).toEqual([
+      "https://www.awwwards.com/sites/one", "https://www.awwwards.com/sites/two",
+    ]);
+  });
+
+  it("rejects invalid counts, duplicates and unsafe slugs before accessing cache or network", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    for (const slugs of [["one"], ["a", "b", "c", "d"], ["a", "A"], ["good", "../bad"], ["good", "bad?x=1"], ["good", ""]]) {
+      const res = await h.compare_sites({ slugs });
+      expect(res.isError).toBe(true);
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("reports an all-empty parse without caching it or fetching images", async () => {
+    const cache = new Cache(tmpDir());
+    const fetchFn = vi.fn(async () => new Response("<html>layout drift</html>", { status: 200 }));
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    cache.setMeta("detail:cached", { slug: "cached", title: "Cached", description: "ok", palette: [], technologies: [], elements: [], awards: [], score: null, ogImage: null, liveUrl: null });
+    const res = await createHandlers({ client, cache }).compare_sites({ slugs: ["cached", "broken"] });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("broken");
+    expect(cache.getMeta("detail:broken", SITE_TTL)).toBeNull();
+    expect(cache.getMeta("elements:broken", SITE_TTL)).toBeNull();
+    expect(fetchFn.mock.calls.map((call: any[]) => String(call[0]))).toEqual(["https://www.awwwards.com/sites/broken"]);
+  });
+});
+
+const SITE_TTL = 7 * 24 * 60 * 60 * 1000;
+
+describe("get_index_status", () => {
+  it("reports a never-indexed cache without any network calls", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const res = await createHandlers({ client, cache }).get_index_status();
+    expect(res.isError).toBeUndefined();
+    expect(JSON.parse((res.content[0] as any).text)).toEqual({
+      sitesCount: 0, progress: { pagesDone: 0, pagesTotal: 0 },
+      lastSuccessfulFinishAt: null, lastError: null,
+      lock: { startedAt: null, active: false, stale: false },
+      indexFreshness: { stale: true, ageMs: null, staleAfterMs: INDEX_STALE_MS },
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("shows cached taxonomy total during the first crawl before status exists", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", { colors: [], filters: ["3d", "webgl", "studio"] });
+    cache.setMeta("index:progress", ["3d"]);
+    cache.setMeta("index:lock", { startedAt: Date.now() });
+    const { client, fetchFn } = fakeClient();
+    const res = await createHandlers({ client, cache }).get_index_status();
+    expect(JSON.parse((res.content[0] as any).text)).toMatchObject({
+      progress: { pagesDone: 1, pagesTotal: 3 },
+      lastSuccessfulFinishAt: null, lock: { active: true },
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("uses completed status after the progress checkpoint is cleared", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("index:status", { finishedAt: Date.now(), pagesDone: 3, pagesTotal: 3 });
+    const { client, fetchFn } = fakeClient();
+    const res = await createHandlers({ client, cache }).get_index_status();
+    expect(cache.getMeta("index:progress", Number.POSITIVE_INFINITY)).toBeNull();
+    expect(JSON.parse((res.content[0] as any).text)).toMatchObject({
+      progress: { pagesDone: 3, pagesTotal: 3 }, indexFreshness: { stale: false },
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("shows the new crawl at zero immediately after acquiring a lock", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", { colors: [], filters: ["3d", "webgl", "studio", "portfolio"] });
+    cache.setMeta("index:status", { finishedAt: Date.now() - INDEX_STALE_MS, pagesDone: 3, pagesTotal: 3 });
+    cache.setMeta("index:lock", { startedAt: Date.now() });
+    const { client, fetchFn } = fakeClient();
+    const res = await createHandlers({ client, cache }).get_index_status();
+    expect(JSON.parse((res.content[0] as any).text)).toMatchObject({
+      progress: { pagesDone: 0, pagesTotal: 4 },
+      lock: { active: true }, indexFreshness: { stale: true },
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("reads persisted counts, progress, errors, lock and freshness offline", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "a" }), site({ slug: "b" })]);
+    const finishedAt = Date.now() - 1000;
+    cache.setMeta("index:status", { finishedAt, pagesDone: 1, pagesTotal: 3, lastError: "blocked" });
+    cache.setMeta("index:progress", ["3d", "webgl"]);
+    cache.setMeta("index:lock", { startedAt: Date.now() - 1000 });
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const currentResult = await h.get_index_status();
+    const current = JSON.parse((currentResult.content[0] as any).text);
+    expect(current).toMatchObject({
+      sitesCount: 2, progress: { pagesDone: 2, pagesTotal: 3 },
+      lastSuccessfulFinishAt: finishedAt, lastError: "blocked",
+      lock: { active: true, stale: false }, indexFreshness: { stale: false },
+    });
+    cache.setMeta("index:status", { finishedAt: Date.now() - INDEX_STALE_MS, pagesDone: 3, pagesTotal: 3 });
+    cache.setMeta("index:lock", { startedAt: Date.now() - INDEX_LOCK_STALE_MS });
+    const old = await h.get_index_status();
+    const stale = JSON.parse((old.content[0] as any).text);
+    expect(stale.lock).toMatchObject({ active: false, stale: true });
+    expect(stale.indexFreshness.stale).toBe(true);
+    expect(stale.lastError).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
 

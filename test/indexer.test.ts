@@ -92,7 +92,8 @@ describe("runIndexer", () => {
     expect(cache.getSites(60_000).length).toBe(31);
     const status = cache.getMeta<any>("index:status", 10_000);
     expect(status.finishedAt).toBeGreaterThan(0);
-    expect(cache.getMeta<string[]>("index:progress", 10_000)!.length).toBe(tags.length);
+    expect(status.pagesDone).toBe(tags.length);
+    expect(cache.getMeta("index:progress", 10_000)).toBeNull();
     expect(logs.length).toBe(tags.length);
     expect(cache.getMeta("index:lock", 10_000)).toBeNull(); // released
   });
@@ -107,6 +108,101 @@ describe("runIndexer", () => {
     expect(result.pagesDone).toBe(tags.length - 2);
     expect(urls.filter((u) => u.includes("/websites/" + firstTag + "/")).length).toBe(0);
     expect(urls.filter((u) => u.includes("/websites/" + tags[1] + "/")).length).toBe(0);
+    expect(cache.getMeta("index:progress", 10_000)).toBeNull();
+    expect(cache.getMeta<any>("index:status", 10_000)?.pagesDone).toBe(tags.length);
+  });
+
+  it("fetches every page again on the next successful refresh", async () => {
+    const cache = new Cache(tmpDir());
+    const cycleTags = tags.slice(0, 3);
+    cache.setMeta("categories", { colors: [], filters: cycleTags });
+    const { client, urls } = fakeClient();
+    await runIndexer({ client, cache });
+    expect(cache.getMeta("index:progress", Number.POSITIVE_INFINITY)).toBeNull();
+    const second = await runIndexer({ client, cache });
+    expect(second).toMatchObject({ pagesDone: 3, pagesTotal: 3, skipped: 0 });
+    for (const tag of cycleTags) {
+      expect(urls.filter((url) => url.endsWith(`/websites/${tag}/`))).toHaveLength(2);
+    }
+    expect(cache.getMeta<any>("index:status", Number.POSITIVE_INFINITY)?.pagesDone).toBe(3);
+    expect(cache.getMeta("index:progress", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("resumes a failed refresh without restarting its completed pages", async () => {
+    const cache = new Cache(tmpDir());
+    const cycleTags = tags.slice(0, 3);
+    cache.setMeta("categories", { colors: [], filters: cycleTags });
+    await runIndexer({ client: fakeClient().client, cache });
+    const { client: failingClient, urls: failingUrls } = fakeClient(
+      new Map([[`/websites/${cycleTags[1]}/`, () => new Response("blocked", { status: 403 })]]),
+    );
+    await expect(runIndexer({ client: failingClient, cache })).rejects.toBeInstanceOf(BlockedError);
+    expect(failingUrls.filter((url) => url.endsWith(`/websites/${cycleTags[0]}/`))).toHaveLength(1);
+    expect(cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY)).toEqual([cycleTags[0]]);
+    const { client: resumedClient, urls: resumedUrls } = fakeClient();
+    const resumed = await runIndexer({ client: resumedClient, cache });
+    expect(resumed).toMatchObject({ pagesDone: 2, pagesTotal: 3, skipped: 1 });
+    expect(resumedUrls.filter((url) => url.endsWith(`/websites/${cycleTags[0]}/`))).toHaveLength(0);
+    for (const tag of cycleTags.slice(1)) {
+      expect(resumedUrls.filter((url) => url.endsWith(`/websites/${tag}/`))).toHaveLength(1);
+    }
+    expect(cache.getMeta<any>("index:status", Number.POSITIVE_INFINITY)).toMatchObject({ pagesDone: 3, pagesTotal: 3 });
+    expect(cache.getMeta("index:progress", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("ignores a completed checkpoint left by an older version", async () => {
+    const cache = new Cache(tmpDir());
+    const oldTags = tags.slice(0, 2);
+    cache.setMeta("categories", { colors: [], filters: tags.slice(0, 3) });
+    cache.setMeta("index:status", { finishedAt: Date.now() - INDEX_STALE_MS, pagesDone: 2, pagesTotal: 2, sitesIndexed: 62 });
+    cache.setMeta("index:progress", oldTags);
+    const { client, urls } = fakeClient();
+    const result = await runIndexer({ client, cache });
+    expect(result).toMatchObject({ pagesDone: 3, skipped: 0 });
+    for (const tag of tags.slice(0, 3)) {
+      expect(urls.filter((url) => url.endsWith(`/websites/${tag}/`))).toHaveLength(1);
+    }
+    expect(cache.getMeta("index:progress", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("does not reuse an old completed checkpoint after a failed refresh", async () => {
+    const cache = new Cache(tmpDir());
+    const cycleTags = tags.slice(0, 3);
+    cache.setMeta("categories", { colors: [], filters: cycleTags });
+    cache.setMeta("index:status", { finishedAt: Date.now() - INDEX_STALE_MS, pagesDone: 2, pagesTotal: 2, sitesIndexed: 62 });
+    cache.setMeta("index:progress", cycleTags.slice(0, 2));
+    const { client: failing } = fakeClient(
+      new Map([[`/websites/${cycleTags[0]}/`, () => new Response("blocked", { status: 403 })]]),
+    );
+    await expect(runIndexer({ client: failing, cache })).rejects.toBeInstanceOf(BlockedError);
+    expect(cache.getMeta("index:progress", Number.POSITIVE_INFINITY)).toBeNull();
+    const { client, urls } = fakeClient();
+    const result = await runIndexer({ client, cache });
+    expect(result).toMatchObject({ pagesDone: 3, skipped: 0 });
+    for (const tag of cycleTags) {
+      expect(urls.filter((url) => url.endsWith(`/websites/${tag}/`))).toHaveLength(1);
+    }
+  });
+
+  it("refreshes a legacy completed checkpoint even after a taxonomy-fetch failure", async () => {
+    const cache = new Cache(tmpDir());
+    const cycleTags = tags.slice(0, 3);
+    cache.setMeta("index:status", {
+      finishedAt: Date.now() - INDEX_STALE_MS, pagesDone: 3, pagesTotal: 3, sitesIndexed: 93,
+    });
+    cache.setMeta("index:progress", cycleTags);
+    const { client: failing } = fakeClient(
+      new Map([["/websites/", () => new Response("blocked", { status: 403 })]]),
+    );
+    await expect(runIndexer({ client: failing, cache })).rejects.toBeInstanceOf(BlockedError);
+    expect(cache.getMeta<any>("index:status", Number.POSITIVE_INFINITY)?.lastError).toMatch(/block|403/i);
+    cache.setMeta("categories", { colors: [], filters: cycleTags });
+    const { client, urls } = fakeClient();
+    const result = await runIndexer({ client, cache });
+    expect(result).toMatchObject({ pagesDone: 3, skipped: 0 });
+    for (const tag of cycleTags) {
+      expect(urls.filter((url) => url.endsWith(`/websites/${tag}/`))).toHaveLength(1);
+    }
   });
 
   it("refuses to run while a fresh lock is held", async () => {
@@ -148,6 +244,20 @@ describe("runIndexer", () => {
     const { client: client2 } = fakeClient();
     const result = await runIndexer({ client: client2, cache });
     expect(result.skipped).toBe(progress.length);
+    expect(cache.getMeta<any>("index:status", 10_000)?.pagesDone).toBe(tags.length);
+    expect(cache.getMeta("index:progress", 10_000)).toBeNull();
+  });
+
+  it("retains the last successful finish when a later run fails", async () => {
+    const cache = new Cache(tmpDir());
+    const finishedAt = Date.now() - 1000;
+    cache.setMeta("index:status", { finishedAt, pagesDone: 2, pagesTotal: tags.length, sitesIndexed: 31 });
+    const { client } = fakeClient(new Map([["/websites/", () => new Response("blocked", { status: 403 })]]));
+    await expect(runIndexer({ client, cache })).rejects.toBeInstanceOf(BlockedError);
+    const status = cache.getMeta<any>("index:status", Number.POSITIVE_INFINITY);
+    expect(status.finishedAt).toBe(finishedAt);
+    expect(status.lastError).toMatch(/block|403/i);
+    expect(isIndexStale(cache)).toBe(false);
   });
 
   it("aborts on parser mismatch and does not mark the page done", async () => {

@@ -176,6 +176,12 @@ export class Cache {
     });
   }
 
+  countSites(): number {
+    return this.withDb((db) =>
+      (db.prepare("SELECT COUNT(*) AS count FROM sites").get() as { count: number }).count,
+    );
+  }
+
   getSite(slug: string, maxAgeMs: number = DEFAULT_SITE_TTL_MS): SiteSummary | null {
     return this.withDb((db) => {
       const row = db.prepare("SELECT * FROM sites WHERE slug = ?").get(slug) as
@@ -191,12 +197,13 @@ export class Cache {
   // for its zero-result "loose matches" hint). Each token is a porter-stemmed
   // prefix term, so multi-word queries match rows where the words are
   // scattered across title/tags/awards. Results are bm25-ascending (best
-  // match first). Returns null when FTS5 is unavailable on this build or the
+  // match first). Returns all fresh matches unless a limit is passed (e.g.
+  // for OR hints). Returns null when FTS5 is unavailable on this build or the
   // query has no usable tokens — callers fall back to legacy search.
   searchSites(
     query: string,
     maxAgeMs: number,
-    limit = 200,
+    limit?: number,
     matchMode: "AND" | "OR" = "AND",
   ): SiteSummary[] | null {
     // Sanitization strips quotes/parens/operators, leaving [a-z0-9-] only —
@@ -209,13 +216,13 @@ export class Cache {
       if (!this.ftsAvailable) return null;
       const match = tokens.map((t) => `"${t}"*`).join(matchMode === "OR" ? " OR " : " AND ");
       const min = this.now() - maxAgeMs;
-      const rows = db.prepare(
+      const stmt = db.prepare(
         `SELECT s.* FROM sites_fts
          JOIN sites s ON s.slug = sites_fts.slug
          WHERE sites_fts MATCH ? AND s.fetchedAt > ?
-         ORDER BY bm25(sites_fts) ASC
-         LIMIT ?`,
-      ).all(match, min, limit) as unknown as SiteRow[];
+         ORDER BY bm25(sites_fts) ASC${limit === undefined ? "" : " LIMIT ?"}`,
+      );
+      const rows = (limit === undefined ? stmt.all(match, min) : stmt.all(match, min, limit)) as unknown as SiteRow[];
       return rows.map(rowToSite);
     });
   }

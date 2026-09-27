@@ -11,6 +11,7 @@ import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
+import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -127,6 +128,8 @@ function errorResponse(err: unknown): ToolResponse {
 export interface Handlers {
   search_sites(args: SearchArgs): Promise<ToolResponse>;
   get_site_details(args: { slug: string }): Promise<ToolResponse>;
+  compare_sites(args: { slugs: string[] }): Promise<ToolResponse>;
+  get_index_status(): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
   capture_live_site(args: {
@@ -414,34 +417,39 @@ export function createHandlers(deps: {
     }
   }
 
+  // Shared by details and comparison: only successful parses seed the detail
+  // and elements caches, and neither caller needs an image to do so.
+  async function loadDetail(slug: string): Promise<SiteDetails | null> {
+    const metaKey = `detail:${slug}`;
+    let d = cache.getMeta<SiteDetails>(metaKey, SITE_TTL_MS);
+    if (!d) {
+      const html = await client.getHtml(`/sites/${slug}`);
+      d = parseDetail(html, slug);
+      if (isAllEmptyDetail(d)) return null;
+      cache.setMeta(metaKey, d);
+      // No Elements section is a legitimate empty; a zero-blob section is
+      // left uncached so get_site_elements can report parser drift.
+      if (cache.getMeta<ElementMedia[]>(`elements:${slug}`, SITE_TTL_MS) === null) {
+        const els = parseElements(html);
+        if (els === null) cache.setMeta(`elements:${slug}`, []);
+        else if (els.length > 0) cache.setMeta(`elements:${slug}`, els);
+      }
+    }
+    return d;
+  }
+
   async function get_site_details(args: { slug: string }): Promise<ToolResponse> {
     try {
-      const metaKey = `detail:${args.slug}`;
-      let d = cache.getMeta<SiteDetails>(metaKey, SITE_TTL_MS);
+      const d = await loadDetail(args.slug);
       if (!d) {
-        const html = await client.getHtml(`/sites/${args.slug}`);
-        d = parseDetail(html, args.slug);
-        if (isAllEmptyDetail(d)) {
-          return {
-            content: [
-              text(
-                "Awwwards layout may have changed: parsed no design data for " +
-                  args.slug +
-                  ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
-              ),
-            ],
-            isError: true,
-          };
-        }
-        cache.setMeta(metaKey, d);
-        // One fetch feeds both caches: seed the elements cache from the same
-        // HTML. Null (no section) caches as a legitimate empty; a zero-blob
-        // parse is left uncached for get_site_elements to surface as a mismatch.
-        if (cache.getMeta<ElementMedia[]>(`elements:${args.slug}`, SITE_TTL_MS) === null) {
-          const els = parseElements(html);
-          if (els === null) cache.setMeta(`elements:${args.slug}`, []);
-          else if (els.length > 0) cache.setMeta(`elements:${args.slug}`, els);
-        }
+        return {
+          content: [text(
+            "Awwwards layout may have changed: parsed no design data for " +
+              args.slug +
+              ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
+          )],
+          isError: true,
+        };
       }
       const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
       const liveUrl = d.liveUrl ?? cachedSite?.liveUrl ?? null;
@@ -473,6 +481,80 @@ export function createHandlers(deps: {
         if (img) content.push(img);
       }
       return { content };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function compare_sites(args: { slugs: string[] }): Promise<ToolResponse> {
+    try {
+      const slugs = args.slugs;
+      if (!Array.isArray(slugs) || slugs.length < 2 || slugs.length > 3 ||
+          slugs.some((slug) => typeof slug !== "string" || !/^[\w-]+$/.test(slug)) ||
+          new Set(slugs.map((slug) => slug.toLowerCase())).size !== slugs.length) {
+        return { content: [text("Provide 2 or 3 distinct site slugs (letters, digits, underscores or hyphens only).")], isError: true };
+      }
+
+      const sites = [];
+      for (const slug of slugs) {
+        const detail = await loadDetail(slug);
+        if (!detail) {
+          return { content: [text(
+            `Awwwards layout may have changed: parsed no design data for ${slug}. ` +
+              "The awwwards-mcp parser likely needs an update (or the site page was not found).",
+          )], isError: true };
+        }
+        const summary = cache.getSite(slug, SITE_TTL_MS);
+        sites.push({
+          slug,
+          title: detail.title ?? summary?.title ?? slug,
+          liveUrl: detail.liveUrl ?? summary?.liveUrl ?? null,
+          palette: detail.palette,
+          technologies: detail.technologies,
+          elements: detail.elements,
+          awards: detail.awards.length ? detail.awards : (summary?.awards ?? []).map((title) => ({ title, date: "" })),
+          score: detail.score,
+          juryDimensions: detail.juryDimensions ?? null,
+        });
+      }
+      return { content: [text(JSON.stringify({ sites }, null, 2))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function get_index_status(): Promise<ToolResponse> {
+    try {
+      const status = cache.getMeta<{
+        finishedAt?: number; pagesDone: number; pagesTotal: number; lastError?: string;
+      }>("index:status", Number.POSITIVE_INFINITY);
+      const progress = cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY);
+      const lock = cache.getMeta<{ startedAt: number }>("index:lock", Number.POSITIVE_INFINITY);
+      const now = Date.now();
+      const finishedAt = status?.finishedAt ?? null;
+      const lockAge = lock ? now - lock.startedAt : null;
+      const indexAge = finishedAt === null ? null : Math.max(0, now - finishedAt);
+      const active = lockAge !== null && lockAge < INDEX_LOCK_STALE_MS;
+      const categoryTotal = cache.getMeta<Categories>("categories", Number.POSITIVE_INFINITY)?.filters.length;
+      return { content: [text(JSON.stringify({
+        sitesCount: cache.countSites(),
+        progress: {
+          pagesDone: progress?.length ?? (active ? 0 : status?.pagesDone ?? 0),
+          pagesTotal: active ? categoryTotal ?? status?.pagesTotal ?? 0 : status?.pagesTotal ?? categoryTotal ?? 0,
+        },
+        lastSuccessfulFinishAt: finishedAt,
+        lastError: status?.lastError ?? null,
+        lock: {
+          startedAt: lock?.startedAt ?? null,
+          active,
+          stale: lockAge !== null && lockAge >= INDEX_LOCK_STALE_MS,
+        },
+        indexFreshness: {
+          stale: indexAge === null || indexAge >= INDEX_STALE_MS,
+          ageMs: indexAge,
+          staleAfterMs: INDEX_STALE_MS,
+        },
+      }, null, 2))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -686,6 +768,8 @@ export function createHandlers(deps: {
   return {
     search_sites,
     get_site_details,
+    compare_sites,
+    get_index_status,
     get_site_elements,
     list_categories,
     capture_live_site,

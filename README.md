@@ -20,6 +20,8 @@ queries keep AND semantics: every token must hit the same site.
 |------|--------------|
 | `search_sites` | Search by color, tags, technology, award type or free-text query. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Returns site cards with inline screenshots. |
 | `get_site_details` | Full design DNA for one site: palette, technologies, elements, awards, description. |
+| `compare_sites` | Compare 2–3 sites' design DNA and jury scores as text-only JSON. Uses cached details or fetches missing detail pages. |
+| `get_index_status` | Read local index count, crawl progress, last success/error, lock state and freshness without network requests. |
 | `get_site_elements` | Component-level visuals for one site: each element's poster image inline (3D models, video content, mobile layouts, microcopy…) + video URLs. |
 | `list_categories` | Every filter the agent can search by (200+ tags, 27 colors). |
 | `capture_live_site` | Optional: fresh full-page screenshot of any live URL. Waits for `load` + a settle window with a bounded pre-scroll, so heavy sites work (`waitStrategy: "networkidle"` available). Pass `viewport: "mobile"` for the 390×844 iPhone-class render (`"desktop"` 1440×900 default). (needs [playwright](https://playwright.dev)). |
@@ -165,10 +167,14 @@ npm run index
   SQLite cache at `~/.awwwards-mcp/`.
 - Resumable: interrupt it and re-run — completed pages are skipped.
 - The MCP server re-indexes automatically in the background whenever the
-  index is older than 7 days (never blocking your session).
+  index is older than 7 days (never blocking your session). Completed crawl
+  checkpoints are cleared so each refresh actually revisits the tag pages.
+  Run `get_index_status` to inspect progress or the last crawl error.
 
 Site details (palettes, tech stacks) are still fetched on demand and cached
-for 7 days.
+for 7 days. Awwwards page and CDN requests have a 10-second deadline per
+attempt, including response-body reading; transient page failures are retried
+once, while blocks (403/429) and CDN failures are not retried.
 
 ## How it works
 

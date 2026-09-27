@@ -71,7 +71,16 @@ export async function runIndexer(deps: {
       cache.setMeta("categories", cats);
     }
     const tags = cats.filters;
-    const done = new Set(cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY) ?? []);
+    const savedProgress = cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY) ?? [];
+    const previous = cache.getMeta<IndexStatus>("index:status", Number.POSITIVE_INFINITY);
+    // Older versions left the completed checkpoint behind. A later failed
+    // taxonomy fetch may have attached lastError to that status without
+    // invalidating the completed checkpoint; do not treat it as resumable.
+    const completed = previous?.finishedAt && previous.pagesTotal > 0 &&
+      previous.pagesDone === previous.pagesTotal &&
+      savedProgress.length >= previous.pagesTotal;
+    if (completed) cache.deleteMeta("index:progress"); // previous cycle already finished successfully
+    const done = new Set(completed ? [] : savedProgress);
     const result = await crawl({ client, cache, now, log }, tags, done);
     cache.setMeta("index:status", {
       startedAt: result.startedAt,
@@ -80,6 +89,9 @@ export async function runIndexer(deps: {
       pagesTotal: tags.length,
       sitesIndexed: result.sitesIndexed,
     });
+    // Checkpoints belong to the in-progress cycle only. Keep them until the
+    // completed status has been written so a failed crawl remains resumable.
+    cache.deleteMeta("index:progress");
     return {
       pagesDone: result.pagesDone,
       pagesTotal: tags.length,
@@ -92,6 +104,7 @@ export async function runIndexer(deps: {
       const progress = (cache.getMeta<string[]>("index:progress", Number.POSITIVE_INFINITY) ?? []).length;
       cache.setMeta("index:status", {
         startedAt: previous?.startedAt,
+        finishedAt: previous?.finishedAt,
         pagesDone: progress,
         pagesTotal: tagsCount(cache),
         sitesIndexed: previous?.sitesIndexed ?? 0,

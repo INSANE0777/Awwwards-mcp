@@ -38,10 +38,12 @@ describe("Cache", () => {
     const cache = new Cache(tmpDir(), () => t);
     cache.upsertSites([site("a"), site("b")]);
     expect(cache.getSites(10_000).length).toBe(2);
+    expect(cache.countSites()).toBe(2);
     expect(cache.getSite("a")!.liveUrl).toBe("https://example.com");
     expect(cache.getSite("a")!.tags).toEqual(["3D", "WebGL"]);
     t += 20_000;
     expect(cache.getSites(10_000).length).toBe(0); // expired
+    expect(cache.countSites()).toBe(2); // stored rows include expired entries
     expect(cache.getSite("a")).toBeNull(); // expired lookups are misses
   });
 
@@ -111,6 +113,30 @@ describe("searchSites (FTS5)", () => {
     seed(cache);
     const rows = cache.searchSites("editorial", 1000)!;
     expect(rows[0]!.slug).toBe("editorial-mag"); // title hit leads
+  });
+
+  it("returns all ranked fresh matches beyond 200 by default", () => {
+    let t = 1_000_000;
+    const cache = new Cache(tmpDir(), () => t);
+    cache.upsertSites([site({ slug: "stale-showcase", title: "Showcase Old" })]);
+    t += 2_000;
+    cache.upsertSites(Array.from({ length: 225 }, (_, i) =>
+      site({ slug: `showcase-${i}`, title: `Showcase ${i}`, tags: [] }),
+    ));
+
+    const rows = cache.searchSites("showcase", 1_000)!;
+    expect(rows).toHaveLength(225);
+    expect(rows.map((r) => r.slug)).toContain("showcase-224");
+    expect(rows.map((r) => r.slug)).not.toContain("stale-showcase");
+  });
+
+  it("respects an explicit limit for OR loose-match hints", () => {
+    const cache = new Cache(tmpDir());
+    seed(cache);
+    expect(cache.searchSites("unmatched editorial", 1_000)).toEqual([]);
+    const rows = cache.searchSites("unmatched editorial", 1_000, 1, "OR")!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.slug).toBe("editorial-mag");
   });
 
   it("matches prefixes and porter stems (editor → Editorial)", () => {

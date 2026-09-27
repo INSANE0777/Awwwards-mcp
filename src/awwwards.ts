@@ -82,10 +82,42 @@ export class RateLimiter {
 export class AwwwardsClient {
   private rateLimiter: RateLimiter;
   private fetchFn: typeof fetch;
+  private timeoutMs: number;
 
-  constructor(opts: { rateLimiter?: RateLimiter; fetchFn?: typeof fetch } = {}) {
+  constructor(opts: { rateLimiter?: RateLimiter; fetchFn?: typeof fetch; timeoutMs?: number } = {}) {
     this.rateLimiter = opts.rateLimiter ?? new RateLimiter(1000);
     this.fetchFn = opts.fetchFn ?? fetch;
+    this.timeoutMs = opts.timeoutMs ?? 10_000;
+    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > 2_147_483_647) {
+      throw new RangeError("timeoutMs must be a positive integer within the timer range");
+    }
+  }
+
+  private async fetchWithTimeout<T>(
+    url: string,
+    label: string,
+    init: RequestInit,
+    read: (res: Response) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(
+          `Timed out fetching ${label} from ${url} after ${this.timeoutMs}ms ` +
+            "(including response body); check connectivity and try again later.",
+        ));
+        controller.abort();
+      }, this.timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => read(await this.fetchFn(url, { ...init, signal: controller.signal })))(),
+        timeout,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   // Rate-limited page fetch with one retry on transient failures.
@@ -96,13 +128,16 @@ export class AwwwardsClient {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         await this.rateLimiter.acquire();
-        const res = await this.fetchFn(url, {
-          headers: { "User-Agent": USER_AGENT },
-          redirect: "follow",
-        });
-        if (res.status === 403 || res.status === 429) throw new BlockedError(url, res.status);
-        if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-        return await res.text();
+        return await this.fetchWithTimeout(
+          url,
+          "page",
+          { headers: { "User-Agent": USER_AGENT }, redirect: "follow" },
+          async (res) => {
+            if (res.status === 403 || res.status === 429) throw new BlockedError(url, res.status);
+            if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+            return res.text();
+          },
+        );
       } catch (err) {
         if (err instanceof BlockedError) throw err;
         lastErr = err;
@@ -123,10 +158,14 @@ export class AwwwardsClient {
 
   // Binary CDN assets (thumbnails, element media) all fetch through this single path.
   private async fetchCdnBinary(url: string, label: string): Promise<Buffer> {
-    const res = await this.fetchFn(url, {
-      headers: { "User-Agent": USER_AGENT },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${label}`);
-    return Buffer.from(await res.arrayBuffer());
+    return this.fetchWithTimeout(
+      url,
+      label,
+      { headers: { "User-Agent": USER_AGENT } },
+      async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${label}`);
+        return Buffer.from(await res.arrayBuffer());
+      },
+    );
   }
 }

@@ -90,8 +90,8 @@ describe("AwwwardsClient", () => {
     expect(html).toContain("card-site");
   });
 
-  it("throws BlockedError immediately on 403 without retrying", async () => {
-    const fetchFn = fakeFetch(403);
+  it.each([403, 429])("throws BlockedError immediately on %i without retrying", async (status) => {
+    const fetchFn = fakeFetch(status);
     const client = new AwwwardsClient({ fetchFn });
     await expect(client.getHtml("/websites/")).rejects.toBeInstanceOf(BlockedError);
     expect((fetchFn as any).mock.calls.length).toBe(1);
@@ -114,5 +114,81 @@ describe("AwwwardsClient", () => {
       .catch((e: unknown) => e as Error);
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toBe("HTTP 404 fetching asset element/2026/08/x.mp4");
+  });
+});
+
+describe("AwwwardsClient request timeouts", () => {
+  afterEach(() => vi.useRealTimers());
+  const stalled = () => new Promise<never>(() => {});
+  const timeoutMs = 20;
+
+  it("bounds a hung HTML fetch, aborts each attempt, and paces the retry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const times: number[] = [];
+    const signals: AbortSignal[] = [];
+    const fetchFn = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      times.push(Date.now());
+      signals.push(init!.signal as AbortSignal);
+      return stalled(); // Deliberately ignores abort, like some injected fetch mocks.
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch, timeoutMs });
+    const result = expect(client.getHtml("/websites/")).rejects.toThrow(
+      /Timed out fetching page from https:\/\/www\.awwwards\.com\/websites\/ after 20ms.*check connectivity/,
+    );
+    await vi.advanceTimersByTimeAsync(1021);
+    await result;
+    expect(times).toEqual([100_000, 101_000]);
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).not.toBe(signals[1]);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it("times out an HTML body read and retries once with a fresh signal", async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const response = new Response("unread body");
+    const read = vi.spyOn(response, "text").mockImplementation(stalled);
+    const fetchFn = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      signals.push(init!.signal as AbortSignal);
+      return Promise.resolve(signals.length === 1 ? response : new Response("recovered"));
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+      timeoutMs,
+    });
+    const result = client.getHtml("/websites/");
+    await vi.advanceTimersByTimeAsync(21);
+    expect(await result).toBe("recovered");
+    expect(read).toHaveBeenCalledOnce();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(signals[1].aborted).toBe(false); // Successful requests clear their deadline.
+  });
+
+  it.each(["fetch", "body"])("bounds a hung CDN %s without retrying", async (stage) => {
+    vi.useFakeTimers();
+    const response = new Response("image bytes");
+    const read = vi.spyOn(response, "arrayBuffer").mockImplementation(stalled);
+    const fetchFn = vi.fn((_url: string | URL | Request, _init?: RequestInit) =>
+      stage === "fetch" ? stalled() : Promise.resolve(response),
+    );
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch, timeoutMs });
+    const result = expect(client.getThumbnail("test.jpg")).rejects.toThrow(
+      /Timed out fetching thumbnail test\.jpg from https:\/\/assets\.awwwards\.com\/.*after 20ms.*check connectivity/,
+    );
+    await vi.advanceTimersByTimeAsync(21);
+    await result;
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledTimes(stage === "body" ? 1 : 0);
+    expect((fetchFn.mock.calls[0][1]!.signal as AbortSignal).aborted).toBe(true);
+  });
+
+  it("rejects invalid timeout settings", () => {
+    expect(() => new AwwwardsClient({ timeoutMs: 0 })).toThrow(RangeError);
+    expect(() => new AwwwardsClient({ timeoutMs: Infinity })).toThrow(RangeError);
   });
 });

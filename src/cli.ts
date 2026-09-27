@@ -101,6 +101,24 @@ server.tool(
 );
 
 server.tool(
+  "compare_sites",
+  "Compare the design DNA of 2–3 Awwwards sites: titles, live URLs, palettes, technologies, elements, awards and jury scores. Text only; missing details are fetched and cached.",
+  {
+    slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(3)
+      .refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "Site slugs must be distinct")
+      .describe("Two or three distinct site slugs from search_sites"),
+  },
+  (args) => asMcpResult(handlers.compare_sites(args)),
+);
+
+server.tool(
+  "get_index_status",
+  "Read offline index status: cached site count, progress, last successful finish and error, lock state and freshness. No live requests.",
+  {},
+  () => asMcpResult(handlers.get_index_status()),
+);
+
+server.tool(
   "get_site_elements",
   "Get the design-element highlights of one Awwwards site: component-level visuals (3D models, video content, mobile layouts, microcopy) with poster images inline and video URLs.",
   {
