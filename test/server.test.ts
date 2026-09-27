@@ -1038,3 +1038,75 @@ describe("get_element handler", () => {
     expect(res.isError).toBe(true);
   });
 });
+
+describe("get_motion_dna handler", () => {
+  const dnaFixture = {
+    url: "https://example.com/a",
+    stack: { libs: ["gsap", "scrolltrigger"], render: ["webgl", "three"], scrollModel: "native" as const },
+    scroll: { triggerCount: 6, scrubCount: 3, pinCount: 2, scrubRatio: 0.5, sample: [] },
+    easingVocab: [{ token: "power4.out", bezier: [0.23, 1, 0.32, 1], uses: 9 }],
+    durationVocab: { p25: 400, median: 700, p75: 1200 },
+    capturedAt: Date.now(),
+  };
+
+  it("serves cached records under 90 days", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertMotionDna({ ...dnaFixture, capturedAt: Date.now() });
+    const captured = vi.fn();
+    const h = createHandlers({ client, cache, motionDnaFn: async (u: string) => { captured(u); return dnaFixture; } });
+    const res = await h.get_motion_dna({ url: dnaFixture.url });
+    expect(JSON.parse((res.content[0] as any).text).url).toBe(dnaFixture.url);
+    expect(captured).not.toHaveBeenCalled();
+  });
+
+  it("live-captures and upserts on a cache miss, surfacing failure as clean error", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache, motionDnaFn: async () => { throw new Error("boom"); } });
+    const miss = await h.get_motion_dna({ url: "https://unreachable.example" });
+    expect(miss.isError).toBe(true);
+    expect((miss.content[0] as any).text).toContain("boom");
+  });
+});
+
+describe("search_motion handler", () => {
+  const dnaFixture = {
+    url: "https://example.com/a",
+    stack: { libs: ["gsap"], render: ["webgl"], scrollModel: "lenis" as const },
+    scroll: { triggerCount: 10, scrubCount: 4, pinCount: 3, scrubRatio: 0.4, sample: [] },
+    easingVocab: [{ token: "power2.out", bezier: null, uses: 5 }],
+    durationVocab: null,
+    capturedAt: Date.now(),
+  };
+
+  it("returns compact payloads and honors limit", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertMotionDna(dnaFixture);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_motion({});
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.count).toBe(1);
+    expect(body.results[0]).toEqual({
+      url: "https://example.com/a", libs: ["gsap"], scrollModel: "lenis",
+      triggerCount: 10, scrubCount: 4, pinCount: 3, topEasing: "power2.out",
+    });
+  });
+
+  it("filters on lib, scrubOnly and hasPins", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const quiet = { ...dnaFixture, url: "https://example.com/quiet",
+      scroll: { triggerCount: 2, scrubCount: 0, pinCount: 0, scrubRatio: 0, sample: [] } };
+    cache.upsertMotionDna(quiet);
+    cache.upsertMotionDna(dnaFixture);
+    const h = createHandlers({ client, cache });
+    const urls = async (args: Parameters<ReturnType<typeof createHandlers>["search_motion"]>[0]) =>
+      JSON.parse(((await h.search_motion(args)).content[0] as any).text).results.map((r: any) => r.url);
+    expect(await urls({ scrubOnly: true })).toEqual(["https://example.com/a"]);
+    expect(await urls({ hasPins: true })).toEqual(["https://example.com/a"]);
+    // lib matches both rows; insertion order is preserved
+    expect(await urls({ lib: "gsap" })).toEqual(["https://example.com/quiet", "https://example.com/a"]);
+  });
+});

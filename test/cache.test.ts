@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
-import type { ElementRecord, SiteSummary } from "../src/types.js";
+import type { ElementRecord, MotionDna, SiteSummary } from "../src/types.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -286,5 +286,35 @@ describe("elements cache", () => {
     cache.upsertElements([elementRecord({ slug: "new" })]);
     expect(cache.listElements(10).map((r) => r.slug)).toEqual(["new", "old"]);
     expect(cache.listElements(1).map((r) => r.slug)).toEqual(["new"]);
+  });
+});
+
+describe("motion dna cache", () => {
+  const dnaFixture: MotionDna = {
+    url: "https://example.com/a",
+    stack: { libs: ["gsap", "scrolltrigger"], render: ["webgl", "three"], scrollModel: "native" },
+    scroll: { triggerCount: 6, scrubCount: 3, pinCount: 2, scrubRatio: 0.5, sample: [] },
+    easingVocab: [{ token: "power4.out", bezier: [0.23, 1, 0.32, 1], uses: 9 }],
+    durationVocab: { p25: 400, median: 700, p75: 1200 },
+    capturedAt: Date.now(),
+  };
+
+  it("round-trips a record through upsert/get", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertMotionDna(dnaFixture);
+    expect(cache.getMotionDna("https://example.com/a")).toEqual(dnaFixture);
+    expect(cache.getMotionDna("https://example.com/b")).toBeNull();
+  });
+
+  it("searchMotion filters on lib, scrubRatio and pins", () => {
+    const cache = new Cache(tmpDir());
+    const noScrub = { ...dnaFixture, url: "https://example.com/noscrub",
+      scroll: { ...dnaFixture.scroll, scrubCount: 0, scrubRatio: 0, pinCount: 0 } };
+    cache.upsertMotionDna(dnaFixture);
+    cache.upsertMotionDna(noScrub);
+    expect(cache.searchMotion({}).length).toBe(2);
+    expect(cache.searchMotion({ lib: "gsap" }).map((d) => d.url)).toContain("https://example.com/a");
+    expect(cache.searchMotion({ scrubOnly: true }).map((d) => d.url)).toEqual(["https://example.com/a"]);
+    expect(cache.searchMotion({ hasPins: true }).map((d) => d.url)).toEqual(["https://example.com/a"]);
   });
 });

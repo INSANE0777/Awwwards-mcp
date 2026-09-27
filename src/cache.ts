@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { ElementRecord, SiteSummary } from "./types.js";
+import type { ElementRecord, MotionDna, SiteSummary } from "./types.js";
 
 // Freshness window applied by getSite() when the caller does not pass one.
 // Expired lookups are misses (single-arg getSite returns null for rows older
@@ -32,6 +32,11 @@ const SCHEMA = `
     source TEXT NOT NULL,                   -- 'gallery' | 'site'
     projectId TEXT,
     fetchedAt INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS motion_dna (
+    url TEXT PRIMARY KEY,
+    data TEXT NOT NULL,      -- whole MotionDna record as JSON — small corpus, filters run in JS
+    capturedAt INTEGER NOT NULL
   );
 `;
 
@@ -409,5 +414,41 @@ export class Cache {
       await writeFile(file, buf);
       return buf;
     }
+  }
+
+  // ---- motion dna ----
+
+  upsertMotionDna(dna: MotionDna): void {
+    this.withDb((db) => {
+      db.prepare(
+        `INSERT INTO motion_dna (url, data, capturedAt) VALUES (?, ?, ?)
+         ON CONFLICT(url) DO UPDATE SET data=excluded.data, capturedAt=excluded.capturedAt`,
+      ).run(dna.url, JSON.stringify(dna), dna.capturedAt);
+    });
+  }
+
+  getMotionDna(url: string): MotionDna | null {
+    return this.withDb((db) => {
+      const row = db.prepare("SELECT data FROM motion_dna WHERE url = ?").get(url) as
+        | { data: string }
+        | undefined;
+      return row ? (JSON.parse(row.data) as MotionDna) : null;
+    });
+  }
+
+  // JS filter over parsed records: small corpora make SQL columns premature.
+  // scrubOnly matches the brief exactly: scrubCount >= 2 OR scrubRatio >= 0.5.
+  searchMotion(filter: { lib?: string; scrubOnly?: boolean; hasPins?: boolean }): MotionDna[] {
+    return this.withDb((db) => {
+      const rows = db.prepare("SELECT data FROM motion_dna").all() as { data: string }[];
+      return rows
+        .map((r) => JSON.parse(r.data) as MotionDna)
+        .filter((d) => {
+          if (filter.lib && !d.stack.libs.includes(filter.lib)) return false;
+          if (filter.scrubOnly && !(d.scroll.scrubCount >= 2 || d.scroll.scrubRatio >= 0.5)) return false;
+          if (filter.hasPins && d.scroll.pinCount === 0) return false;
+          return true;
+        });
+    });
   }
 }

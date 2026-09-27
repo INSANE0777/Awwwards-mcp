@@ -10,7 +10,7 @@ import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
-import type { Categories, ElementMedia, ElementRecord, SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
@@ -63,6 +63,11 @@ export type MotionFn = (
     viewport?: ViewportName;
   },
 ) => Promise<{ file: string; base64: string; frames: number } | { error: string }>;
+
+export type MotionDnaFn = (
+  url: string,
+  opts?: { viewport?: ViewportName },
+) => Promise<MotionDna>;
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -156,7 +161,18 @@ export interface Handlers {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
   }): Promise<ToolResponse>;
+  get_motion_dna(args: { url: string; recapture?: boolean }): Promise<ToolResponse>;
+  search_motion(args: {
+    lib?: string;
+    scrubOnly?: boolean;
+    hasPins?: boolean;
+    limit?: number;
+  }): Promise<ToolResponse>;
 }
+
+// Freshness window for cached Motion DNA rows; records older than this are
+// re-captured live by get_motion_dna.
+export const MOTION_DNA_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 export function createHandlers(deps: {
   client: AwwwardsClient;
@@ -164,6 +180,7 @@ export function createHandlers(deps: {
   captureFn?: CaptureFn;
   analyzeFn?: AnalyzeFn;
   motionFn?: MotionFn;
+  motionDnaFn?: MotionDnaFn;
 }): Handlers {
   const { client, cache } = deps;
 
@@ -852,6 +869,51 @@ export function createHandlers(deps: {
     }
   }
 
+  async function get_motion_dna(args: { url: string; recapture?: boolean }): Promise<ToolResponse> {
+    try {
+      const cached = args.recapture ? null : cache.getMotionDna(args.url);
+      if (cached && Date.now() - cached.capturedAt < MOTION_DNA_TTL_MS) {
+        return { content: [text(JSON.stringify(cached, null, 1))] };
+      }
+      // Lazy default: playwright is only touched when the tool actually runs.
+      const capture =
+        deps.motionDnaFn ??
+        ((url: string, opts?: { viewport?: ViewportName }) =>
+          import("./motion-dna.js").then((m) => m.captureMotionDna(url, opts)));
+      const dna = await capture(args.url, { viewport: "desktop" });
+      cache.upsertMotionDna(dna);
+      return { content: [text(JSON.stringify(dna, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  // Compact payloads only: the full record lives in the corpus under its url.
+  async function search_motion(args: {
+    lib?: string;
+    scrubOnly?: boolean;
+    hasPins?: boolean;
+    limit?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const hits = cache
+        .searchMotion(args)
+        .slice(0, args.limit ?? 20)
+        .map((d) => ({
+          url: d.url,
+          libs: d.stack.libs,
+          scrollModel: d.stack.scrollModel,
+          triggerCount: d.scroll.triggerCount,
+          scrubCount: d.scroll.scrubCount,
+          pinCount: d.scroll.pinCount,
+          topEasing: d.easingVocab[0]?.token ?? null,
+        }));
+      return { content: [text(JSON.stringify({ count: hits.length, results: hits }, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   return {
     search_sites,
     get_site_details,
@@ -864,5 +926,7 @@ export function createHandlers(deps: {
     capture_live_site,
     analyze_page_structure,
     record_site_motion,
+    get_motion_dna,
+    search_motion,
   };
 }

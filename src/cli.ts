@@ -205,6 +205,30 @@ server.tool(
   (args) => asMcpResult(handlers.record_site_motion(args)),
 );
 
+server.tool(
+  "get_motion_dna",
+  "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Serves the corpus first; live-captures unseen URLs (headless browser required).",
+  {
+    url: z.string().url().describe("Absolute site URL"),
+    recapture: z.boolean().default(false).describe("Force a fresh live capture even if a recent record exists"),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.get_motion_dna(args)),
+);
+
+server.tool(
+  "search_motion",
+  "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
+  {
+    lib: z.string().describe("Library token, e.g. 'gsap', 'lenis', 'webgl'").optional(),
+    scrubOnly: z.boolean().default(false).describe("Only sites with substantial scroll-scrubbed animation"),
+    hasPins: z.boolean().default(false).describe("Only sites that pin sections"),
+    limit: z.number().int().min(1).max(50).default(20),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.search_motion(args)),
+);
+
 // Auto-refresh: if the index is stale (or absent) and no crawl is running,
 // re-index in the background. Serving is never blocked; errors are stderr-only.
 if (shouldAutoIndex(cache)) {
