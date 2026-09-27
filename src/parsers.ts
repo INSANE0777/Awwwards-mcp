@@ -249,7 +249,7 @@ export function parseElements(html: string): ElementMedia[] | null {
 
 // /elements/ gallery listing: element tiles deep-link to
 // /inspiration/<slug> pages (live-verified 2026-09-28, e.g.
-// /inspiration/micro-interactions-croing-tiktok-partner-agency).
+// /inspiration/about-page-realevate).
 // null = no /inspiration/ href anywhere (drift or empty body);
 // [] = page parsed but gallery has zero tiles (legitimate empty).
 export function parseElementsGallery(html: string): string[] | null {
