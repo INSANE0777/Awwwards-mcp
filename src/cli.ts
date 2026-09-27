@@ -82,6 +82,8 @@ server.tool(
       .describe(
         "Sort results: by Awwwards jury score (details previously fetched) or newest first",
       ),
+    responseMode: z.enum(["full", "compact"]).default("full")
+      .describe("full (default) returns all inline previews; compact returns concise cards and at most two page previews"),
     count: z.number().int().min(1).max(12).default(6),
     page: z.number().int().min(1).default(1),
   },

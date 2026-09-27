@@ -18,7 +18,7 @@ queries keep AND semantics: every token must hit the same site.
 
 | Tool | What it does |
 |------|--------------|
-| `search_sites` | Search by color, tags, technology, award type or free-text query. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Returns site cards with inline screenshots. |
+| `search_sites` | Search by color, tags, technology, award type or free-text query. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Default full results include each site's screenshot; use `responseMode: "compact"` for concise cards and inline previews of only the first two results on the requested page. |
 | `get_site_details` | Full design DNA for one site: palette, technologies, elements, awards, description. |
 | `compare_sites` | Compare 2–3 sites' design DNA and jury scores as text-only JSON. Uses cached details or fetches missing detail pages. |
 | `get_index_status` | Read local index count, crawl progress, last success/error, lock state and freshness without network requests. |

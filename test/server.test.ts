@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
-import { AwwwardsClient } from "../src/awwwards.js";
+import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
 import type { SiteSummary } from "../src/types.js";
@@ -72,6 +72,136 @@ describe("slugifyTag", () => {
 });
 
 describe("search_sites", () => {
+  it("keeps full by default and limits compact previews without hiding cards", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 8 }, (_, i) => site({
+      slug: `compact-${i}`, title: `Studio ${i}`, createdAt: 1789516800 - i,
+      tags: ["WebGL", "3D", "Portfolio", "Animation"],
+      thumbnailPath: `submissions/compact-${i}.jpg`,
+    })));
+    const { client, fetchFn } = fakeClient();
+    const thumbnail = vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const h = createHandlers({ client, cache });
+    const compact = await h.search_sites({ tags: ["webgl"], count: 6, responseMode: "compact" });
+    const body = (compact.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("8 site(s) matched; showing 1-6");
+    for (let i = 0; i < 6; i++) expect(body).toContain(`${i + 1}. Studio ${i} (slug: compact-${i})`);
+    expect(body).toContain("WebGL, 3D, Portfolio +1");
+    expect(compact.content.filter((block) => block.type === "image")).toHaveLength(2);
+    expect(compact.content.slice(1).filter((block) => block.type === "text")
+      .map((block) => (block as { type: "text"; text: string }).text))
+      .toEqual(["Preview #1: compact-0", "Preview #2: compact-1"]);
+    expect(thumbnail.mock.calls.map(([path]) => path)).toEqual([
+      "submissions/compact-0.jpg", "submissions/compact-1.jpg",
+    ]);
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    const full = await h.search_sites({ tags: ["webgl"], count: 6 });
+    expect(full.content).toEqual([
+      { type: "text", text: "8 site(s) matched; showing 1-6:\n\n" +
+        Array.from({ length: 6 }, (_, i) =>
+          `- Studio ${i} (slug: compact-${i}) [Site of the Day]\n` +
+          "  live: https://example.com\n" +
+          "  awwwards: https://www.awwwards.com/sites/s1\n" +
+          "  tags: WebGL, 3D, Portfolio, Animation",
+        ).join("\n\n"),
+      },
+      ...Array.from({ length: 6 }, () => ({
+        type: "image", data: Buffer.from("jpeg").toString("base64"), mimeType: "image/jpeg",
+      })),
+    ]);
+  });
+
+  it("keeps untrusted multiline metadata on one compact card line", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({
+        slug: "unsafe", title: "Studio\n2. Forged\tTitle", createdAt: 1789516801,
+        liveUrl: "https://example.com/\n3. forged", awards: ["Site\r\nof the Day"],
+        tags: ["Web\nGL", "3D\tMotion"], thumbnailPath: "submissions/unsafe.jpg",
+      }),
+      site({ slug: "real", title: "Real Studio", createdAt: 1789516800,
+        thumbnailPath: "submissions/real.jpg" }),
+    ]);
+    const { client } = fakeClient();
+    vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const h = createHandlers({ client, cache });
+    const compact = await h.search_sites({ count: 2, responseMode: "compact" });
+    expect((compact.content[0] as { type: "text"; text: string }).text).toBe(
+      "2 site(s) matched; showing 1-2:\n\n" +
+      "1. Studio 2. Forged Title (slug: unsafe) | live: https://example.com/ 3. forged | " +
+      "awards: Site of the Day | tags: Web GL, 3D Motion\n" +
+      "2. Real Studio (slug: real) | live: https://example.com | " +
+      "awards: Site of the Day | tags: WebGL, 3D",
+    );
+    const full = await h.search_sites({ count: 2 });
+    expect((full.content[0] as { type: "text"; text: string }).text)
+      .toContain("- Studio\n2. Forged\tTitle (slug: unsafe) [Site\r\nof the Day]");
+  });
+
+  it("previews the selected score-sorted page, not page one", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 8 }, (_, i) => site({
+      slug: `rank-${i}`, createdAt: 1789516800 + i,
+      thumbnailPath: `submissions/rank-${i}.jpg`,
+    })));
+    for (let i = 0; i < 8; i++) cache.setMeta(`detail:rank-${i}`, { score: i });
+    const { client, fetchFn } = fakeClient();
+    const thumbnail = vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const res = await createHandlers({ client, cache }).search_sites({
+      count: 3, page: 2, sortBy: "score", responseMode: "compact",
+    });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("showing 4-6");
+    expect(body).toContain("4. Cool Studio (slug: rank-4)");
+    expect(res.content.filter((block) => block.type === "image")).toHaveLength(2);
+    expect(thumbnail.mock.calls.map(([path]) => path)).toEqual([
+      "submissions/rank-4.jpg", "submissions/rank-3.jpg",
+    ]);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("keeps the second card when its first preview fails", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "first", createdAt: 1789516801, thumbnailPath: "submissions/first.jpg" }),
+      site({ slug: "second", createdAt: 1789516800, thumbnailPath: "submissions/second.jpg" })]);
+    const { client } = fakeClient();
+    vi.spyOn(client, "getThumbnail").mockImplementation(async (path) => {
+      if (path === "submissions/first.jpg") throw new Error("CDN unavailable");
+      return Buffer.from("jpeg");
+    });
+    const res = await createHandlers({ client, cache }).search_sites({ count: 2, responseMode: "compact" });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("1. Cool Studio (slug: first)");
+    expect(body).toContain("2. Cool Studio (slug: second)");
+    expect(res.content.slice(1).filter((block) => block.type === "text")
+      .map((block) => (block as { type: "text"; text: string }).text))
+      .toEqual(["Preview #2: second"]);
+    expect(res.content.filter((block) => block.type === "image")).toHaveLength(1);
+  });
+
+  it("supports a single compact match", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "single" })]);
+    const { client } = fakeClient();
+    vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const res = await createHandlers({ client, cache }).search_sites({ count: 1, responseMode: "compact" });
+    expect((res.content[0] as { type: "text"; text: string }).text).toContain("1. Cool Studio (slug: single)");
+    expect(res.content.filter((block) => block.type === "image")).toHaveLength(1);
+  });
+
+  it("keeps zero-result guidance unchanged in compact mode", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const full = await h.search_sites({ query: "unfindabletopicword" });
+    const compact = await h.search_sites({ query: "unfindabletopicword", responseMode: "compact" });
+    expect((compact.content[0] as { type: "text"; text: string }).text)
+      .toContain("No sites matched the search");
+    expect(compact.content).toEqual(full.content);
+    expect(compact.content.filter((block) => block.type === "image")).toHaveLength(0);
+  });
+
   it("serves matching fresh cache without any network call", async () => {
     const cache = new Cache(tmpDir());
     cache.upsertSites(Array.from({ length: 8 }, (_, i) => site({ slug: `s${i + 1}` })));
@@ -142,6 +272,54 @@ describe("search_sites", () => {
     expect(text).toContain("stale");
     expect(text).toContain("s1");
     expect(res.isError).toBeUndefined();
+  });
+
+  it("keeps the stale warning but inlines only two compact fallback images", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 4 }, (_, i) => site({
+      slug: `stale-${i}`, createdAt: 1789516800 - i,
+      thumbnailPath: `submissions/stale-${i}.jpg`,
+    })));
+    const client = new AwwwardsClient({
+      fetchFn: vi.fn(async () => { throw new Error("ECONNRESET"); }) as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    });
+    const thumbnail = vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const res = await createHandlers({ client, cache }).search_sites({
+      count: 6, page: 2, responseMode: "compact",
+    });
+    expect(res.isError).toBeUndefined();
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("Serving 4 result(s) from stale cache instead:");
+    expect(body).toContain("(slug: stale-3)");
+    expect(res.content.slice(1).filter((block) => block.type === "text")
+      .map((block) => (block as { type: "text"; text: string }).text))
+      .toEqual(["Preview #1: stale-0", "Preview #2: stale-1"]);
+    expect(res.content.filter((block) => block.type === "image")).toHaveLength(2);
+    expect(thumbnail.mock.calls.map(([path]) => path)).toEqual([
+      "submissions/stale-0.jpg", "submissions/stale-1.jpg",
+    ]);
+  });
+
+  it("keeps a partially filled compact page when its top-up fails", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 4 }, (_, i) => site({
+      slug: `partial-${i}`, createdAt: 1789516800 - i,
+      thumbnailPath: `submissions/partial-${i}.jpg`,
+    })));
+    const client = new AwwwardsClient({
+      fetchFn: vi.fn(async () => { throw new Error("ECONNRESET"); }) as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    });
+    const thumbnail = vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const res = await createHandlers({ client, cache }).search_sites({
+      count: 3, page: 2, responseMode: "compact",
+    });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("4 site(s) matched; showing 4-4:");
+    expect(body).toContain("4. Cool Studio (slug: partial-3)");
+    expect(body).not.toContain("stale cache instead");
+    expect(thumbnail.mock.calls.map(([path]) => path)).toEqual(["submissions/partial-3.jpg"]);
   });
 
   it("client-checks the technology filter when serving from cache", async () => {

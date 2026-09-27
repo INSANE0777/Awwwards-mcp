@@ -35,6 +35,7 @@ export interface ToolResponse {
 }
 
 export interface SearchArgs extends SearchFilters {
+  responseMode?: "full" | "compact";
   count?: number;
   page?: number;
   // "newest" (default) = current newest-first behavior; "score" orders scored
@@ -103,6 +104,17 @@ function text(t: string): Block {
 function summarizeSite(s: SiteSummary): string {
   const award = s.awards.length ? ` [${s.awards.join(", ")}]` : "";
   return `- ${s.title} (slug: ${s.slug})${award}\n  live: ${s.liveUrl ?? "unknown"}\n  awwwards: https://www.awwwards.com${s.detailPath}\n  tags: ${s.tags.join(", ")}`;
+}
+
+function formatCompactSite(s: SiteSummary, number: number): string {
+  const tags = s.tags.slice(0, 3);
+  const extra = s.tags.length - tags.length;
+  return [
+    `${number}. ${s.title} (slug: ${s.slug})`,
+    s.liveUrl ? `live: ${s.liveUrl}` : null,
+    s.awards.length ? `awards: ${s.awards.join(", ")}` : null,
+    tags.length ? `tags: ${tags.join(", ")}${extra > 0 ? ` +${extra}` : ""}` : null,
+  ].filter(Boolean).join(" | ").replace(/\s+/g, " ").trim();
 }
 
 // An all-empty parse means the layout changed (or the page was not found):
@@ -218,6 +230,16 @@ export function createHandlers(deps: {
     } catch {
       return null; // thumbnail failures degrade to metadata-only cards
     }
+  }
+
+  async function compactContent(slice: SiteSummary[], start: number, header: string): Promise<Block[]> {
+    const images = await Promise.all(slice.slice(0, 2).map(siteImage));
+    return [
+      text(`${header}\n\n${slice.map((s, i) => formatCompactSite(s, start + i)).join("\n")}`),
+      ...images.flatMap((image, i): Block[] => image
+        ? [text(`Preview #${start + i}: ${slice[i].slug}`), image]
+        : []),
+    ];
   }
 
   // sortBy: "score" view. Scores live in detail-meta entries written by
@@ -380,6 +402,15 @@ export function createHandlers(deps: {
         };
       }
 
+      if (args.responseMode === "compact") {
+        const start = (page - 1) * count + 1;
+        return { content: await compactContent(
+          slice,
+          start,
+          `${ordered.length} site(s) matched; showing ${start}-${start + slice.length - 1}:`,
+        ) };
+      }
+
       const images = await Promise.all(slice.map(siteImage));
       const content: Block[] = [
         text(
@@ -401,6 +432,11 @@ export function createHandlers(deps: {
       if (stale.length > 0) {
         const orderedStale = orderByScore(stale, args.sortBy);
         const slice = orderedStale.slice(0, count);
+        if (args.responseMode === "compact") {
+          const message = `The live awwwards.com request failed (${err instanceof Error ? err.message : String(err)}). ` +
+            `Serving ${slice.length} result(s) from stale cache instead:`;
+          return { content: await compactContent(slice, 1, message) };
+        }
         const images = await Promise.all(slice.map(siteImage));
         return {
           content: [
