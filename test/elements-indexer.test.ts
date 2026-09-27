@@ -78,6 +78,40 @@ describe("runElementsIndexer", () => {
     }
   });
 
+  it("crawls additional listing pages via ?page=N until maxPages, deduping slugs", async () => {
+    // Page 2 returns a fresh slug set; page 3 404s (loop stops early).
+    // Every item fetch serves the same fixture → canonical slug dedupes.
+    // Default maxPages is 1 (auto-index stays cheap); pagination is opt-in.
+    const page2Html = galleryHtml.replace(
+      'href="/inspiration/about-page-realevate/"',
+      'href="/inspiration/second-page-fixture/"',
+    );
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.endsWith("/elements/")) return new Response(galleryHtml, { status: 200 });
+      if (url.includes("/elements/?page=2")) return new Response(page2Html, { status: 200 });
+      if (url.includes("/elements/?page=")) return new Response("gone", { status: 404 });
+      return new Response(itemHtml, { status: 200 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const dir = mkdtempSync(join(tmpdir(), "aww-eix4-"));
+    const cache = new Cache(dir);
+    try {
+      const res = await runElementsIndexer({ client, cache, maxPages: 2, maxItems: 10 });
+      // Page 1 slugs + page 2's new slug, deduped across pages. All item
+      // pages serve the same canonical fixture slug, so upserts collapse to
+      // 1 stored row — but all 10 distinct slugs were fetched and reported.
+      expect(res.itemsIndexed).toBe(10); // 10 distinct listing slugs fetched
+      expect(cache.countElements()).toBe(1); // same canonical slug → 1 row
+      const listedUrls = fetchFn.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/elements/"));
+      expect(listedUrls.some((u) => u.endsWith("/elements/"))).toBe(true);
+      expect(listedUrls.some((u) => u.includes("page=2"))).toBe(true);
+      expect(listedUrls.some((u) => /page=3/.test(u))).toBe(false); // 404 stops the loop
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not overwrite related/site rows it did not fetch", async () => {
     // Tier B row present before indexing; the Tier A crawl (which never
     // fetched this slug) must leave it untouched — source and projectId

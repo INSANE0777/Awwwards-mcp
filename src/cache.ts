@@ -44,10 +44,13 @@ const SCHEMA = `
 // (columns stored in the fts table itself, triggers delete+reinsert by the
 // unindexed slug; NOT the external-content content= variant). builtWith stays
 // a JSON string — unicode61 tokenizes around brackets/quotes, so tokens
-// extract cleanly.
+// extract cleanly. v2: slug is an indexed column (slug tokens like "countup"
+// search directly); ELEMENTS_FTS_VERSION gates a drop/recreate/reindex
+// migration for databases created before the change.
+const ELEMENTS_FTS_VERSION = 2;
 const ELEMENTS_FTS_SCHEMA = `
   CREATE VIRTUAL TABLE IF NOT EXISTS elements_fts USING fts5(
-    slug UNINDEXED, title, author, builtWith, category, tokenize='porter unicode61'
+    slug, title, author, builtWith, category, tokenize='porter unicode61'
   );
   CREATE TRIGGER IF NOT EXISTS elements_fts_ai AFTER INSERT ON elements BEGIN
     INSERT INTO elements_fts (slug, title, author, builtWith, category)
@@ -185,6 +188,20 @@ export class Cache {
         }
       }
       if (this.ftsAvailable) {
+        // Versioned FTS migration: if elements exists but its fts table was
+        // built by an older schema version (e.g. v1 indexed slug as
+        // UNINDEXED), drop and rebuild. The elements table itself is the
+        // source of truth; the fts table is derived, so the migration is a
+        // full reinsert with today's triggers — no data loss, no request.
+        const { v } = db.prepare(
+          "SELECT COALESCE((SELECT value FROM meta WHERE key = 'elements_fts_version'), '0') AS v",
+        ).get() as { v: string };
+        if (Number(v) < ELEMENTS_FTS_VERSION) {
+          db.exec("DROP TRIGGER IF EXISTS elements_fts_ai; DROP TRIGGER IF EXISTS elements_fts_au; DROP TRIGGER IF EXISTS elements_fts_ad; DROP TABLE IF EXISTS elements_fts;");
+          db.exec(ELEMENTS_FTS_SCHEMA);
+          db.exec("INSERT INTO elements_fts (slug, title, author, builtWith, category) SELECT slug, title, author, builtWith, category FROM elements");
+          db.prepare("INSERT INTO meta (key, value) VALUES ('elements_fts_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(ELEMENTS_FTS_VERSION));
+        }
         // The fts table is derived and must never gate correctness: if sites
         // has rows but sites_fts is empty (pre-FTS database opened for the
         // first time), rebuild the index. The guard lives inside the INSERT

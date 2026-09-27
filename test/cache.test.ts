@@ -275,7 +275,41 @@ describe("elements cache", () => {
     cache.upsertElements([elementRecord({ author: "Studio X", source: "site" })]);
     expect(cache.searchElements("studio", 10).map((r) => r.slug))
       .toContain("micro-interactions-croing-tiktok-partner-agency");
-    expect(cache.searchElements("croing", 10)).toEqual([]);
+    // "croing" lives only in the slug; v2 indexes slug, so it now matches
+    // (behavioral change from the slug-indexing migration, by design).
+    expect(cache.searchElements("croing", 10).map((r) => r.slug))
+      .toEqual(["micro-interactions-croing-tiktok-partner-agency"]);
+  });
+
+  it("FTS-matches slug tokens (footer-cta-hero style)", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([
+      elementRecord({ slug: "hero-with-number-countup", title: "Landing Hero" }),
+    ]);
+    // Slug is now an indexed FTS column: tokens from the slug itself match.
+    expect(cache.searchElements("countup", 10).map((r) => r.slug)).toEqual(["hero-with-number-countup"]);
+  });
+
+  it("rebuilds elements_fts with slug tokens when opening a pre-v2 database", () => {
+    // Simulate a database written by the old schema: rows exist, but the FTS
+    // table was created without an indexed slug column (v1 layout).
+    const dir = tmpDir();
+    const old = new Cache(dir);
+    old.upsertElements([elementRecord({ slug: "hero-with-number-countup", title: "Landing Hero" })]);
+    old.withDbForTest((db) => {
+      db.exec(`DROP TABLE elements_fts;
+        CREATE VIRTUAL TABLE elements_fts USING fts5(
+          slug UNINDEXED, title, author, builtWith, category, tokenize='porter unicode61');`);
+      db.exec(`INSERT INTO elements_fts (slug, title, author, builtWith, category)
+        VALUES ('hero-with-number-countup', 'Landing Hero', '', '[]', '')`);
+      // A real v1 database was written before versioning existed: no stamp.
+      db.prepare("DELETE FROM meta WHERE key = 'elements_fts_version'").run();
+    });
+    // Reopen the SAME directory: migration detects the old table shape,
+    // drops + recreates it against the current schema, and repopulates.
+    const reopened = new Cache(dir);
+    expect(reopened.searchElements("countup", 10).map((r) => r.slug))
+      .toEqual(["hero-with-number-countup"]);
   });
 
   it("listElements returns rows newest-fetched first", () => {
