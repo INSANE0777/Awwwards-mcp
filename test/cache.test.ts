@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
-import type { SiteSummary } from "../src/types.js";
+import type { ElementRecord, SiteSummary } from "../src/types.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -195,5 +195,96 @@ describe("searchSites (FTS5)", () => {
       const { n } = db.prepare("SELECT COUNT(*) AS n FROM sites_fts").get() as unknown as { n: number };
       expect(n).toBe(3);
     });
+  });
+});
+
+describe("elements cache", () => {
+  const elementRecord = (overrides: Partial<ElementRecord> = {}): ElementRecord => ({
+    slug: "micro-interactions-croing-tiktok-partner-agency",
+    title: "Micro-interactions",
+    cid: "norm:micro-interactions", // normalized category id
+    category: "Micro-interactions",
+    author: "CROING - TikTok Partner Agency",
+    builtWith: ["GSAP", "WebGL"],
+    related: ["elem-b", "elem-c"],
+    mediaPath: "element/2025/11/abc.mp4",
+    mediaType: "video",
+    source: "gallery",
+    projectId: null,
+    fetchedAt: Date.now(),
+    ...overrides,
+  });
+
+  it("upserts twice without duplicating rows", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementRecord()]);
+    cache.upsertElements([elementRecord({ title: "Micro-interactions v2" })]);
+    expect(cache.countElements()).toBe(1);
+    expect(cache.getElements(["micro-interactions-croing-tiktok-partner-agency"])[0]!.title)
+      .toBe("Micro-interactions v2");
+  });
+
+  it("FTS-matches title and author with prefix semantics", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([
+      elementRecord(),
+      elementRecord({ slug: "e2", title: "Editorial Footer", author: "Studio X", category: "Footers", cid: "norm:footers" }),
+    ]);
+    const hits = cache.searchElements("micro", 10);
+    expect(hits.map((h) => h.slug)).toContain("micro-interactions-croing-tiktok-partner-agency");
+    const byAuthor = cache.searchElements("studio", 10);
+    expect(byAuthor.map((h) => h.slug)).toContain("e2");
+    expect(cache.searchElements("zzzznothing", 10)).toEqual([]);
+  });
+
+  it("round-trips JSON arrays and optional fields", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([
+      elementRecord(),
+      elementRecord({ slug: "site-elem", source: "site", projectId: "12345" }),
+    ]);
+    const [gallery, siteElem] = cache.getElements(["micro-interactions-croing-tiktok-partner-agency", "site-elem"]);
+    expect(gallery!.builtWith).toEqual(["GSAP", "WebGL"]);
+    expect(gallery!.related).toEqual(["elem-b", "elem-c"]);
+    expect(gallery!.source).toBe("gallery");
+    expect(gallery!.projectId).toBeNull();
+    expect(siteElem!.source).toBe("site");
+    expect(siteElem!.projectId).toBe("12345");
+  });
+
+  it("getElements silently drops missing slugs", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementRecord()]);
+    expect(cache.getElements(["nope", elementRecord().slug]).map((r) => r.slug))
+      .toEqual(["micro-interactions-croing-tiktok-partner-agency"]);
+    expect(cache.getElements([])).toEqual([]);
+  });
+
+  it("countElements counts only gallery-sourced rows", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([
+      elementRecord(),
+      elementRecord({ slug: "site-elem", source: "site", cid: "norm:micro-interactions" }),
+    ]);
+    expect(cache.countElements()).toBe(1);
+  });
+
+  it("upserting an element updates its FTS row (author change is searchable)", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([elementRecord()]);
+    cache.upsertElements([elementRecord({ author: "Studio X", source: "site" })]);
+    expect(cache.searchElements("studio", 10).map((r) => r.slug))
+      .toContain("micro-interactions-croing-tiktok-partner-agency");
+    expect(cache.searchElements("croing", 10)).toEqual([]);
+  });
+
+  it("listElements returns rows newest-fetched first", () => {
+    let t = 1_000_000;
+    const cache = new Cache(tmpDir(), () => t);
+    cache.upsertElements([elementRecord({ slug: "old" })]);
+    t += 5_000;
+    cache.upsertElements([elementRecord({ slug: "new" })]);
+    expect(cache.listElements(10).map((r) => r.slug)).toEqual(["new", "old"]);
+    expect(cache.listElements(1).map((r) => r.slug)).toEqual(["new"]);
   });
 });

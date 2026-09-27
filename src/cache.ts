@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { SiteSummary } from "./types.js";
+import type { ElementRecord, SiteSummary } from "./types.js";
 
 // Freshness window applied by getSite() when the caller does not pass one.
 // Expired lookups are misses (single-arg getSite returns null for rows older
@@ -19,6 +19,43 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY, value TEXT, fetchedAt INTEGER
   );
+  CREATE TABLE IF NOT EXISTS elements (
+    slug TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    cid TEXT,               -- normalized category id (Task 5 fills the taxonomy; raw title until then)
+    category TEXT,
+    author TEXT,
+    builtWith TEXT NOT NULL DEFAULT '[]',   -- JSON string[]
+    related TEXT NOT NULL DEFAULT '[]',     -- JSON string[]
+    mediaPath TEXT,
+    mediaType TEXT,                         -- 'video' | 'image' | NULL
+    source TEXT NOT NULL,                   -- 'gallery' | 'site'
+    projectId TEXT,
+    fetchedAt INTEGER NOT NULL
+  );
+`;
+
+// FTS5 layer over the elements table — same standalone variant as sites_fts
+// (columns stored in the fts table itself, triggers delete+reinsert by the
+// unindexed slug; NOT the external-content content= variant). builtWith stays
+// a JSON string — unicode61 tokenizes around brackets/quotes, so tokens
+// extract cleanly.
+const ELEMENTS_FTS_SCHEMA = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS elements_fts USING fts5(
+    slug UNINDEXED, title, author, builtWith, category, tokenize='porter unicode61'
+  );
+  CREATE TRIGGER IF NOT EXISTS elements_fts_ai AFTER INSERT ON elements BEGIN
+    INSERT INTO elements_fts (slug, title, author, builtWith, category)
+    VALUES (new.slug, new.title, new.author, new.builtWith, new.category);
+  END;
+  CREATE TRIGGER IF NOT EXISTS elements_fts_au AFTER UPDATE OF title, author, builtWith, category ON elements BEGIN
+    DELETE FROM elements_fts WHERE slug = new.slug;
+    INSERT INTO elements_fts (slug, title, author, builtWith, category)
+    VALUES (new.slug, new.title, new.author, new.builtWith, new.category);
+  END;
+  CREATE TRIGGER IF NOT EXISTS elements_fts_ad AFTER DELETE ON elements BEGIN
+    DELETE FROM elements_fts WHERE slug = old.slug;
+  END;
 `;
 
 // FTS5 full-text layer over the sites table (derived — rebuildable at any
@@ -71,6 +108,38 @@ function rowToSite(r: SiteRow): SiteSummary {
   };
 }
 
+interface ElementRow {
+  slug: string;
+  title: string;
+  cid: string | null;
+  category: string | null;
+  author: string | null;
+  builtWith: string;
+  related: string;
+  mediaPath: string | null;
+  mediaType: "video" | "image" | null;
+  source: "gallery" | "site";
+  projectId: string | null;
+  fetchedAt: number;
+}
+
+function rowToElement(r: ElementRow): ElementRecord {
+  return {
+    slug: r.slug,
+    title: r.title,
+    cid: r.cid ?? "",
+    category: r.category ?? "",
+    author: r.author ?? "",
+    builtWith: JSON.parse(r.builtWith),
+    related: JSON.parse(r.related),
+    mediaPath: r.mediaPath ?? "",
+    mediaType: r.mediaType,
+    source: r.source,
+    projectId: r.projectId,
+    fetchedAt: r.fetchedAt,
+  };
+}
+
 export class Cache {
   private readonly dbPath: string;
   private readonly now: () => number;
@@ -104,6 +173,7 @@ export class Cache {
       if (this.ftsAvailable === null) {
         try {
           db.exec(FTS_SCHEMA);
+          db.exec(ELEMENTS_FTS_SCHEMA);
           this.ftsAvailable = true;
         } catch {
           this.ftsAvailable = false; // FTS5 compiled out → legacy fallback
@@ -249,6 +319,83 @@ export class Cache {
   deleteMeta(key: string): void {
     this.withDb((db) => {
       db.prepare("DELETE FROM meta WHERE key = ?").run(key);
+    });
+  }
+
+  // ---- elements (gallery items) ----
+
+  upsertElements(records: ElementRecord[]): void {
+    if (records.length === 0) return;
+    this.withDb((db) => {
+      const stmt = db.prepare(
+        `INSERT INTO elements (slug, title, cid, category, author, builtWith, related, mediaPath, mediaType, source, projectId, fetchedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(slug) DO UPDATE SET
+           title=excluded.title, cid=excluded.cid, category=excluded.category,
+           author=excluded.author, builtWith=excluded.builtWith, related=excluded.related,
+           mediaPath=excluded.mediaPath, mediaType=excluded.mediaType,
+           source=excluded.source, projectId=excluded.projectId, fetchedAt=excluded.fetchedAt`,
+      );
+      // One transaction for the whole batch — same reason as upsertSites.
+      db.exec("BEGIN");
+      try {
+        for (const r of records) {
+          stmt.run(
+            r.slug, r.title, r.cid, r.category, r.author,
+            JSON.stringify(r.builtWith), JSON.stringify(r.related),
+            r.mediaPath, r.mediaType, r.source, r.projectId, r.fetchedAt,
+          );
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    });
+  }
+
+  getElements(slugs: string[]): ElementRecord[] {
+    if (slugs.length === 0) return [];
+    return this.withDb((db) => {
+      const rows = db.prepare(
+        `SELECT * FROM elements WHERE slug IN (${slugs.map(() => "?").join(",")})`,
+      ).all(...slugs) as unknown as ElementRow[];
+      return rows.map(rowToElement);
+    });
+  }
+
+  // Full-text search over elements. Caller passes a prebuilt FTS query
+  // (mirrors searchSites' contract of taking match text, but here the server
+  // layer owns sanitization/token shaping). No TTL: element rows are reused
+  // across gallery pages, staleness is not a correctness gate. Filtered to
+  // Tier A (source='gallery') — Tier B rows are duplicate authors from site
+  // detail pages and would pollute ranked results with the same names.
+  searchElements(ftsQuery: string, limit: number): ElementRecord[] {
+    return this.withDb((db) => {
+      if (!this.ftsAvailable) return [];
+      const rows = db.prepare(
+        `SELECT e.* FROM elements_fts
+         JOIN elements e ON e.slug = elements_fts.slug
+         WHERE elements_fts MATCH ?
+         ORDER BY bm25(elements_fts) ASC
+         LIMIT ?`,
+      ).all(ftsQuery, limit) as unknown as ElementRow[];
+      return rows.map(rowToElement);
+    });
+  }
+
+  countElements(): number {
+    return this.withDb((db) =>
+      (db.prepare("SELECT COUNT(*) AS count FROM elements WHERE source='gallery'").get() as { count: number }).count,
+    );
+  }
+
+  listElements(limit: number): ElementRecord[] {
+    return this.withDb((db) => {
+      const rows = db.prepare(
+        "SELECT * FROM elements ORDER BY fetchedAt DESC LIMIT ?",
+      ).all(limit) as unknown as ElementRow[];
+      return rows.map(rowToElement);
     });
   }
 

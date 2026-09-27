@@ -52,3 +52,21 @@ export interface GalleryItem {
   mediaType: "video" | "image" | null; // .mp4 → video, .jpg → image
   category: string | null; // e.g. "micro-interactions"; null when page has no /elements/<cat>/ breadcrumb
 }
+
+// Stored version of a gallery item (Cache / elements table). GalleryItem is
+// what the parsers emit; cacheUpdaters add cid/source/projectId/fetchedAt.
+export interface ElementRecord {
+  slug: string;
+  title: string;
+  cid: string; // normalized category id (Task 5 fills the taxonomy; raw title until then)
+  category: string;
+  author: string;
+  builtWith: string[];
+  related: string[];
+  mediaPath: string;
+  mediaType: "video" | "image" | null;
+  /** Tier A source="gallery" | Tier B source="site" (from a site detail's Elements section) */
+  source: "gallery" | "site";
+  projectId: string | null;
+  fetchedAt: number;
+}
