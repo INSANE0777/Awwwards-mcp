@@ -10,7 +10,7 @@ import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
-import type { Categories, ElementMedia, SiteDetails, SiteSummary } from "./types.js";
+import type { Categories, ElementMedia, ElementRecord, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
@@ -131,6 +131,13 @@ export interface Handlers {
   compare_sites(args: { slugs: string[] }): Promise<ToolResponse>;
   get_index_status(): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
+  search_elements(args: {
+    query?: string;
+    category?: string;
+    stack?: string[];
+    limit?: number;
+  }): Promise<ToolResponse>;
+  get_element(args: { id: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
   capture_live_site(args: {
     url: string;
@@ -627,6 +634,86 @@ export function createHandlers(deps: {
     }
   }
 
+  // Compact payload per hit. mediaPath is coalesced to "" by rowToElement; an
+  // empty path would yield a garbage "assets.awwwards.com/awards/" URL, so
+  // mediaUrl/posterUrl render as null instead.
+  function compactElement(r: ElementRecord) {
+    return {
+      slug: r.slug,
+      title: r.title,
+      category: r.category,
+      author: r.author,
+      mediaUrl: r.mediaPath ? elementUrl(r.mediaPath) : null,
+      posterUrl: r.mediaPath ? elementUrl(elementPosterPath(r.mediaPath)) : null,
+      source: r.source,
+      projectId: r.projectId,
+    };
+  }
+
+  async function search_elements(args: {
+    query?: string; category?: string; stack?: string[]; limit?: number;
+  }): Promise<ToolResponse> {
+    try {
+      // Empty corpus → best-effort auto-index (gallery crawl is small and
+      // one-shot; identical UX to the sites index auto-run).
+      if (cache.countElements() === 0) {
+        const { runElementsIndexer } = await import("./elements-indexer.js");
+        try {
+          await runElementsIndexer({ client, cache, maxItems: 48 });
+        } catch (err) {
+          return {
+            content: [
+              text(
+                `Element index is empty and the gallery crawl failed (${err instanceof Error ? err.message : String(err)}). Try again later or run get_index_status.`,
+              ),
+            ],
+            isError: true,
+          };
+        }
+      }
+      // Tokens exist but no query → no FTS call at all (searchElements with an
+      // empty MATCH string would error). No-query searches list recent rows.
+      const ftsQuery = args.query
+        ? tokenizeQuery(args.query).map((t) => `"${t}"*`).join(" ")
+        : null;
+      const rows = ftsQuery
+        ? cache.searchElements(ftsQuery, 100)
+        : cache.listElements(200);
+
+      const stackWords = (args.stack ?? []).map((s) => s.toLowerCase());
+      const hits = rows
+        .filter((r) => (args.category ? r.cid === args.category : true))
+        .filter((r) => {
+          if (stackWords.length === 0) return true;
+          const hay = r.builtWith.map((b) => b.toLowerCase()).join(" ");
+          return stackWords.every((w) => hay.includes(w));
+        })
+        .slice(0, args.limit ?? 8)
+        .map(compactElement);
+      return { content: [text(JSON.stringify({ count: hits.length, results: hits }, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function get_element(args: { id: string }): Promise<ToolResponse> {
+    try {
+      const [record] = cache.getElements([args.id]);
+      if (!record) {
+        return { content: [text(`Unknown element id: ${args.id}`)], isError: true };
+      }
+      // One batched lookup resolves every related slug's title.
+      const bySlug = new Map(cache.getElements(record.related).map((r) => [r.slug, r]));
+      const related = record.related.map((slug) => {
+        const r = bySlug.get(slug);
+        return { slug, title: r?.title ?? "" };
+      });
+      return { content: [text(JSON.stringify({ ...record, related }, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function list_categories(): Promise<ToolResponse> {
     try {
       let cats = cache.getMeta<Categories>("categories", CATEGORY_TTL_MS);
@@ -771,6 +858,8 @@ export function createHandlers(deps: {
     compare_sites,
     get_index_status,
     get_site_elements,
+    search_elements,
+    get_element,
     list_categories,
     capture_live_site,
     analyze_page_structure,

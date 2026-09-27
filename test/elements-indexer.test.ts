@@ -57,9 +57,9 @@ describe("runElementsIndexer", () => {
   });
 
   it("does not overwrite related/site rows it did not fetch", async () => {
-    // Tier B row present before indexing; the Tier A crawl upserts the same
-    // slug as source="gallery" (wins), but a Tier-B-only slug must survive
-    // untouched.
+    // Tier B row present before indexing; the Tier A crawl (which never
+    // fetched this slug) must leave it untouched — source and projectId
+    // survive the upsert run.
     const fetchFn = vi.fn(async () => new Response(itemHtml, { status: 200 }));
     const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
     const dir = mkdtempSync(join(tmpdir(), "aww-eix2-"));

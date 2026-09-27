@@ -1,4 +1,4 @@
-import { AwwwardsClient, BASE_URL } from "./awwwards.js";
+import { AwwwardsClient } from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import { parseElementsGallery, parseElementGalleryPage } from "./parsers.js";
 import type { ElementRecord } from "./types.js";

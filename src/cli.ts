@@ -131,6 +131,33 @@ server.tool(
 );
 
 server.tool(
+  "search_elements",
+  "Search Awwwards' curated element gallery — award-grade UI components (footers, menus, loaders, transitions, micro-interactions…). " +
+    "Usage: pass query text and at most one of category/stack; every result links back to its source element page and parent project.",
+  {
+    query: z.string().describe("Free text: what the component is or does").optional(),
+    category: z
+      .string()
+      .describe("Normalized category id, e.g. 'footers', 'micro-interactions'")
+      .optional(),
+    stack: z.array(z.string()).describe("Built-with tokens, e.g. ['gsap', 'webgl']").optional(),
+    limit: z.number().int().min(1).max(20).default(8),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.search_elements(args)),
+);
+
+server.tool(
+  "get_element",
+  "Get one Awwwards element in full: title, author, built-with stack, media URLs, related elements and the parent award-winning project. Use search_elements first for ids.",
+  {
+    id: z.string().describe("Element slug from search_elements"),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.get_element(args)),
+);
+
+server.tool(
   "list_categories",
   "List the filter taxonomy available on Awwwards: color hexes and tag/technology slugs usable with search_sites.",
   {},
