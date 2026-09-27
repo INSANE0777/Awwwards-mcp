@@ -53,6 +53,35 @@ export interface GalleryItem {
   category: string | null; // e.g. "micro-interactions"; null when page has no /elements/<cat>/ breadcrumb
 }
 
+// Motion DNA result (Task 7): reduced view of a runtime page scan for the
+// gallery/motion tooling. Aggregated by reduceScan from a MotionScan
+// (src/motion-dna.ts) captured with MOTION_SNIPPET via page.evaluate.
+export interface MotionDna {
+  url: string;
+  stack: {
+    libs: string[];
+    render: string[];
+    scrollModel: "lenis" | "locomotive" | "native" | "unknown";
+  };
+  scroll: {
+    triggerCount: number;
+    scrubCount: number;
+    pinCount: number;
+    scrubRatio: number; // scrubCount / triggerCount; 0 when no triggers
+    sample: {
+      start: string | null;
+      end: string | null;
+      scrub: boolean;
+      pin: boolean;
+      duration: number | null; // seconds (gsap convention)
+      ease: string | null;
+    }[];
+  };
+  easingVocab: { token: string; bezier: number[] | null; uses: number }[];
+  durationVocab: { p25: number; median: number; p75: number } | null; // milliseconds
+  capturedAt: number; // Date.now() at capture
+}
+
 // Stored version of a gallery item (Cache / elements table). GalleryItem is
 // what the parsers emit; cacheUpdaters add cid/source/projectId/fetchedAt.
 export interface ElementRecord {
