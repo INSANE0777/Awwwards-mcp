@@ -246,3 +246,14 @@ export function parseElements(html: string): ElementMedia[] | null {
   }
   return elements;
 }
+
+// /elements/ gallery listing: element tiles deep-link to
+// /inspiration/<slug> pages (live-verified 2026-09-28, e.g.
+// /inspiration/micro-interactions-croing-tiktok-partner-agency).
+// null = no /inspiration/ href anywhere (drift or empty body);
+// [] = page parsed but gallery has zero tiles (legitimate empty).
+export function parseElementsGallery(html: string): string[] | null {
+  const matches = [...html.matchAll(/href="\/inspiration\/([\w-]+)\/?"/g)].map((m) => m[1]);
+  if (matches.length === 0) return html.length === 0 ? null : [];
+  return [...new Set(matches)];
+}

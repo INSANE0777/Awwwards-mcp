@@ -8,6 +8,7 @@ import {
   parseCategories,
   parseElements,
   parseScore,
+  parseElementsGallery,
 } from "../src/parsers.js";
 
 const FIXTURES = join(__dirname, "fixtures");
@@ -329,5 +330,34 @@ describe("parseScore", () => {
   });
   it("returns null when no score heading exists", () => {
     expect(parseScore("<html><body>no score</body></html>")).toBeNull();
+  });
+});
+
+// /elements/ gallery listing: element tiles deep-link to /inspiration/<slug>.
+// Live capture 2026-09-28 (test/fixtures/elements-listing.html, 62 hrefs).
+// Brief's listingHtml variable adapted to this file's readFixture() helper.
+describe("parseElementsGallery", () => {
+  const galleryHtml = readFixture("elements-listing.html");
+
+  it("extracts element permalink slugs from the live snapshot", () => {
+    const slugs = parseElementsGallery(galleryHtml);
+    expect(slugs).not.toBeNull();
+    expect(slugs!.length).toBeGreaterThanOrEqual(20);
+    // Slugs are path-fragments only — no slashes, no leading dot-dot.
+    for (const s of slugs!) expect(s).toMatch(/^[\w-]+$/);
+  });
+
+  it("deduplicates slugs (tiles repeat on hover markup)", () => {
+    const slugs = parseElementsGallery(galleryHtml)!;
+    expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
+  it("returns [] when the page is a 404-style shell with no elements", () => {
+    // A generic page (listing.html = search results) has no /inspiration/ links.
+    expect(parseElementsGallery(listing())).toEqual([]);
+  });
+
+  it("returns null for truly empty input (drift signal)", () => {
+    expect(parseElementsGallery("")).toBeNull();
   });
 });
