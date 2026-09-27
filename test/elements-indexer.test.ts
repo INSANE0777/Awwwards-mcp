@@ -56,6 +56,28 @@ describe("runElementsIndexer", () => {
     }
   });
 
+  it("does not stamp freshness meta when every item fetch fails", async () => {
+    // Listing parses but every item page 403s → records empty → no upsert
+    // and no "elements_indexed_at", so the stale gate lets a retry in
+    // instead of blocking re-indexing for 7 days against 0 rows.
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/elements/")) return new Response(galleryHtml, { status: 200 });
+      return new Response("blocked", { status: 403 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const dir = mkdtempSync(join(tmpdir(), "aww-eix3-"));
+    const cache = new Cache(dir);
+    try {
+      const res = await runElementsIndexer({ client, cache, maxItems: 3 });
+      expect(res.itemsIndexed).toBe(0);
+      expect(cache.countElements()).toBe(0);
+      expect(cache.getMeta("elements_indexed_at", Number.POSITIVE_INFINITY)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not overwrite related/site rows it did not fetch", async () => {
     // Tier B row present before indexing; the Tier A crawl (which never
     // fetched this slug) must leave it untouched — source and projectId

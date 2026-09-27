@@ -55,7 +55,12 @@ export async function runElementsIndexer(deps: {
       fetchedAt: now(),
     });
   }
-  if (records.length > 0) cache.upsertElements(records);
-  cache.setMeta("elements_indexed_at", now());
+  if (records.length > 0) {
+    cache.upsertElements(records);
+    // Never stamp freshness on an empty crawl: a listing that parsed but
+    // whose item pages all failed must not block re-indexing for 7 days
+    // while countElements() === 0 (repo "never cache empty parses" rule).
+    cache.setMeta("elements_indexed_at", now());
+  }
   return { itemsIndexed: records.length, skipped: false };
 }
