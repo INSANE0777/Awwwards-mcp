@@ -364,12 +364,11 @@ export class Cache {
     });
   }
 
-  // Full-text search over elements. Caller passes a prebuilt FTS query
-  // (mirrors searchSites' contract of taking match text, but here the server
-  // layer owns sanitization/token shaping). No TTL: element rows are reused
-  // across gallery pages, staleness is not a correctness gate. Filtered to
-  // Tier A (source='gallery') — Tier B rows are duplicate authors from site
-  // detail pages and would pollute ranked results with the same names.
+  // Full-text search over elements. Caller passes a prebuilt FTS query (the
+  // server layer owns sanitization/token shaping). Raw FTS match over ALL
+  // rows — NO Tier A filter here: any source='gallery' gating is the caller's
+  // job (Task 5). No TTL: element rows are reused across gallery pages,
+  // staleness is not a correctness gate.
   searchElements(ftsQuery: string, limit: number): ElementRecord[] {
     return this.withDb((db) => {
       if (!this.ftsAvailable) return [];
