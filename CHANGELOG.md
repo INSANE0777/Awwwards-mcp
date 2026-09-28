@@ -2,6 +2,21 @@
 
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
+## v1.0.1 — 2026-09-28
+
+Element↔site pairing (Task 5) and elements-index docs.
+
+- **Pairing**: gallery elements now link to their owning site. Item-page
+  attribution anchors (`/sites/<slug>`) are parsed into a new
+  `elements.siteSlug` column (lazy ALTER TABLE migration — existing caches
+  upgrade in place). At read time, rows crawled before this change fall back
+  to an exact author→site-title match, filled only when the title is unique
+  across the sites index (wrong pairing is worse than none). `search_elements`
+  and `get_element` payloads carry `siteSlug` + `siteUrl`; the next elements
+  re-index stamps `siteSlug` authoritatively.
+- **Docs**: README documents the optional full elements index
+  (`--elements all|N`), slug-FTS search, and the 7-day freshness gate.
+
 ## v1.0.0 — 2026-09-19
 
 First **stable** release. Supersedes the alpha 1.x line and the beta — the

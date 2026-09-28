@@ -211,10 +211,10 @@ describe("elements cache", () => {
     mediaType: "video",
     source: "gallery",
     projectId: null,
+    siteSlug: null,
     fetchedAt: Date.now(),
     ...overrides,
   });
-
   it("upserts twice without duplicating rows", () => {
     const cache = new Cache(tmpDir());
     cache.upsertElements([elementRecord()]);
@@ -250,6 +250,40 @@ describe("elements cache", () => {
     expect(gallery!.projectId).toBeNull();
     expect(siteElem!.source).toBe("site");
     expect(siteElem!.projectId).toBe("12345");
+  });
+
+  it("round-trips the pairing siteSlug column", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([
+      elementRecord({ siteSlug: "realevate" }),
+      elementRecord({ slug: "no-pair" }), // siteSlug omitted → null
+    ]);
+    const [paired, unpaired] = cache.getElements(["micro-interactions-croing-tiktok-partner-agency", "no-pair"]);
+    expect(paired!.siteSlug).toBe("realevate");
+    expect(unpaired!.siteSlug).toBeNull();
+  });
+
+  it("migrates a pre-Task-5 database lacking the siteSlug column", () => {
+    const dir = tmpDir();
+    // Create the old-shape table exactly as it existed before Task 5.
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const old = new DatabaseSync(join(dir, "cache.db"));
+    old.exec(
+      "CREATE TABLE elements (slug TEXT PRIMARY KEY, title TEXT NOT NULL, cid TEXT, category TEXT, " +
+      "author TEXT, builtWith TEXT NOT NULL DEFAULT '[]', related TEXT NOT NULL DEFAULT '[]', " +
+      "mediaPath TEXT, mediaType TEXT, source TEXT NOT NULL, projectId TEXT, fetchedAt INTEGER NOT NULL)",
+    );
+    old.prepare(
+      "INSERT INTO elements (slug, title, cid, category, author, builtWith, related, mediaPath, mediaType, source, projectId, fetchedAt) " +
+      "VALUES ('legacy-row', 'Legacy', 'norm:x', 'X', 'Studio', '[]', '[]', NULL, NULL, 'gallery', NULL, 1)",
+    ).run();
+    old.close();
+    // Opening through Cache must add the column, keep the row, and let upserts write siteSlug.
+    const cache = new Cache(dir);
+    expect(cache.getElements(["legacy-row"])[0]!.siteSlug).toBeNull();
+    const migrated = cache.getElements(["legacy-row"])[0]!;
+    cache.upsertElements([{ ...migrated, siteSlug: "realevate" }]);
+    expect(cache.getElements(["legacy-row"])[0]!.siteSlug).toBe("realevate");
   });
 
   it("getElements silently drops missing slugs", () => {

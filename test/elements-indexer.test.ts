@@ -135,6 +135,7 @@ describe("runElementsIndexer", () => {
         mediaType: null,
         source: "site",
         projectId: "l-i-s-a",
+        siteSlug: null,
         fetchedAt: 1,
       };
       cache.upsertElements([tierBRow]);

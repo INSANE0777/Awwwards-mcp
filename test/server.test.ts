@@ -1144,7 +1144,8 @@ const elementFixture: ElementRecord = {
   slug: "footers-editorial-studio", title: "Editorial Footer", cid: "footers",
   category: "Footers", author: "Studio X", builtWith: ["GSAP", "Lenis"],
   related: ["footers-editorial-studio-2"], mediaPath: "element/2025/11/e.jpg",
-  mediaType: "image", source: "gallery", projectId: null, fetchedAt: Date.now(),
+  mediaType: "image", source: "gallery", projectId: null, siteSlug: null,
+  fetchedAt: Date.now(),
 };
 const elementFixture2: ElementRecord = {
   ...elementFixture, slug: "footers-editorial-studio-2", title: "Second Footer",
@@ -1181,6 +1182,48 @@ describe("search_elements handler", () => {
     const body = JSON.parse((res.content[0] as any).text);
     expect(body.count).toBe(1);
     expect(body.results[0].slug).toBe("footers-editorial-studio");
+  });
+
+  it("pairs elements to sites: stored siteSlug wins, else author→title fallback", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    // Sites index has two rows; only one matches elementFixture's author
+    // "Studio X" by title. A stored siteSlug bypasses the fallback entirely.
+    cache.upsertSites([
+      site({ slug: "studio-x", title: "Studio X" }),
+      site({ slug: "other-site", title: "Unrelated" }),
+    ]);
+    cache.upsertElements([
+      elementFixture, // siteSlug null → resolves via author→title
+      elementFixture2, // siteSlug stored → used as-is
+    ]);
+    cache.upsertElements([
+      { ...elementFixture2, siteSlug: "the-real-site" },
+    ]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "footer", limit: 10 });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    const bySlug = new Map(parsed.results.map((r: any) => [r.slug, r]));
+    // Fallback: author "Studio X" matches exactly one site title.
+    expect(bySlug.get("footers-editorial-studio").siteSlug).toBe("studio-x");
+    expect(bySlug.get("footers-editorial-studio").siteUrl).toContain("/sites/studio-x/");
+    // Stored value beats the fallback.
+    expect(bySlug.get("footers-editorial-studio-2").siteSlug).toBe("the-real-site");
+  });
+
+  it("leaves siteSlug null when the author matches zero or multiple site titles", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "studio-x-1", title: "Studio X" }),
+      site({ slug: "studio-x-2", title: "Studio X" }), // duplicate titles → ambiguous
+    ]);
+    cache.upsertElements([elementFixture]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "footer", limit: 10 });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.results[0].siteSlug).toBeNull();
+    expect(parsed.results[0].siteUrl).toBeNull();
   });
 
   it("renders mediaUrl/posterUrl null when mediaPath is empty (no garbage URL)", async () => {

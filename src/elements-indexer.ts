@@ -76,7 +76,8 @@ export async function runElementsIndexer(deps: {
       mediaPath: item.mediaPath ?? "",
       mediaType: item.mediaType,
       source: "gallery",
-      projectId: null, // Task 5 pairs gallery items to site slugs when possible
+      projectId: null, // legacy pairing field; Task 5 pairs via siteSlug below
+      siteSlug: item.siteSlug, // attribution /sites/<slug> href — null when absent
       fetchedAt: now(),
     });
   }

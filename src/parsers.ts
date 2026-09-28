@@ -290,6 +290,11 @@ export function parseElementGalleryPage(html: string): GalleryItem | null {
       /from<\/small>\s*<a(?:[^>"']|"[^"]*"|'[^']*')*>\s*([\s\S]{2,120}?)<\/a>/,
     )?.[1]?.replace(/<[^>]+>/g, "").trim() ?? null;
 
+  // Task 5 pairing: the same attribution anchor's href is the owning site's
+  // slug (e.g. /sites/realevate), the join key to the sites table. Verified
+  // against the 2026-09-28 fixture: exactly one /sites/ anchor per item page.
+  const siteSlug = html.match(/from<\/small>\s*<a[^>]*?href="\/sites\/([\w-]+)"/)?.[1] ?? null;
+
   // "This element was built with" section: tag chips until the section closes.
   const builtWith: string[] = [];
   const builtI = html.indexOf('was built with...</p>');
@@ -324,5 +329,5 @@ export function parseElementGalleryPage(html: string): GalleryItem | null {
   // Category: breadcrumb link into /elements/<category>/.
   const category = html.match(/href="\/elements\/([\w-]+)\/"/)?.[1] ?? null;
 
-  return { slug, title, author, builtWith, related, mediaPath, mediaType, category };
+  return { slug, title, author, builtWith, related, mediaPath, mediaType, category, siteSlug };
 }

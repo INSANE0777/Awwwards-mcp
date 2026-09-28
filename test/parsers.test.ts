@@ -400,6 +400,21 @@ describe("parseElementGalleryPage", () => {
     expect(item.builtWith).toContain("motion");
   });
 
+  it("parses the attribution site slug (Task 5 pairing join key)", () => {
+    const item = parseElementGalleryPage(itemHtml())!;
+    // Anchor text is "Realevate", but the pairing key is the href slug.
+    expect(item.siteSlug).toBe("realevate");
+  });
+
+  it("returns siteSlug null when the page has no /sites/ attribution", () => {
+    // Same fixture minus the attribution anchors.
+    const stripped = readFixture("elements-item.html")
+      .replace(/<a[^>]*href="\/sites\/[\w-]+"[^>]*>[\s\S]*?<\/a>/g, "");
+    const item = parseElementGalleryPage(stripped);
+    expect(item).not.toBeNull();
+    expect(item!.siteSlug).toBeNull();
+  });
+
   it("returns null on empty/unknown page", () => {
     expect(parseElementGalleryPage("")).toBeNull();
   });

@@ -179,6 +179,22 @@ npm run index
   checkpoints are cleared so each refresh actually revisits the tag pages.
   Run `get_index_status` to inspect progress or the last crawl error.
 
+### Elements index (optional)
+
+The `search_elements` tool auto-indexes the first gallery page (~48 items)
+on first use. To build a full corpus (~1,500+ items, ~15 pages at 48/page):
+
+```bash
+npm run index -- --elements all     # follow pagination until exhausted
+npm run index -- --elements 10      # first 10 listing pages
+```
+
+Element rows are searched by title, author, category **and slug tokens**
+(slug is an FTS5-indexed column; a cache opened from an older schema
+version rebuilds its search index automatically on first open). The
+elements index has the same 7-day freshness gate as the sites index —
+a re-run inside the window skips itself.
+
 Site details (palettes, tech stacks) are still fetched on demand and cached
 for 7 days. Awwwards page and CDN requests have a 10-second deadline per
 attempt, including response-body reading; transient page failures are retried

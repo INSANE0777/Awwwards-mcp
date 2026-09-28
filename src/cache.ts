@@ -31,6 +31,7 @@ const SCHEMA = `
     mediaType TEXT,                         -- 'video' | 'image' | NULL
     source TEXT NOT NULL,                   -- 'gallery' | 'site'
     projectId TEXT,
+    siteSlug TEXT,                          -- Task 5 pairing: owning /sites/<slug>
     fetchedAt INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS motion_dna (
@@ -128,6 +129,7 @@ interface ElementRow {
   mediaType: "video" | "image" | null;
   source: "gallery" | "site";
   projectId: string | null;
+  siteSlug: string | null;
   fetchedAt: number;
 }
 
@@ -144,6 +146,7 @@ function rowToElement(r: ElementRow): ElementRecord {
     mediaType: r.mediaType,
     source: r.source,
     projectId: r.projectId,
+    siteSlug: r.siteSlug,
     fetchedAt: r.fetchedAt,
   };
 }
@@ -178,6 +181,16 @@ export class Cache {
     const db = new DatabaseSync(this.dbPath);
     try {
       db.exec(SCHEMA);
+      // Lazy column migration: databases created before Task 5 lack the
+      // elements.siteSlug column. CREATE TABLE above adds it for fresh
+      // databases; on the old shape this ALTER fires once, then duplicates
+      // are caught per-open below (dupes are rare and this open→close path
+      // runs on every op, so branch inside try/catch rather than probe).
+      try {
+        db.exec("ALTER TABLE elements ADD COLUMN siteSlug TEXT");
+      } catch {
+        /* column already exists */
+      }
       if (this.ftsAvailable === null) {
         try {
           db.exec(FTS_SCHEMA);
@@ -350,13 +363,14 @@ export class Cache {
     if (records.length === 0) return;
     this.withDb((db) => {
       const stmt = db.prepare(
-        `INSERT INTO elements (slug, title, cid, category, author, builtWith, related, mediaPath, mediaType, source, projectId, fetchedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO elements (slug, title, cid, category, author, builtWith, related, mediaPath, mediaType, source, projectId, siteSlug, fetchedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(slug) DO UPDATE SET
            title=excluded.title, cid=excluded.cid, category=excluded.category,
            author=excluded.author, builtWith=excluded.builtWith, related=excluded.related,
            mediaPath=excluded.mediaPath, mediaType=excluded.mediaType,
-           source=excluded.source, projectId=excluded.projectId, fetchedAt=excluded.fetchedAt`,
+           source=excluded.source, projectId=excluded.projectId, siteSlug=excluded.siteSlug,
+           fetchedAt=excluded.fetchedAt`,
       );
       // One transaction for the whole batch — same reason as upsertSites.
       db.exec("BEGIN");
@@ -365,7 +379,7 @@ export class Cache {
           stmt.run(
             r.slug, r.title, r.cid, r.category, r.author,
             JSON.stringify(r.builtWith), JSON.stringify(r.related),
-            r.mediaPath, r.mediaType, r.source, r.projectId, r.fetchedAt,
+            r.mediaPath, r.mediaType, r.source, r.projectId, r.siteSlug, r.fetchedAt,
           );
         }
         db.exec("COMMIT");

@@ -51,6 +51,7 @@ export interface GalleryItem {
   mediaPath: string | null; // assets.awwwards.com path (reuse elementUrl for full URL)
   mediaType: "video" | "image" | null; // .mp4 → video, .jpg → image
   category: string | null; // e.g. "micro-interactions"; null when page has no /elements/<cat>/ breadcrumb
+  siteSlug: string | null; // Task 5: attribution /sites/<slug> href — pairing key to the sites table
 }
 
 // Motion DNA result (Task 7): reduced view of a runtime page scan for the
@@ -83,7 +84,7 @@ export interface MotionDna {
 }
 
 // Stored version of a gallery item (Cache / elements table). GalleryItem is
-// what the parsers emit; cacheUpdaters add cid/source/projectId/fetchedAt.
+// what the parsers emit; cacheUpdaters add cid/source/fetchedAt.
 export interface ElementRecord {
   slug: string;
   title: string;
@@ -97,5 +98,8 @@ export interface ElementRecord {
   /** Tier A source="gallery" | Tier B source="site" (from a site detail's Elements section) */
   source: "gallery" | "site";
   projectId: string | null;
+  // Task 5 pairing: owning site, resolved at index time from the attribution
+  // href, else at read time by author → sites.title match. "realevate".
+  siteSlug: string | null;
   fetchedAt: number;
 }

@@ -687,6 +687,19 @@ export function createHandlers(deps: {
     }
   }
 
+  // Task 5 read-time pairing: rows crawled before the attribution href was
+  // parsed carry siteSlug = null, so fall back to matching the element author
+  // against site titles (exact, case-insensitive; matched ~74% of the live
+  // corpus at 2026-09-28). Author names are not unique across sites, so the
+  // fallback only fills when exactly one site row has that title.
+  function resolveSiteSlug(r: ElementRecord): string | null {
+    if (r.siteSlug) return r.siteSlug;
+    if (!r.author) return null;
+    const titleMatches = cache.getSites(Infinity)
+      .filter((s) => s.title.trim().toLowerCase() === r.author.trim().toLowerCase());
+    return titleMatches.length === 1 ? titleMatches[0].slug : null;
+  }
+
   // Compact payload per hit. mediaPath is coalesced to "" by rowToElement; an
   // empty path would yield a garbage "assets.awwwards.com/awards/" URL, so
   // mediaUrl/posterUrl render as null instead.
@@ -700,6 +713,11 @@ export function createHandlers(deps: {
       posterUrl: r.mediaPath ? elementUrl(elementPosterPath(r.mediaPath)) : null,
       source: r.source,
       projectId: r.projectId,
+      siteSlug: resolveSiteSlug(r),
+      siteUrl: (() => {
+        const s = resolveSiteSlug(r);
+        return s ? `https://www.awwwards.com/sites/${s}/` : null;
+      })(),
     };
   }
 
