@@ -2,6 +2,42 @@
 
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
+
+## v1.1.0 — 2026-09-28
+
+Winner feed (`new_winners` + `watch_site`), `awwwards-setup` skill, repo
+renamed to the correct spelling.
+
+- **`new_winners`** polls today's freshly-crowned winners (SOTD /
+  Developer Award / Honorable Mention) against a persisted UTC-day
+  baseline: the first call seeds silently and dumps the listing; later
+  calls report only the delta. Each first-seen winner's site page is
+  fetched once and its Elements section is backfilled into the searchable
+  element corpus as `source:"site"` records (slugs namespaced
+  `site-<siteslug>-<title>` so they never collide with gallery records) —
+  new winners are element-searchable immediately, no gallery indexing
+  needed. Per-winner fetch failures never abort the loop.
+- **`watch_site`** adds persistent watches (studio / tag / url, optional
+  `award` + `note`). `list` matches each watch against the freshest cached
+  listing and reports per-watch `NEW since last check` deltas; it never
+  fetches — `new_winners` / `search_sites` keep the pool fresh. First
+  `list` seeds the baseline silently; url watches take the site slug;
+  studio matching is a case-insensitive substring.
+- **New skill `awwwards-setup`** — first-invocation onboarding: wires the
+  MCP server when it isn't connected yet (Claude Code, Codex, OpenCode,
+  mcpServers-standard clients, pi), asks the user's preferences once
+  (result density full/compact, default viewport, live-capture opt-in
+  with playwright install, local-index opt-in, winner watches to register)
+  and persists them to `~/.awwwards-mcp/preferences.json`. Later runs
+  apply silently and only ask about missing fields. Shipped in the npm
+  package; `awwwards-inspiration` hands off to it on first run.
+- **Docs**: README documents both new tools and the two-source element
+  corpus; `awwwards-inspiration` gains the tool-table rows, a "staying
+  current" section, and the first-run setup handoff.
+- **Repo renamed** `Awwards-mcp` → `Awwwards-mcp` (three w's, matching the
+  npm package and awwwards.com). Old GitHub links redirect automatically;
+  `package.json` and issue-template URLs updated.
+
 ## v1.0.1 — 2026-09-28
 
 Element↔site pairing (Task 5), element category taxonomy, elements-index docs.
