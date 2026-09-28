@@ -3,7 +3,11 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## v1.1.0 — 2026-09-28
+## v1.7.0 — 2026-09-28
+
+> First stable-minor release. npm versions 1.1.0–1.6.0 were the retired
+> alpha line, so the stable line jumps to 1.7.0 — semver forbids reusing a
+> published version number.
 
 Winner feed (`new_winners` + `watch_site`), `awwwards-setup` skill, repo
 renamed to the correct spelling.
