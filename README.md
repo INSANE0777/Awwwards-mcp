@@ -189,9 +189,18 @@ npm run index -- --elements all     # follow pagination until exhausted
 npm run index -- --elements 10      # first 10 listing pages
 ```
 
+Any crawl beyond the first page also runs the **taxonomy pass**: every
+facet page (`/elements/footer/`, `/elements/cta/`, … 46 categories) is
+fetched once and each element under it is stamped with that category, so
+`search_elements`' `category` filter works across the corpus. Element
+pages carry no breadcrumb, so this listing-side pass is the only category
+source; elements seen on no facet page stay `unsorted`.
+
 Element rows are searched by title, author, category **and slug tokens**
 (slug is an FTS5-indexed column; a cache opened from an older schema
-version rebuilds its search index automatically on first open). The
+version rebuilds its search index automatically on first open). Each
+element also carries the slug of the award-winning site it came from
+(`siteSlug`/`siteUrl` in `search_elements`/`get_element` results). The
 elements index has the same 7-day freshness gate as the sites index —
 a re-run inside the window skips itself.
 

@@ -148,4 +148,76 @@ describe("runElementsIndexer", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // 46 facet fetches through the client's 1 req/s rate limiter ≈ 50s.
+  it("withCategories: facet pages assign cid; broken facets are skipped", { timeout: 90_000 }, async () => {
+    // Facet nav in the listing yields facet paths; each /elements/<cat>/
+    // fetch serves a mini listing whose slug belongs to that category. One
+    // facet fetch fails → its slugs are lost, the rest still index.
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.endsWith("/elements/footer/")) {
+        return new Response('<a href="/inspiration/footer-elem">F</a>', { status: 200 });
+      }
+      if (url.endsWith("/elements/hero_image/")) {
+        return new Response("boom", { status: 500 }); // throws → skipped
+      }
+      if (url.endsWith("/elements/")) return new Response(galleryHtml, { status: 200 });
+      if (url.includes("/elements/")) return new Response("<html></html>", { status: 200 });
+      return new Response(itemHtml, { status: 200 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const dir = mkdtempSync(join(tmpdir(), "aww-eix5-"));
+    const cache = new Cache(dir);
+    try {
+      await runElementsIndexer({ client, cache, maxItems: 2, withCategories: true });
+      // The item fixture's canonical slug is "about-page-realevate"; it never
+      // appears on a facet page, so no cid map entry → falls back to the
+      // item's own breadcrumb parse (null on this page shape) → "unsorted".
+      const rec = cache.getElements(["about-page-realevate"]);
+      expect(rec.length).toBe(1);
+      expect(rec[0].cid).toBe("unsorted");
+      // Every facet in the fixture nav was attempted except the dead one.
+      const facetCalls = fetchFn.mock.calls
+        .map((c) => String(c[0]))
+        .filter((u) => /\/elements\/[\w-]+\/$/.test(u) && !u.includes("?"));
+      expect(facetCalls.some((u) => u.endsWith("/elements/footer/"))).toBe(true);
+      expect(facetCalls.some((u) => u.endsWith("/elements/hero_image/"))).toBe(true);
+      // 46 facets fetched once; the 500-ing hero_image is retried (transient
+      // failure policy) → 47 fetches total.
+      expect(facetCalls.length).toBe(47);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("withCategories: slug seen on a facet page gets that cid", async () => {
+    // Item page serves the same slug the facet page listed → cid from map.
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("?page=")) return new Response("<html></html>", { status: 200 });
+      if (url.endsWith("/elements/")) {
+        return new Response(
+          '<nav class="js-filter-item"><a class="nav-filters__subitem" href="/elements/footer/"></a></nav>' +
+            '<a href="/inspiration/about-page-realevate"></a>',
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/elements/footer/")) {
+        return new Response('<a href="/inspiration/about-page-realevate"></a>', { status: 200 });
+      }
+      return new Response(itemHtml, { status: 200 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const dir = mkdtempSync(join(tmpdir(), "aww-eix6-"));
+    const cache = new Cache(dir);
+    try {
+      await runElementsIndexer({ client, cache, maxItems: 2, withCategories: true });
+      const rec = cache.getElements(["about-page-realevate"]);
+      expect(rec.length).toBe(1);
+      expect(rec[0].cid).toBe("footer");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

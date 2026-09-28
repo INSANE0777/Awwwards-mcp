@@ -258,6 +258,19 @@ export function parseElementsGallery(html: string): string[] | null {
   return [...new Set(matches)];
 }
 
+// Taxonomy facets from a gallery page's filter nav (nav-filters__subitem
+// links into /elements/<category>/). Anchoring the match on the subitem class
+// excludes pagination (?page=N) and card-level /elements/ noise. Verified
+// against the 2026-09-28 fixture: 46 facets, including the unobvious
+// 404_page/thumbnail/mobile_thumbnail which ARE real facet nav entries.
+export function parseElementCategories(html: string): string[] | null {
+  const matches = [...html.matchAll(/nav-filters__subitem[^>]*href="\/elements\/([\w-]+)\/?"/g)].map(
+    (m) => m[1],
+  );
+  if (matches.length === 0) return html.length === 0 ? null : [];
+  return [...new Set(matches)];
+}
+
 // Element detail page (/inspiration/<slug>). Anchor notes verified against the
 // committed fixture test/fixtures/elements-item.html (2026-09-28, slug
 // "about-page-realevate"):

@@ -29,7 +29,8 @@ try {
     const maxPages = pagesArg === undefined ? 1
       : pagesArg === "all" ? Infinity
       : Math.max(1, Number.parseInt(pagesArg, 10) || 1);
-    const res = await runElementsIndexer({ client, cache, maxPages });
+    // Category facets only for non-bootstrap crawls: ~46 extra 1/s fetches.
+    const res = await runElementsIndexer({ client, cache, maxPages, withCategories: maxPages > 1 });
     console.error(`awwwards-index: elements done — ${res.itemsIndexed} item pages indexed${res.skipped ? " (skipped: fresh)" : ""}`);
     process.exit(0);
   }

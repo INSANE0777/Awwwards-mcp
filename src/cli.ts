@@ -140,7 +140,7 @@ server.tool(
     query: z.string().describe("Free text: what the component is or does").optional(),
     category: z
       .string()
-      .describe("Normalized category id, e.g. 'footers', 'micro-interactions'")
+      .describe("Category id from the gallery taxonomy, e.g. 'footer', 'menu', 'cta', 'loading', 'mouse_interaction', '404_page'")
       .optional(),
     stack: z.array(z.string()).describe("Built-with tokens, e.g. ['gsap', 'webgl']").optional(),
     limit: z.number().int().min(1).max(20).default(8),
