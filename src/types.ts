@@ -8,6 +8,9 @@ export interface SiteSummary {
   liveUrl: string | null;
   detailPath: string; // e.g. "/sites/l-i-s-a"
   awards: string[]; // e.g. ["Site of the Day", "Developer Award"]
+  // Studio/author name from the card's avatar-name block (listing pages
+  // only). Undefined on rows parsed before this field existed.
+  studio?: string | null;
 }
 
 export interface SiteDetails {

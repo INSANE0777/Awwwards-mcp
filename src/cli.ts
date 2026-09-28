@@ -231,6 +231,32 @@ server.tool(
   (args) => asMcpResult(handlers.search_motion(args)),
 );
 
+server.tool(
+  "new_winners",
+  "Poll today's new Awwwards winners as a delta against the previous poll: new-entrant cards since the last call (first call seeds the baseline and reports no delta). Poll daily for a winners feed; pairs with watch_site for structured monitoring.",
+  {
+    award: z.enum(["sotd", "developer", "honorable"]).default("sotd")
+      .describe("Which winners feed to poll"),
+  },
+  { readOnlyHint: true },
+  (args) => asMcpResult(handlers.new_winners(args)),
+);
+
+server.tool(
+  "watch_site",
+  "Longitudinal watchlist over Awwwards listings: track a studio (e.g. 'ToyFight'), a tag/technology slug (e.g. 'webgl'), or a site URL-slug for changes and new entries. add/list/remove; the delta is reported by watch_site list after new_winners or search_sites refreshes the listing.",
+  {
+    action: z.enum(["add", "list", "remove"]),
+    kind: z.enum(["studio", "tag", "url"]).optional()
+      .describe("studio = creator name from listing cards; tag = tag/technology slug; url = a /sites/<slug> site-slug"),
+    pattern: z.string().optional().describe("What to watch (name/slug per kind)"),
+    award: z.enum(["sotd", "developer", "honorable"]).optional()
+      .describe("Restrict a watch to one award feed"),
+    note: z.string().optional().describe("Why you're watching (free text)"),
+  },
+  (args) => asMcpResult(handlers.watch_site(args)),
+);
+
 // Auto-refresh: if the index is stale (or absent) and no crawl is running,
 // re-index in the background. Serving is never blocked; errors are stderr-only.
 if (shouldAutoIndex(cache)) {

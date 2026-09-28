@@ -31,6 +31,8 @@ queries keep AND semantics: every token must hit the same site.
 | `get_element` | One element record: title, category, author, built-with stack, related elements and its media URL (image or video) pointing at awwwards' CDN. |
 | `get_motion_dna` | Runtime motion fingerprint of a live URL: animation libraries, render engines, ScrollTrigger stats (trigger count, scrub ratio), tween easing/duration vocab and the scroll model. Fresh capture or cached capture with timestamp. |
 | `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
+| `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds and dumps the listing; later calls report the delta. Each first-seen winner's Elements section is backfilled into the searchable element corpus, so new winners are element-searchable immediately. |
+| `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
 
 **Data posture**: element records store metadata + media URLs pointing at
 awwwards' own CDN — nothing is mirrored. Motion DNA records are local
@@ -134,18 +136,19 @@ package automatically if present.
 
 ## Skills
 
-This package ships three agent skills. Any agent that follows the
+This package ships four agent skills. Any agent that follows the
 [Agent Skills standard](https://agentskills.io) can load them; copy them into
 your agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study ~/.agents/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study ~/.agents/skills/
 ```
 
 | Skill | What it teaches |
 |-------|-----------------|
-| `awwwards-inspiration` | The inspiration loop: search, judge from screenshots, pull design DNA, state a design direction, capture/motion-first builds. |
+| `awwwards-setup` | First-time onboarding: asks the user's preferences (result density, viewport, captures, local index, winner watches), persists them to `~/.awwwards-mcp/preferences.json`, and runs any one-time installs they opt into. |
+| `awwwards-inspiration` | The inspiration loop: search, judge from screenshots, pull design DNA, state a design direction, capture/motion-first builds; staying current with `new_winners` and `watch_site`. |
 | `awwwards-motion-study` | The full video chain: what to record from a live site (and what to skip), frame-by-frame review (video input or tile-per-element), the motion inventory, and build verification by re-recording. |
 | `awwwards-doctor` | Repair: run `npm run doctor`, apply its fixes, re-anchor parsers after real awwwards.com drift, recover the in-flight task that surfaced the failure. |
 
@@ -157,7 +160,7 @@ mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-ins
 | Agent Skills-standard agents | `~/.agents/skills/` |
 
 Windows: run this from Git Bash, or copy
-`node_modules\awwwards-mcp\skills\awwwards-inspiration` manually.
+`node_modules\awwwards-mcp\skills\awwwards-setup` manually.
 
 ## Indexing (recommended)
 
@@ -200,7 +203,11 @@ Element rows are searched by title, author, category **and slug tokens**
 (slug is an FTS5-indexed column; a cache opened from an older schema
 version rebuilds its search index automatically on first open). Each
 element also carries the slug of the award-winning site it came from
-(`siteSlug`/`siteUrl` in `search_elements`/`get_element` results). The
+(`siteSlug`/`siteUrl` in `search_elements`/`get_element` results). Two
+record sources share this corpus: gallery records (indexed from the public
+elements listing) and `source:"site"` records backfilled from each new
+SOTD winner's own Elements section by `new_winners` — their slugs are
+namespaced `site-<siteslug>-<title>` so the two never collide. The
 elements index has the same 7-day freshness gate as the sites index —
 a re-run inside the window skips itself.
 

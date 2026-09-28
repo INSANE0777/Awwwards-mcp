@@ -47,6 +47,9 @@ export function parseListing(html: string): SiteSummary[] {
     const awards = [...card.matchAll(/budget-tag--([a-z-]+)/g)].map(
       (m) => AWARD_LABELS[m[1]] ?? m[1],
     );
+    // Studio attribution: <h3 class="avatar-name__title">ToyFight</h3> inside
+    // the card's avatar block. Absent on some page kinds → null.
+    const studioMatch = card.match(/avatar-name__title">([^<]+)</);
     sites.push({
       id: meta.id ?? 0,
       slug: meta.slug,
@@ -57,6 +60,7 @@ export function parseListing(html: string): SiteSummary[] {
       liveUrl: liveMatch ? decodeEntities(liveMatch[1]) : null,
       detailPath: detailMatch[1],
       awards: [...new Set(awards)],
+      studio: studioMatch ? decodeEntities(studioMatch[1].trim()) : null,
     });
   }
   return sites;
