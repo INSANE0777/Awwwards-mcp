@@ -4,7 +4,7 @@
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 ## v1.0.1 — 2026-09-28
 
-Element↔site pairing (Task 5) and elements-index docs.
+Element↔site pairing (Task 5), element category taxonomy, elements-index docs.
 
 - **Pairing**: gallery elements now link to their owning site. Item-page
   attribution anchors (`/sites/<slug>`) are parsed into a new
@@ -14,8 +14,17 @@ Element↔site pairing (Task 5) and elements-index docs.
   across the sites index (wrong pairing is worse than none). `search_elements`
   and `get_element` payloads carry `siteSlug` + `siteUrl`; the next elements
   re-index stamps `siteSlug` authoritatively.
+- **Taxonomy**: `search_elements`'s `category` filter works for real. A
+  taxonomy pass (opt-in, any `--elements` crawl beyond page 1) fetches each
+  facet page (`/elements/footer/`, `/elements/cta/`, … 46 categories) once
+  and stamps every element under it with that category id — element pages
+  carry no breadcrumb, so the listing side is the only category source. The
+  1-page bootstrap auto-index stays cheap; dead facet pages are skipped;
+  a frozen 46-category list covers facet-nav drift. Elements seen on no
+  facet page stay `unsorted`. Completes the "Task 5 fills the taxonomy" stub.
 - **Docs**: README documents the optional full elements index
-  (`--elements all|N`), slug-FTS search, and the 7-day freshness gate.
+  (`--elements all|N`), slug-FTS search, the 7-day freshness gate, and the
+  taxonomy pass.
 
 ## v1.0.0 — 2026-09-19
 
