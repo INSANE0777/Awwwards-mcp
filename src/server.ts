@@ -123,8 +123,10 @@ function formatCompactSite(s: SiteSummary, number: number): string {
   ].filter(Boolean).join(" | ").replace(/\s+/g, " ").trim();
 }
 
-// An all-empty parse means the layout changed (or the page was not found):
-// neither tool may cache such a parse, so the mismatch can still be surfaced.
+// An all-empty parse on an awarded page means the layout changed (or the page
+// was not found): neither tool may cache such a parse, so the mismatch can
+// still be surfaced. A Nominee submission carries no palette, technology,
+// award or description section at all, so its empty parse is real content.
 function isAllEmptyDetail(d: SiteDetails): boolean {
   return (
     d.palette.length === 0 &&
@@ -494,7 +496,9 @@ export function createHandlers(deps: {
     if (!d) {
       const html = await client.getHtml(`/sites/${slug}`);
       d = parseDetail(html, slug);
-      if (isAllEmptyDetail(d)) return null;
+      // Nominees legitimately parse empty; only an awarded page that parses
+      // empty is parser drift, and only drift stays uncached.
+      if (isAllEmptyDetail(d) && !d.nominee) return null;
       cache.setMeta(metaKey, d);
       // No Elements section is a legitimate empty; a zero-blob section is
       // left uncached so get_site_elements can report parser drift.
@@ -539,6 +543,9 @@ export function createHandlers(deps: {
             d.technologies.length ? `Technologies & tools: ${d.technologies.join(", ")}` : null,
             d.elements.length ? `Design elements: ${d.elements.join(", ")}` : null,
             d.description ? `Description: ${d.description}` : null,
+            d.nominee
+              ? `Status: Nominee - awwwards.com publishes no jury score, color palette or technologies for nominees.`
+              : null,
             d.ogImage ? `Full-size screenshot: ${d.ogImage}` : null,
           ]
             .filter(Boolean)
@@ -584,6 +591,7 @@ export function createHandlers(deps: {
           awards: detail.awards.length ? detail.awards : (summary?.awards ?? []).map((title) => ({ title, date: "" })),
           score: detail.score,
           juryDimensions: detail.juryDimensions ?? null,
+          nominee: detail.nominee,
         });
       }
       return { content: [text(JSON.stringify({ sites }, null, 2))] };
@@ -657,7 +665,7 @@ export function createHandlers(deps: {
         // HTML unless it is an all-empty parse (never cached, per contract).
         if (cache.getMeta<SiteDetails>(`detail:${args.slug}`, SITE_TTL_MS) === null) {
           const d = parseDetail(html, args.slug);
-          if (!isAllEmptyDetail(d)) cache.setMeta(`detail:${args.slug}`, d);
+          if (!isAllEmptyDetail(d) || d.nominee) cache.setMeta(`detail:${args.slug}`, d);
         }
       }
       const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);

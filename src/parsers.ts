@@ -70,6 +70,14 @@ function stripTags(s: string): string {
   return decodeEntities(s.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
+// Banner heading of a submission page: <h2 class="text-default">Nominee - Sep
+// 23, 2026</h2>. Awarded pages carry "Site of the Day - <date>" in the same
+// heading, so this separates a legitimate empty design parse (nominee) from a
+// drifted parser (awarded page that parsed to nothing).
+export function isNomineePage(html: string): boolean {
+  return /<h2 class="text-default">\s*Nominee\b/.test(html);
+}
+
 export function parseDetail(html: string, slug: string): SiteDetails {
   const palette = [
     ...new Set(
@@ -136,6 +144,7 @@ export function parseDetail(html: string, slug: string): SiteDetails {
     technologies,
     elements,
     awards,
+    nominee: isNomineePage(html),
     ogImage: ogMatch ? decodeEntities(ogMatch[1]) : null,
     liveUrl: liveUrl ? decodeEntities(liveUrl) : null,
     score: parseScore(html),
