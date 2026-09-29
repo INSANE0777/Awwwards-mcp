@@ -3,6 +3,24 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.7.1 — 2026-09-29
+
+Daily environment self-check + corrected optional-dependency install hints.
+
+- **Daily env check**: at server startup (once per day, stderr-only, never
+  blocks serving) the server probes playwright with a real chromium launch
+  and resolves ffmpeg-static from its own install location. When captures
+  or motion recordings later fail, the cause was warned about up to a day
+  earlier — and the fix hint prints once, not on every failed capture.
+- **Corrected install hints**: capture/motion hints now say
+  `npm install -g playwright && npx playwright install chromium` /
+  `npm install -g ffmpeg-static` — the server resolves optional deps from
+  its own install location, so a `-D` install in whichever project the
+  agent happens to sit in does not fix a globally-installed server.
+- Failure-tolerant by design: a flaky probe (first-run policy, AV scan)
+  records nothing, so the next start re-checks; every failure is swallowed
+  and stdout is never touched.
+
 ## v1.7.0 — 2026-09-28
 
 > First stable-minor release. npm versions 1.1.0–1.6.0 were the retired
