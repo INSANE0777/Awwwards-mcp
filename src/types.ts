@@ -18,6 +18,10 @@ export interface SiteDetails {
   technologies: string[];
   elements: string[];
   awards: { title: string; date: string }[];
+  // true on Nominee submissions. awwwards.com publishes no jury score, color
+  // palette, technologies or description section for a nominee, so an empty
+  // design parse there is real content, not parser drift.
+  nominee: boolean;
   score: number | null; // displayed overall jury score, null when absent
   // Per-dimension jury scores from the layout-overall chartbar block
   // (Design / Usability / Creativity / Content). Undefined when the page has
