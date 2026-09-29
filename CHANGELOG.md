@@ -3,6 +3,25 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.7.2 — 2026-09-29
+
+Reliability & housekeeping. No runtime tool changes.
+
+- **Parser-drift probe: network rejections no longer masquerade as parser
+  drift.** A raw `fetch()` crash (DNS/reset/classifier network errors)
+  killed the live probe with exit 1, which the workflow reported as
+  "markup changed — parsers need updating" even though zero anchors had
+  been probed. Rejected fetches are now recorded as failed pages and the
+  verdict logic emits its existing honest `fetch-fail` (exit 2) state.
+  This was the root cause of issue #6 (false alarm — the 9/19 committed
+  status was `ok 0/59`, and awwwards.com fetches fine).
+- **Dependency alerts cleared**: vitest + @vitest/mocker bumped to 4.1.11
+  (dev-only; full suite 251/251 green on vitest 4). Supersedes the two
+  Dependabot PRs, which were merged into one local commit.
+- **CI updated** to `actions/checkout@v5` / `actions/setup-node@v5` in all
+  three workflows (fixes the Node 20 deprecation annotation).
+- Removed the stale `elements-motion-dna` worktree (fully merged).
+
 ## v1.7.1 — 2026-09-29
 
 Daily environment self-check + corrected optional-dependency install hints.

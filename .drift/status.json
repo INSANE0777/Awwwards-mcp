@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-19T10:23:36.729Z",
+  "at": "2026-09-29T19:56:37.720Z",
   "mode": "live",
   "pages": [
     {
@@ -23,17 +23,17 @@
       "ok": true
     },
     {
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "status": 200,
       "ok": true
     },
     {
-      "url": "https://www.awwwards.com/sites/cafe-technica",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "status": 200,
       "ok": true
     },
     {
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
       "status": 200,
       "ok": true
     }
@@ -65,7 +65,7 @@
       "parser": "parseListing (award labels)",
       "url": "https://www.awwwards.com/websites/",
       "drift": false,
-      "count": 56
+      "count": 58
     },
     {
       "name": "parseCategories[rollover links]",
@@ -266,7 +266,7 @@
     {
       "name": "parseDetail[tech section]",
       "parser": "parseDetail (tech stack)",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -274,15 +274,14 @@
     {
       "name": "parseElements[section start]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
-      "count": 0,
-      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+      "count": 1
     },
     {
       "name": "parseElements[section end]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -290,7 +289,7 @@
     {
       "name": "parseDetail[description marker]",
       "parser": "parseDetail (description)",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -298,110 +297,42 @@
     {
       "name": "parseDetail[description h3]",
       "parser": "parseDetail (description text)",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:image]",
       "parser": "parseDetail (screenshot)",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:title]",
       "parser": "parseScore + parseElements",
-      "url": "https://www.awwwards.com/sites/black-shard",
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section blobs]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/black-shard",
-      "count": -1,
-      "drift": false,
-      "note": "no section"
-    },
-    {
-      "name": "parseElements[media path scheme]",
-      "parser": "parseElements",
-      "url": "https://www.awwwards.com/sites/black-shard",
-      "count": 0,
-      "drift": false,
-      "note": "no section"
-    },
-    {
-      "name": "parseDetail[tech section]",
-      "parser": "parseDetail (tech stack)",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 0,
-      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
-    },
-    {
-      "name": "parseElements[section start]",
-      "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 1
-    },
-    {
-      "name": "parseElements[section end]",
-      "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 0,
-      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
-    },
-    {
-      "name": "parseDetail[description marker]",
-      "parser": "parseDetail (description)",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 0,
-      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
-    },
-    {
-      "name": "parseDetail[description h3]",
-      "parser": "parseDetail (description text)",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 1
-    },
-    {
-      "name": "parseDetail[og:image]",
-      "parser": "parseDetail (screenshot)",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 1
-    },
-    {
-      "name": "parseDetail[og:title]",
-      "parser": "parseScore + parseElements",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "drift": false,
-      "count": 1
-    },
-    {
-      "name": "parseElements[section blobs]",
-      "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "count": 1,
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "count": 5,
       "drift": false
     },
     {
       "name": "parseElements[media path scheme]",
       "parser": "parseElements",
-      "url": "https://www.awwwards.com/sites/cafe-technica",
-      "count": 1,
+      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "count": 5,
       "drift": false
     },
     {
       "name": "parseDetail[tech section]",
       "parser": "parseDetail (tech stack)",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -409,22 +340,21 @@
     {
       "name": "parseElements[section start]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section end]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
-      "count": 0,
-      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+      "count": 1
     },
     {
       "name": "parseDetail[description marker]",
       "parser": "parseDetail (description)",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -432,36 +362,102 @@
     {
       "name": "parseDetail[description h3]",
       "parser": "parseDetail (description text)",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:image]",
       "parser": "parseDetail (screenshot)",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:title]",
       "parser": "parseScore + parseElements",
-      "url": "https://www.awwwards.com/sites/clarvos",
+      "url": "https://www.awwwards.com/sites/brand-libs",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section blobs]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/clarvos",
-      "count": 8,
+      "url": "https://www.awwwards.com/sites/brand-libs",
+      "count": 5,
       "drift": false
     },
     {
       "name": "parseElements[media path scheme]",
       "parser": "parseElements",
-      "url": "https://www.awwwards.com/sites/clarvos",
-      "count": 8,
+      "url": "https://www.awwwards.com/sites/brand-libs",
+      "count": 5,
+      "drift": false
+    },
+    {
+      "name": "parseDetail[tech section]",
+      "parser": "parseDetail (tech stack)",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseElements[section start]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section end]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description marker]",
+      "parser": "parseDetail (description)",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+    },
+    {
+      "name": "parseDetail[description h3]",
+      "parser": "parseDetail (description text)",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:image]",
+      "parser": "parseDetail (screenshot)",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseDetail[og:title]",
+      "parser": "parseScore + parseElements",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "drift": false,
+      "count": 1
+    },
+    {
+      "name": "parseElements[section blobs]",
+      "parser": "parseDetail + parseElements",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "count": 2,
+      "drift": false
+    },
+    {
+      "name": "parseElements[media path scheme]",
+      "parser": "parseElements",
+      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "count": 2,
       "drift": false
     }
   ],

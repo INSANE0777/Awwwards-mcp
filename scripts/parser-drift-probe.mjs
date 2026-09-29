@@ -292,10 +292,20 @@ async function probeLive() {
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
     if (i > 0) await new Promise((r) => setTimeout(r, 1000));
-    const res = await fetch(group.url, { headers: { "user-agent": UA } });
-    const html = await res.text();
-    const blocked = res.status !== 200 || html.includes("Your Humanity") || html.includes("cf-chl");
-    pages[group.url] = { html, status: res.status, ok: !blocked };
+    let page;
+    try {
+      const res = await fetch(group.url, { headers: { "user-agent": UA } });
+      const html = await res.text();
+      const blocked = res.status !== 200 || html.includes("Your Humanity") || html.includes("cf-chl");
+      page = { html, status: res.status, ok: !blocked };
+    } catch (err) {
+      // Network rejection (DNS, ECONNRESET, …): record as failed page, not a
+      // crash — an unhandled rejection would exit 1 and the workflow would
+      // misreport it as parser drift.
+      console.error(`fetch failed: ${group.url} — ${(err && err.cause && err.cause.code) || err.message}`);
+      page = { html: "", status: 0, ok: false };
+    }
+    pages[group.url] = page;
     // Sampled fetch failures are inconclusive (rows note it); only listing +
     // pinned failures push the run to fetch-fail.
     if (!pages[group.url].ok && group.kind !== "sampled") fetchFailed = true;
