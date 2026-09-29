@@ -10,8 +10,8 @@ import { resolveViewport } from "./viewport.js";
 
 export const CAPTURE_INSTALL_HINT =
   "Full-page capture needs Playwright, which is an optional dependency.\n" +
-  "Install it with:  npm install -D playwright && npx playwright install chromium\n" +
-  "Then retry the capture or structure tool.";
+  "Install it where this server runs (globally works for a global install):  npm install -g playwright && npx playwright install chromium\n" +
+  "Then retry the capture or structure tool (or restart your agent afterward).";
 
 type CaptureResult = { file: string; base64: string } | { error: string };
 

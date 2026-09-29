@@ -296,9 +296,12 @@ describe("search_sites", () => {
       .map((block) => (block as { type: "text"; text: string }).text))
       .toEqual(["Preview #1: stale-0", "Preview #2: stale-1"]);
     expect(res.content.filter((block) => block.type === "image")).toHaveLength(2);
-    expect(thumbnail.mock.calls.map(([path]) => path)).toEqual([
-      "submissions/stale-0.jpg", "submissions/stale-1.jpg",
-    ]);
+    // The two previews fetch concurrently (Promise.all), so the spy's call
+    // order races — assert the set, and let the response-order assertions
+    // above pin the ordering guarantee.
+    expect(new Set(thumbnail.mock.calls.map(([path]) => path))).toEqual(
+      new Set(["submissions/stale-0.jpg", "submissions/stale-1.jpg"]),
+    );
   });
 
   it("keeps a partially filled compact page when its top-up fails", async () => {

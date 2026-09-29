@@ -14,6 +14,7 @@ import { createHandlers, type ToolResponse } from "./server.js";
 import { captureLiveSite } from "./capture.js";
 import { runIndexer, shouldAutoIndex } from "./indexer.js";
 import { checkForUpdate } from "./version-check.js";
+import { checkEnvironment } from "./env-check.js";
 
 // The handlers return ToolResponse, which is structurally identical to the
 // SDK's CallToolResult at runtime ({ content, isError? }). CallToolResult's
@@ -270,5 +271,10 @@ if (shouldAutoIndex(cache)) {
 // Update notice: once a day, compare against the npm registry; stderr-only,
 // never blocks serving. AWWWARDS_AUTO_UPDATE=1 opts into background install.
 checkForUpdate(pkgJson.version);
+
+// Environment notice: once a day, verify playwright/ffmpeg are usable from
+// the server's own install (a real chromium launch, not just an import);
+// stderr-only, never blocks serving.
+checkEnvironment();
 
 await server.connect(new StdioServerTransport());
