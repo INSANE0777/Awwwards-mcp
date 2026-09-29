@@ -1380,3 +1380,98 @@ describe("search_motion handler", () => {
     expect(await urls({ lib: "gsap" })).toEqual(["https://example.com/quiet", "https://example.com/a"]);
   });
 });
+
+describe("new_winners + watch_site", () => {
+  // One listing card per (title, createdAt) with escaped attribute encoding,
+  // matching what parseListing reads in the fixture.
+  const card = (slug: string, title: string, createdAt: number) =>
+    `<li class="col-3 js-collectable" data-collectable-model-value="${JSON.stringify({
+      slug, title, createdAt, id: createdAt, tags: ["WebGL"], type: "submission",
+      images: { thumbnail: `submissions/2026/09/${slug}.jpg` },
+    }).replace(/"/g, "&quot;")}">` +
+    `<a href="/sites/${slug}">card</a>` +
+    `<a class="figure-rollover__bt" href="https://example.com">live</a>` +
+    `<span class="budget-tag--sotd">SOTD</span>` +
+    `<h3 class="avatar-name__title">ToyFight</h3></li>`;
+  const listingFor = (...cards: string[]) => listingHtml.replace(
+    /(<ul class="grid-cards[^>]*>)[\s\S]*(<\/ul>)/,
+    (_m, a, b) => a + cards.join("\n") + b,
+  );
+  const day = (n: number) => Date.UTC(2026, 8, 28 + n) / 1000; // UTC date n offset from Sep 28
+
+  it("new_winners seeds then reports a delta and backfills element records", async () => {
+    const cache = new Cache(tmpDir());
+    const pages: Record<string, string> = {
+      "/websites/sites_of_the_day/": listingFor(
+        card("day-one", "Day One", day(0) - 3600),
+        card("old-one", "Old One", day(-5)),
+      ),
+      "/sites/day-one": elementsPage(2),
+      "/sites/day-two": [
+        `<h2 class="text-default">Elements</h2>`,
+        `<div data-collectable-model-value="${JSON.stringify({
+          collectableTitle: "Hero loop", collectableImage: "element/2026/09/x.mp4",
+        }).replace(/"/g, "&quot;")}"></div>`,
+        `<h2 class="text-default">Color Palette</h2>`,
+      ].join("\n"),
+    };
+    const fetchFn = vi.fn(async (input: any) => {
+      const url = String(input);
+      const p = Object.keys(pages).find((k) => url.includes(k));
+      if (!p) return new Response("not found", { status: 404 });
+      return new Response(pages[p], { status: 200 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const h = createHandlers({ client, cache });
+
+    const asJson = (res: { content: { type: string; text?: string }[] }) =>
+      (res.content[0] as { text: string }).text;
+
+    // First call seeds the baseline (no rows upserted — nothing is "new").
+    const first = await h.new_winners({ award: "sotd" });
+    expect(asJson(first)).toContain("no baseline");
+    expect(cache.countSites()).toBe(0);
+
+    // Next day: one new winner → reported + its Elements section backfilled.
+    pages["/websites/sites_of_the_day/"] = listingFor(
+      card("day-two", "Day Two", day(1)),
+      card("day-one", "Day One", day(0) - 3600),
+      card("old-one", "Old One", day(-5)),
+    );
+    const second = await h.new_winners({ award: "sotd" });
+    expect(asJson(second)).toContain("1 new");
+    expect(asJson(second)).toContain("backfilled");
+    // Backfilled record is searchable.
+    const els = JSON.parse(asJson(await h.search_elements({ query: "Hero loop" })));
+    expect(els.results.some((r: any) => r.title === "Hero loop" && r.source === "site")).toBe(true);
+
+    // Same-day re-poll: nothing new.
+    const third = await h.new_winners({ award: "sotd" });
+    expect(asJson(third)).toContain("0 new");
+  });
+
+  it("watch_site add/list seeds, then reports deltas from refreshed rows", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "alpha", title: "Alpha", createdAt: day(-1), studio: "ToyFight" }),
+      site({ slug: "beta", title: "Beta", createdAt: day(0), studio: "Other" }),
+    ]);
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const body = async (args: any) => ((await h.watch_site(args)).content[0] as any).text;
+
+    expect(await body({ action: "add", kind: "studio", pattern: "toyfight", award: "sotd" })).toContain("Watching");
+    // First list just seeds (no delta line).
+    expect(await body({ action: "list" })).not.toContain("NEW since last check");
+
+    // A new ToyFight site appears in the cache (as new_winners would seed it).
+    cache.upsertSites([site({ slug: "gamma", title: "Gamma", createdAt: day(1), studio: "ToyFight" })]);
+    const out = await body({ action: "list" });
+    expect(out).toContain("toyfight");
+    expect(out).toContain("NEW since last check");
+    expect(out).toContain("/sites/gamma");
+
+    expect(await body({ action: "remove", kind: "studio", pattern: "toyfight" })).toContain("Removed");
+    expect(await body({ action: "remove", kind: "studio", pattern: "toyfight" })).toContain("No watch");
+  });
+});

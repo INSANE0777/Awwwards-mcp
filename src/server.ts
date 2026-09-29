@@ -12,6 +12,7 @@ import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
+import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -181,6 +182,14 @@ export interface Handlers {
     scrubOnly?: boolean;
     hasPins?: boolean;
     limit?: number;
+  }): Promise<ToolResponse>;
+  new_winners(args: { award?: "sotd" | "developer" | "honorable" }): Promise<ToolResponse>;
+  watch_site(args: {
+    action: "add" | "list" | "remove";
+    kind?: "studio" | "tag" | "url";
+    pattern?: string;
+    award?: "sotd" | "developer" | "honorable";
+    note?: string;
   }): Promise<ToolResponse>;
 }
 
@@ -976,6 +985,110 @@ export function createHandlers(deps: {
     }
   }
 
+  // ---- longitudinal monitoring ----
+
+  async function new_winners(args: { award?: "sotd" | "developer" | "honorable" }): Promise<ToolResponse> {
+    try {
+      const res = await fetchNewWinners(client, cache, { award: args.award ?? "sotd" });
+      // Seed the sites cache too — next search_sites serves these rows
+      // without re-fetching the same listing.
+      if (res.newWinners.length > 0) cache.upsertSites(res.newWinners);
+      // Backfill: index each winner's Elements section as source="site"
+      // component records so search_elements covers fresh winners without
+      // waiting for the gallery crawl. One page fetch per winner; per-winner
+      // failures never abort the rest.
+      let backfilled = 0;
+      if (res.newWinners.length > 0) {
+        const records: ElementRecord[] = [];
+        for (const site of res.newWinners) {
+          try {
+            const html = await client.getHtml(site.detailPath);
+            records.push(...recordsFromSiteHtml(html, site, Math.floor(Date.now() / 1000)));
+            backfilled++;
+          } catch {
+            /* site page 404/blocked — the detail remains fetchable on demand */
+          }
+        }
+        if (records.length > 0) cache.upsertElements(records);
+      }
+      const body = res.isNewArrivals
+        ? `First poll for ${res.day} — no baseline yet, so there is no delta. ` +
+          `${res.totalInListing} current listing entries stored as the baseline; call again after the next winners land.`
+        : `${res.newWinners.length} new ${AWARD_FILTER_LABELS[args.award ?? "sotd"]} winner(s) for ${res.day} ` +
+          `(listing shows ${res.totalInListing})` +
+          (backfilled > 0 ? `; ${backfilled} site page(s) backfilled into the component index.` : ".") +
+          ` Search components with search_elements (source hits show siteSlug).`;
+      return {
+        content: [
+          text(body),
+          ...(res.isNewArrivals
+            ? []
+            : [text(res.newWinners.map(summarizeSite).join("\n\n") || "(no unreported winners — poll again tomorrow)")]),
+        ],
+      };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function watch_site(args: {
+    action: "add" | "list" | "remove";
+    kind?: "studio" | "tag" | "url";
+    pattern?: string;
+    award?: "sotd" | "developer" | "honorable";
+    note?: string;
+  }): Promise<ToolResponse> {
+    try {
+      if (args.action === "list") {
+        const watches = listWatches(cache);
+        if (watches.length === 0) return { content: [text("No watches. Add one with action=add.")] };
+        // Evaluate against the freshest cached listing rows; watch_site itself
+        // never fetches — new_winners/search_sites keep this supply fresh.
+        const rows = cache.getSites(SITE_TTL_MS);
+        const deltas = rows.length > 0 ? checkWatches(cache, rows) : [];
+        const lines = watches.map((w) => {
+          const delta = deltas.find((d) => d.watch.kind === w.kind && d.watch.pattern === w.pattern);
+          const matches = rows.filter((s) => matchesWatch(w, s));
+          return (
+            `- [${w.kind}] ${w.pattern}${w.award ? ` (award: ${w.award})` : ""}` +
+            `${w.note ? ` — ${w.note}` : ""}\n` +
+            `  currently matching: ${matches.length} site(s)` +
+            (matches.length ? `: ${matches.map((s) => s.slug).join(", ")}` : "") +
+            `\n  last checked: ${w.lastCheckedAt ? new Date(w.lastCheckedAt).toISOString() : "never (list again after rows load to seed)"}` +
+            (delta ? `\n  NEW since last check: ${delta.matches.map((s) => `${s.title} (/sites/${s.slug})`).join("; ")}` : "")
+          );
+        });
+        return { content: [text(lines.join("\n"))] };
+      }
+      if (!args.kind || !args.pattern) {
+        return { content: [text("add/remove need kind (studio|tag|url) and pattern.")], isError: true };
+      }
+      if (args.action === "remove") {
+        return {
+          content: [
+            text(removeWatch(cache, args.kind, args.pattern) ? `Removed watch [${args.kind}] ${args.pattern}.` : `No watch [${args.kind}] ${args.pattern}.`),
+          ],
+        };
+      }
+      const rec = await addWatch(cache, {
+        kind: args.kind,
+        pattern: args.pattern,
+        award: args.award,
+        note: args.note,
+      });
+      return {
+        content: [
+          text(
+            `Watching [${rec.kind}] ${rec.pattern}. Poll with action=list after new winners land ` +
+              "(new_winners also advances the baseline any watch compares against).",
+          ),
+        ],
+      };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   return {
     search_sites,
     get_site_details,
@@ -990,5 +1103,7 @@ export function createHandlers(deps: {
     record_site_motion,
     get_motion_dna,
     search_motion,
+    new_winners,
+    watch_site,
   };
 }

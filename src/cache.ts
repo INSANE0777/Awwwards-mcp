@@ -14,7 +14,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS sites (
     slug TEXT PRIMARY KEY, id INTEGER, title TEXT, createdAt INTEGER,
     tags TEXT, thumbnailPath TEXT, liveUrl TEXT, detailPath TEXT,
-    awards TEXT, fetchedAt INTEGER
+    awards TEXT, studio TEXT, fetchedAt INTEGER
   );
   CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY, value TEXT, fetchedAt INTEGER
@@ -100,6 +100,7 @@ interface SiteRow {
   liveUrl: string | null;
   detailPath: string;
   awards: string;
+  studio: string | null;
   fetchedAt: number;
 }
 
@@ -114,6 +115,7 @@ function rowToSite(r: SiteRow): SiteSummary {
     liveUrl: r.liveUrl,
     detailPath: r.detailPath,
     awards: JSON.parse(r.awards),
+    studio: r.studio ?? null,
   };
 }
 
@@ -191,6 +193,12 @@ export class Cache {
       } catch {
         /* column already exists */
       }
+      // Same lazy migration for sites.studio (monitoring feature).
+      try {
+        db.exec("ALTER TABLE sites ADD COLUMN studio TEXT");
+      } catch {
+        /* column already exists */
+      }
       if (this.ftsAvailable === null) {
         try {
           db.exec(FTS_SCHEMA);
@@ -243,13 +251,14 @@ export class Cache {
   upsertSites(sites: SiteSummary[]): void {
     this.withDb((db) => {
       const stmt = db.prepare(
-        `INSERT INTO sites (slug, id, title, createdAt, tags, thumbnailPath, liveUrl, detailPath, awards, fetchedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sites (slug, id, title, createdAt, tags, thumbnailPath, liveUrl, detailPath, awards, studio, fetchedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(slug) DO UPDATE SET
            id=excluded.id, title=excluded.title, createdAt=excluded.createdAt,
            tags=excluded.tags, thumbnailPath=excluded.thumbnailPath,
            liveUrl=excluded.liveUrl, detailPath=excluded.detailPath,
-           awards=excluded.awards, fetchedAt=excluded.fetchedAt`,
+           awards=excluded.awards, studio=COALESCE(excluded.studio, sites.studio),
+           fetchedAt=excluded.fetchedAt`,
       );
       const t = this.now();
       // One transaction for the whole batch: each autocommitted INSERT pays a
@@ -260,7 +269,8 @@ export class Cache {
         for (const s of sites) {
           stmt.run(
             s.slug, s.id, s.title, s.createdAt, JSON.stringify(s.tags),
-            s.thumbnailPath, s.liveUrl, s.detailPath, JSON.stringify(s.awards), t,
+            s.thumbnailPath, s.liveUrl, s.detailPath, JSON.stringify(s.awards),
+            s.studio ?? null, t,
           );
         }
         db.exec("COMMIT");
@@ -354,6 +364,17 @@ export class Cache {
   deleteMeta(key: string): void {
     this.withDb((db) => {
       db.prepare("DELETE FROM meta WHERE key = ?").run(key);
+    });
+  }
+
+  // All meta rows whose key starts with prefix — watchlist storage keeps one
+  // key per watch, so listing needs a scan rather than an exact key.
+  listMetaPrefix<T>(prefix: string): T[] {
+    return this.withDb((db) => {
+      const rows = db
+        .prepare("SELECT value FROM meta WHERE key LIKE ? ESCAPE '\\' ORDER BY key")
+        .all(prefix.replace(/[\\%_]/g, (c) => `\\${c}`) + "%") as { value: string }[];
+      return rows.map((r) => JSON.parse(r.value) as T);
     });
   }
 

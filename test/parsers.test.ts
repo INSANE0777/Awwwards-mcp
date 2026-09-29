@@ -10,6 +10,7 @@ import {
   parseScore,
   parseElementsGallery,
   parseElementGalleryPage,
+  parseElementCategories,
   isNomineePage,
 } from "../src/parsers.js";
 
@@ -361,6 +362,41 @@ describe("parseElementsGallery", () => {
 
   it("returns null for truly empty input (drift signal)", () => {
     expect(parseElementsGallery("")).toBeNull();
+  });
+});
+
+// Taxonomy facets from the gallery filter nav (nav-filters__subitem links).
+describe("parseElementCategories", () => {
+  const galleryHtml = readFixture("elements-listing.html");
+
+  it("extracts the 46 taxonomy facets from the live snapshot's filter nav", () => {
+    const facets = parseElementCategories(galleryHtml);
+    expect(facets).not.toBeNull();
+    expect(facets).toHaveLength(46);
+    // Including the unobvious real facets.
+    for (const f of ["404_page", "about_us", "CTA", "FAQ", "microcopy_and_ux_writing", "video"]) {
+      expect(facets).toContain(f);
+    }
+  });
+
+  it("deduplicates facets", () => {
+    const facets = parseElementCategories(galleryHtml)!;
+    expect(new Set(facets).size).toBe(facets.length);
+  });
+
+  it("returns [] for a page with no facet nav (item pages)", () => {
+    // Element item pages have no filter nav — and no /elements/ links at all.
+    expect(parseElementCategories(readFixture("elements-item.html"))).toEqual([]);
+  });
+
+  it("tolerates pagination links (no /elements/?page= leakage)", () => {
+    // Pagination hrefs must not appear as facets — the subitem anchor matters.
+    const facets = parseElementCategories(readFixture("elements-listing.html"))!;
+    for (const f of facets) expect(f).toMatch(/^[\w-]+$/);
+  });
+
+  it("returns null for truly empty input (drift signal)", () => {
+    expect(parseElementCategories("")).toBeNull();
   });
 });
 

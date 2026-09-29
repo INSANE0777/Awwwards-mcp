@@ -47,6 +47,9 @@ export function parseListing(html: string): SiteSummary[] {
     const awards = [...card.matchAll(/budget-tag--([a-z-]+)/g)].map(
       (m) => AWARD_LABELS[m[1]] ?? m[1],
     );
+    // Studio attribution: <h3 class="avatar-name__title">ToyFight</h3> inside
+    // the card's avatar block. Absent on some page kinds → null.
+    const studioMatch = card.match(/avatar-name__title">([^<]+)</);
     sites.push({
       id: meta.id ?? 0,
       slug: meta.slug,
@@ -57,6 +60,7 @@ export function parseListing(html: string): SiteSummary[] {
       liveUrl: liveMatch ? decodeEntities(liveMatch[1]) : null,
       detailPath: detailMatch[1],
       awards: [...new Set(awards)],
+      studio: studioMatch ? decodeEntities(studioMatch[1].trim()) : null,
     });
   }
   return sites;
@@ -263,6 +267,19 @@ export function parseElements(html: string): ElementMedia[] | null {
 // [] = page parsed but gallery has zero tiles (legitimate empty).
 export function parseElementsGallery(html: string): string[] | null {
   const matches = [...html.matchAll(/href="\/inspiration\/([\w-]+)\/?"/g)].map((m) => m[1]);
+  if (matches.length === 0) return html.length === 0 ? null : [];
+  return [...new Set(matches)];
+}
+
+// Taxonomy facets from a gallery page's filter nav (nav-filters__subitem
+// links into /elements/<category>/). Anchoring the match on the subitem class
+// excludes pagination (?page=N) and card-level /elements/ noise. Verified
+// against the 2026-09-28 fixture: 46 facets, including the unobvious
+// 404_page/thumbnail/mobile_thumbnail which ARE real facet nav entries.
+export function parseElementCategories(html: string): string[] | null {
+  const matches = [...html.matchAll(/nav-filters__subitem[^>]*href="\/elements\/([\w-]+)\/?"/g)].map(
+    (m) => m[1],
+  );
   if (matches.length === 0) return html.length === 0 ? null : [];
   return [...new Set(matches)];
 }

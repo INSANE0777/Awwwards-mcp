@@ -11,6 +11,10 @@ it to ground design decisions in real, proven references instead of guessing.
 
 ## When to use this skill
 
+0. **First time on this machine?** If `~/.awwwards-mcp/preferences.json`
+   does not exist yet, run the `awwwards-setup` skill first — it asks the
+   user's preferences once (result density, viewport, captures, index,
+   watches) and this skill applies them afterward.
 1. **During site builds** — before writing any UI code, gather references and
    state a design direction.
 2. **Standalone research** — the user wants inspiration, trends, or examples
@@ -117,9 +121,22 @@ Run this loop before building anything visual:
 | `capture_live_site` | `url` (absolute URL) | Full-page PNG saved to disk + inline image | Requires the optional playwright dependency (`npm install -g playwright && npx playwright install chromium`). |
 | `analyze_page_structure` | `url` (absolute URL or `file://` path), `maxBands` (cap on returned bands, default 40) | JSON: `title`, `totalHeight`, and an ordered band map (`index`, `tag`, `label`, `background`, `offsetTop`, `height`, `textStart` (first ~60 chars of the band's text) per band) | Requires playwright. Run it on BOTH the reference and your build (step 8) and compare band maps — count, order, backgrounds, heights — never just total height. |
 | `record_site_motion` | `url` (absolute URL), `frames` (filmstrip tile count, 4–36, default 16 → a 4x4 grid) | Inline filmstrip JPEG of a motion-through pass (preloader dwell, slow scroll, hover/cursor interactions) + the saved .webm path as text | Requires playwright + ffmpeg-static. Runs a ~30 s scripted pass — heavier than a capture, use when motion matters (step on from static captures). |
+| `new_winners` | `award` (`sotd` default, or `developer`/`honorable`) | Today's freshly-crowned winners since the last poll, as site cards; first-ever call seeds a baseline and dumps the listing instead | UTC-day granular. Each first-seen winner's Elements section is auto-backfilled into the `source:"site"` element corpus — new winners are searchable by elements immediately without gallery indexing. Longitudinal monitoring: call periodically during a session to catch new SOTDs as they land. |
+| `watch_site` | `action` (`add`\|`list`\|`remove`), `kind` (`studio`\|`tag`\|`url`), `pattern`, optional `award`, `note` | list: matching sites per watch + `NEW since last check` deltas; add/remove confirm | Never fetches — evaluates against the freshest cached listing, so run `new_winners` or `search_sites` first (the first `list` only seeds its baseline; a second `list` after rows load reports deltas). url watches take the site slug (e.g. `l-i-s-a`); studio watches are case-insensitive substrings. |
 
 All image results arrive as MCP image content blocks — look at them, don't
 just read the text blocks.
+
+## Staying current
+
+For research that should reflect what's winning *now* (trend questions,
+"latest" anything), open the session with `new_winners` — it reports today's
+freshly-crowned SOTD/Developer/Honorable winners and quietly folds each
+winner's elements into the searchable corpus. To track a studio, tag, or
+specific site over time, add a watch (`watch_site`, `action: "add"`,
+`kind: studio|tag|url`) after your first sweep; every later `new_winners` /
+`search_sites` run refreshes the pool and `watch_site list` reports what's
+new per watch. Watches never fetch on their own — the sweep feeds them.
 
 ## Index & capture ops
 
