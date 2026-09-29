@@ -10,6 +10,7 @@ import {
   parseScore,
   parseElementsGallery,
   parseElementGalleryPage,
+  isNomineePage,
 } from "../src/parsers.js";
 
 const FIXTURES = join(__dirname, "fixtures");
@@ -417,5 +418,32 @@ describe("parseElementGalleryPage", () => {
 
   it("returns null on empty/unknown page", () => {
     expect(parseElementGalleryPage("")).toBeNull();
+  });
+});
+
+describe("isNomineePage", () => {
+  it("flags the Nominee banner", () => {
+    expect(isNomineePage("<div class=\"c-heading text-center\"> <div class=\"c-heading__top\"> <h2 class=\"text-default\">Nominee - Sep 23, 2026</h2></div></div><meta property=\"og:title\" content=\"Brandon Yasin\" /><meta property=\"og:image\" content=\"https://s.awwwards.com/shot.jpg\" />")).toBe(true);
+  });
+
+  it("does not flag an awarded page", () => {
+    expect(isNomineePage(detail())).toBe(false);
+  });
+});
+
+describe("parseDetail on a nominee page", () => {
+  it("reports nominee true and leaves award-only fields empty", () => {
+    const d = parseDetail("<div class=\"c-heading text-center\"> <div class=\"c-heading__top\"> <h2 class=\"text-default\">Nominee - Sep 23, 2026</h2></div></div><meta property=\"og:title\" content=\"Brandon Yasin\" /><meta property=\"og:image\" content=\"https://s.awwwards.com/shot.jpg\" />", "brandon-yasin");
+    expect(d.nominee).toBe(true);
+    expect(d.palette).toEqual([]);
+    expect(d.technologies).toEqual([]);
+    expect(d.awards).toEqual([]);
+    expect(d.score).toBeNull();
+  });
+
+  it("still yields title and screenshot, so the detail call is usable", () => {
+    const d = parseDetail("<div class=\"c-heading text-center\"> <div class=\"c-heading__top\"> <h2 class=\"text-default\">Nominee - Sep 23, 2026</h2></div></div><meta property=\"og:title\" content=\"Brandon Yasin\" /><meta property=\"og:image\" content=\"https://s.awwwards.com/shot.jpg\" />", "brandon-yasin");
+    expect(d.title).toBe("Brandon Yasin");
+    expect(d.ogImage).toBe("https://s.awwwards.com/shot.jpg");
   });
 });

@@ -426,7 +426,7 @@ describe("compare_sites", () => {
     cache.upsertSites([site({ slug: "first", title: "Fallback title", liveUrl: "https://fallback.test", awards: ["Site of the Day"] })]);
     const base = {
       title: null, description: null, palette: ["#123456"], technologies: ["WebGL"],
-      elements: ["3D"], awards: [], score: 7.5, ogImage: null, liveUrl: null,
+      elements: ["3D"], awards: [], score: 7.5, ogImage: null, liveUrl: null, nominee: false,
     };
     cache.setMeta("detail:first", { ...base, slug: "first", juryDimensions: { design: 8, usability: 7, creativity: 9, content: 6 } });
     cache.setMeta("detail:second", { ...base, slug: "second", title: "Second", liveUrl: "https://second.test", awards: [{ title: "Developer Award", date: "2026-09-01" }] });
@@ -505,6 +505,41 @@ describe("compare_sites", () => {
     expect(cache.getMeta("detail:broken", SITE_TTL)).toBeNull();
     expect(cache.getMeta("elements:broken", SITE_TTL)).toBeNull();
     expect(fetchFn.mock.calls.map((call: any[]) => String(call[0]))).toEqual(["https://www.awwwards.com/sites/broken"]);
+  });
+
+  it("compares a nominee with an awarded site and reports nominee status", async () => {
+    const cache = new Cache(tmpDir());
+    const fetchFn = vi.fn(async (url: any) =>
+      new Response(
+        String(url).includes("/sites/brandon-yasin")
+          ? "<div class=\"c-heading text-center\"> <div class=\"c-heading__top\"> <h2 class=\"text-default\">Nominee - Sep 23, 2026</h2></div></div><meta property=\"og:title\" content=\"Brandon Yasin\" /><meta property=\"og:image\" content=\"https://s.awwwards.com/shot.jpg\" />"
+          : readFileSync(join(FIXTURES, "detail.html"), "utf8"),
+        { status: 200 },
+      ));
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const h = createHandlers({ client, cache });
+    const res = await h.compare_sites({ slugs: ["brandon-yasin", "l-i-s-a"] });
+    expect(res.isError).toBeUndefined();
+    const { sites } = JSON.parse((res.content[0] as any).text);
+    expect(sites[0].nominee).toBe(true);
+    expect(sites[0].title).toBe("Brandon Yasin");
+    expect(sites[0].liveUrl).toBeNull();
+    expect(sites[1].nominee).toBe(false);
+    expect(sites[1].palette.length).toBeGreaterThan(0);
+    // The nominee parse is real content, so the second call is cache-only.
+    await h.compare_sites({ slugs: ["brandon-yasin", "l-i-s-a"] });
+    const pageCalls = fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/sites/"));
+    expect(pageCalls.length).toBe(2);
+  });
+
+  it("still rejects parser drift on an awarded page during comparison", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: (async () => new Response("<html><body>nothing</body></html>", { status: 200 })) as unknown as typeof fetch,
+    });
+    const res = await createHandlers({ client, cache }).compare_sites({ slugs: ["a-one", "b-two"] });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("layout may have changed");
   });
 });
 
@@ -631,6 +666,20 @@ describe("empty-parse guards", () => {
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("parsed 0 categories");
     expect(cache.getMeta<any>("categories", 30 * 24 * 60 * 60 * 1000)).toBeNull();
+  });
+
+  it("get_site_details returns nominee data instead of a parser-drift error", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({
+      fetchFn: (async () => new Response("<div class=\"c-heading text-center\"> <div class=\"c-heading__top\"> <h2 class=\"text-default\">Nominee - Sep 23, 2026</h2></div></div><meta property=\"og:title\" content=\"Brandon Yasin\" /><meta property=\"og:image\" content=\"https://s.awwwards.com/shot.jpg\" />", { status: 200 })) as unknown as typeof fetch,
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_details({ slug: "brandon-yasin" });
+    expect(res.isError).toBeFalsy();
+    const body = (res.content[0] as any).text;
+    expect(body).toContain("Brandon Yasin");
+    expect(body).toContain("Nominee");
+    expect(cache.getMeta<any>("detail:brandon-yasin", 7 * 24 * 60 * 60 * 1000)).toBeTruthy();
   });
 
   it("get_site_details errors instead of caching an empty parse", async () => {
