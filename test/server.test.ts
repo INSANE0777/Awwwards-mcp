@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import { utcDayStart } from "../src/feed.js";
 import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
@@ -1400,7 +1401,9 @@ describe("new_winners + watch_site", () => {
     /(<ul class="grid-cards[^>]*>)[\s\S]*(<\/ul>)/,
     (_m, a, b) => a + cards.join("\n") + b,
   );
-  const day = (n: number) => Date.UTC(2026, 8, 28 + n) / 1000; // UTC date n offset from Sep 28
+  // Test-controlled clock: UTC noon on synthetic "day 0" (2026-09-28).
+  const now = { ms: Date.UTC(2026, 8, 28, 12) };
+  const day = (n: number) => Date.UTC(2026, 8, 28 + n) / 1000; // UTC date n offset from day 0 (2026-09-28)
 
   it("new_winners seeds then reports a delta and backfills element records", async () => {
     const cache = new Cache(tmpDir());
@@ -1425,7 +1428,7 @@ describe("new_winners + watch_site", () => {
       return new Response(pages[p], { status: 200 });
     });
     const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
-    const h = createHandlers({ client, cache });
+    const h = createHandlers({ client, cache, now: () => now.ms });
 
     const asJson = (res: { content: { type: string; text?: string }[] }) =>
       (res.content[0] as { text: string }).text;
@@ -1435,7 +1438,8 @@ describe("new_winners + watch_site", () => {
     expect(asJson(first)).toContain("no baseline");
     expect(cache.countSites()).toBe(0);
 
-    // Next day: one new winner → reported + its Elements section backfilled.
+    // Next day: advance the test clock to Sep 29 — one new winner → reported + Elements backfilled.
+    now.ms = Date.UTC(2026, 8, 29, 12);
     pages["/websites/sites_of_the_day/"] = listingFor(
       card("day-two", "Day Two", day(1)),
       card("day-one", "Day One", day(0) - 3600),
@@ -1448,7 +1452,7 @@ describe("new_winners + watch_site", () => {
     const els = JSON.parse(asJson(await h.search_elements({ query: "Hero loop" })));
     expect(els.results.some((r: any) => r.title === "Hero loop" && r.source === "site")).toBe(true);
 
-    // Same-day re-poll: nothing new.
+    // Same-day re-poll (clock still Sep 29): nothing new.
     const third = await h.new_winners({ award: "sotd" });
     expect(asJson(third)).toContain("0 new");
   });
