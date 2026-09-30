@@ -204,8 +204,12 @@ export function createHandlers(deps: {
   analyzeFn?: AnalyzeFn;
   motionFn?: MotionFn;
   motionDnaFn?: MotionDnaFn;
+  // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
+  // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
+  now?: () => number;
 }): Handlers {
   const { client, cache } = deps;
+  const nowMs = deps.now ?? Date.now;
 
   // Which filter wins the URL (combined filter URLs 404 on awwwards.com).
   const urlSource = (f: SearchArgs): "color" | "award" | "technology" | "tag" | "none" =>
@@ -989,7 +993,7 @@ export function createHandlers(deps: {
 
   async function new_winners(args: { award?: "sotd" | "developer" | "honorable" }): Promise<ToolResponse> {
     try {
-      const res = await fetchNewWinners(client, cache, { award: args.award ?? "sotd" });
+      const res = await fetchNewWinners(client, cache, { award: args.award ?? "sotd", now: nowMs });
       // Seed the sites cache too — next search_sites serves these rows
       // without re-fetching the same listing.
       if (res.newWinners.length > 0) cache.upsertSites(res.newWinners);
@@ -1003,7 +1007,7 @@ export function createHandlers(deps: {
         for (const site of res.newWinners) {
           try {
             const html = await client.getHtml(site.detailPath);
-            records.push(...recordsFromSiteHtml(html, site, Math.floor(Date.now() / 1000)));
+            records.push(...recordsFromSiteHtml(html, site, Math.floor(nowMs() / 1000)));
             backfilled++;
           } catch {
             /* site page 404/blocked — the detail remains fetchable on demand */
