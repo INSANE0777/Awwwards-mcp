@@ -88,6 +88,7 @@ server.tool(
     count: z.number().int().min(1).max(12).default(6),
     page: z.number().int().min(1).default(1),
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.search_sites(args)),
 );
 
@@ -100,6 +101,7 @@ server.tool(
       .regex(/^[\w-]+$/)
       .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.get_site_details(args)),
 );
 
@@ -111,6 +113,7 @@ server.tool(
       .refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "Site slugs must be distinct")
       .describe("Two or three distinct site slugs from search_sites"),
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.compare_sites(args)),
 );
 
@@ -118,6 +121,7 @@ server.tool(
   "get_index_status",
   "Read offline index status: cached site count, progress, last successful finish and error, lock state and freshness. No live requests.",
   {},
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   () => asMcpResult(handlers.get_index_status()),
 );
 
@@ -130,6 +134,7 @@ server.tool(
       .regex(/^[\w-]+$/)
       .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.get_site_elements(args)),
 );
 
@@ -146,7 +151,7 @@ server.tool(
     stack: z.array(z.string()).describe("Built-with tokens, e.g. ['gsap', 'webgl']").optional(),
     limit: z.number().int().min(1).max(20).default(8),
   },
-  { readOnlyHint: true },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.search_elements(args)),
 );
 
@@ -156,7 +161,7 @@ server.tool(
   {
     id: z.string().describe("Element slug from search_elements"),
   },
-  { readOnlyHint: true },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   (args) => asMcpResult(handlers.get_element(args)),
 );
 
@@ -164,6 +169,7 @@ server.tool(
   "list_categories",
   "List the filter taxonomy available on Awwwards: color hexes and tag/technology slugs usable with search_sites.",
   {},
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   () => asMcpResult(handlers.list_categories()),
 );
 
@@ -175,6 +181,7 @@ server.tool(
     waitStrategy: waitStrategySchema,
     viewport: viewportSchema,
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
 
@@ -187,6 +194,7 @@ server.tool(
     waitStrategy: waitStrategySchema,
     viewport: viewportSchema,
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
 );
 
@@ -205,6 +213,7 @@ server.tool(
     waitStrategy: waitStrategySchema,
     viewport: viewportSchema,
   },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.record_site_motion(args)),
 );
 
@@ -215,7 +224,7 @@ server.tool(
     url: z.string().url().describe("Absolute site URL"),
     recapture: z.boolean().default(false).describe("Force a fresh live capture even if a recent record exists"),
   },
-  { readOnlyHint: true },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.get_motion_dna(args)),
 );
 
@@ -228,7 +237,7 @@ server.tool(
     hasPins: z.boolean().default(false).describe("Only sites that pin sections"),
     limit: z.number().int().min(1).max(50).default(20),
   },
-  { readOnlyHint: true },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   (args) => asMcpResult(handlers.search_motion(args)),
 );
 
@@ -239,7 +248,8 @@ server.tool(
     award: z.enum(["sotd", "developer", "honorable"]).default("sotd")
       .describe("Which winners feed to poll"),
   },
-  { readOnlyHint: true },
+  // Writes the poll baseline, so results change the next call — not idempotent.
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.new_winners(args)),
 );
 
@@ -255,6 +265,8 @@ server.tool(
       .describe("Restrict a watch to one award feed"),
     note: z.string().optional().describe("Why you're watching (free text)"),
   },
+  // add/remove mutate the watchlist, so the tool as a whole is not read-only.
+  { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.watch_site(args)),
 );
 
