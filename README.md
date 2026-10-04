@@ -4,6 +4,8 @@ Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
 sourced from the web's best award-winning websites.
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-12ujax?v=fcf2750cbf00b4513f135f425d3afdcd)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-12ujax?s=readme)
+
 <a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="480"></a>
 
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
