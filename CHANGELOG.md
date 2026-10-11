@@ -3,6 +3,20 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.8.0 — 2026-10-12
+
+Deterministic design briefs and evidence-backed interaction guidance.
+
+- Added the `create_design_brief` MCP tool for cited, versioned briefs from
+  shortlisted Awwwards references.
+- Reused cached site details, element metadata, and Motion DNA; optional
+  structure analysis runs only when requested.
+- Added an Interaction Plan for observed cursor/hover, scroll, entrance/reveal,
+  easing, and duration signals, with reduced-motion and keyboard-access
+  guidance. Missing evidence is reported rather than inferred.
+- Documented the design-brief workflow in the `awwwards-inspiration` skill and
+  README.
+
 ## v1.7.2 — 2026-09-29
 
 Reliability & housekeeping. No runtime tool changes.
