@@ -39,7 +39,8 @@ Run this loop before building anything visual:
    (`"magazines"` finds Magazine-tagged sites, best matches first); multi-word
    queries keep AND semantics — both tokens must hit the same site.
 3b. **Techniques registry:** `skills/_memory/techniques.json` catalogs researched how-tos per domain (video-understanding, motion-detection, ui-structure, micro-interactions, images). Consult it when a step needs a method — it grows via the flywheel.
-4. **Live reference URL named? Capture it full-page first.** (and later capture
+4. **Synthesize the direction.** Once you have 2–5 shortlisted slugs, call `create_design_brief` with those slugs and the user's non-blank project goal. Optionally include `audience` and concrete `constraints`. Use the returned shared signals, deliberate outliers, build constraints, evidence, and limitations to define an original direction — do not copy any single reference. Set `includeStructure: true` only when optional page-band evidence is needed; it may run browser analysis for sources with usable live URLs. Cached Motion DNA is included when available, but the brief never records motion automatically.
+5. **Live reference URL named? Capture it full-page first.** (and later capture
    your own build the same way — compare both against each other) If the user
    points at a specific live site (e.g. "recreate cerebrium.ai"), call
    `capture_live_site` on that URL before anything else and design from the
@@ -49,12 +50,8 @@ Run this loop before building anything visual:
    layouts, contrast breaks, footer) were never visible in them. For
    mobile-excellence references pass `viewport: "mobile"` — and capture BOTH
    viewports when the desktop and mobile designs diverge.
-5. **Get the design DNA.** Call `get_site_details` on the top pick for its
-   palette, technologies, design elements, awards, and description. If it
-   reports a layout-drift error, fall back to judging the shortlisted
-   screenshots, `get_site_elements` (which uses a different parser), or a
-   `capture_live_site` of the site's URL for a first-hand full-page view.
-6. **Study MOTION before building (element videos, not posters).** Call
+6. **Get the design DNA as follow-up evidence.** Call `get_site_details` on the top pick when the brief reports missing or weak detail evidence, or when a specific source needs deeper inspection. If it reports a layout-drift error, fall back to judging the shortlisted screenshots, `get_site_elements` (which uses a different parser), or a `capture_live_site` of the site's URL for a first-hand full-page view.
+7. **Study MOTION before building (element videos, not posters).** Call
    `get_site_elements` on shortlisted sites — it returns per-element video
    URLs (preloader, page transition, case study, about…). **Download those
    videos and tile them at 1–2 fps BEFORE writing any animation code**:
@@ -67,7 +64,7 @@ Run this loop before building anything visual:
    IS the design: every reference animation you ship must trace to frames
    you actually studied, and reference videos pass through
    `showcase/ref-motion/` as the design's evidence trail.
-7. **State the design direction before writing code.** In prose: palette
+8. **State the design direction before writing code.** In prose: palette
    (hexes from the references), type mood, layout patterns, page
    architecture (one page vs separate horizontal sections — judge this from
    the reference passages you studied in steps 4–6, not habit), and tech
@@ -75,7 +72,7 @@ Run this loop before building anything visual:
    marquee frontend skills, prefer proven patterns (GSAP ScrollTrigger for
    horizontal scroll chapters, Lenis for smooth scroll) over hand-rolled
    scroll math.
-8. **Verify structure, then polish.** After building, capture your own build
+9. **Verify structure, then polish.** After building, capture your own build
    full-page (`capture_live_site` on its `file://` or served URL) and run
    `analyze_page_structure` on BOTH the reference and the build. Compare band
    maps section by section (count, order, backgrounds, heights). Match the
