@@ -43,7 +43,7 @@ queries keep AND semantics: every token must hit the same site.
 2. Call `create_design_brief` with the slugs and a required project goal.
 3. Use its Markdown direction and versioned JSON; set `includeStructure: true` only when optional browser-derived section-band evidence is needed.
 
-The response separates observed shared signals from one-site outliers, names evidence gaps, and never records motion automatically.
+The response separates observed shared signals from one-site outliers, names evidence gaps, and never records motion automatically. Its Interaction Plan applies only evidence-backed cursor/hover, scroll, entrance/reveal, easing, and duration cues; empty fields mean the brief has no supporting evidence, not that an effect should be invented. It also carries a `prefers-reduced-motion`, content-access, and keyboard-access guardrail.
 
 **Data posture**: element records store metadata + media URLs pointing at
 awwwards' own CDN — nothing is mirrored. Motion DNA records are local
