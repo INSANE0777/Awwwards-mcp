@@ -40,6 +40,28 @@ describe("createDesignBrief", () => {
     expect(constrained.direction.buildConstraints).toContain("Honor constraint: webgl");
     expect(constrained.direction.buildConstraints).toContain("Avoid observed WebGL rendering where the stated constraint requires it; retain WebGL in the evidence above.");
   });
+  it("derives only explicit interaction evidence and renders accessibility guidance", () => {
+    const brief = make([
+      source("a", detail({ elements: ["Cursor interaction", "Hover state", "Page transition"] }), motion),
+      source("b", detail({ elements: ["Mouse interaction", "Preloader"] }), motion),
+    ]);
+    expect(brief.direction.interactionPlan.cursorHover.map((x) => x.value)).toEqual(["cursor-mouse-interaction", "micro-interaction", "hover-interaction"]);
+    expect(brief.direction.interactionPlan.scroll.map((x) => x.value)).toEqual(["pinned-sections", "scroll-trigger", "scrubbed-scroll"]);
+    expect(brief.direction.interactionPlan.entranceReveal.map((x) => x.value)).toEqual(["loading-entrance", "transition-reveal"]);
+    expect(brief.direction.interactionPlan.easings.map((x) => x.value)).toEqual(["power4.out"]);
+    expect(brief.direction.interactionPlan.durationRange).toEqual({ p25: 10, median: 20, p75: 30, sourceSlugs: ["a", "b"] });
+    const markdown = renderDesignBrief(brief);
+    expect(markdown).toContain("## Interaction plan");
+    expect(markdown).toContain("Respect prefers-reduced-motion");
+  });
+  it("does not invent interaction behavior without cached evidence", () => {
+    const brief = make([source("a"), source("b")]);
+    expect(brief.direction.interactionPlan.cursorHover).toEqual([]);
+    expect(brief.direction.interactionPlan.scroll).toEqual([]);
+    expect(brief.direction.interactionPlan.entranceReveal).toEqual([]);
+    expect(brief.direction.interactionPlan.durationRange).toBeNull();
+    expect(renderDesignBrief(brief)).toContain("No cached timing evidence; do not invent durations or easing.");
+  });
   it("includes only captured non-null structures and reports inconsistent captures", () => {
     const captured = source("a", detail());
     captured.structureStatus = "captured";

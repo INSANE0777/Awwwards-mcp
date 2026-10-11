@@ -7,6 +7,14 @@ export interface DesignBriefInput { slugs: string[]; goal: string; audience?: st
 export interface DesignBriefSource { slug: string; title: string; detail: SiteDetails | null; detailStatus: EvidenceStatus; motion: MotionDna | null; structure: PageStructure | null; structureStatus: StructureEvidenceStatus; }
 export interface BriefSignal { value: string; display: string; frequency: number; sourceSlugs: string[]; }
 export interface PaletteSignal extends BriefSignal { luminanceBand: "light" | "mid" | "dark"; }
+export interface InteractionPlan {
+  cursorHover: BriefSignal[];
+  scroll: BriefSignal[];
+  entranceReveal: BriefSignal[];
+  easings: BriefSignal[];
+  durationRange: { p25: number; median: number; p75: number; sourceSlugs: string[] } | null;
+  accessibility: string;
+}
 export interface DesignBrief {
   version: 1; goal: string; audience?: string; constraints: string[];
   sources: Array<{ slug: string; title: string; evidence: { detail: EvidenceStatus; motion: "cached" | "unavailable"; elements: "cached" | "unavailable"; structure: StructureEvidenceStatus; }; }>;
@@ -14,6 +22,7 @@ export interface DesignBrief {
     summary: string; sharedPatterns: BriefSignal[]; outliers: BriefSignal[];
     palette: PaletteSignal[]; technologySignals: BriefSignal[]; elementSignals: BriefSignal[];
     motion: { availableSourceSlugs: string[]; libraries: BriefSignal[]; renderers: BriefSignal[]; scrollModels: BriefSignal[]; interactionSignals: BriefSignal[]; easings: BriefSignal[]; durationRange: { p25: number; median: number; p75: number; sourceSlugs: string[] } | null; };
+    interactionPlan: InteractionPlan;
     structure?: { availableSourceSlugs: string[]; bandCounts: Array<{ slug: string; count: number }>; repeatedTags: BriefSignal[]; };
     buildConstraints: string[]; limitations: string[];
   };
@@ -62,6 +71,29 @@ export function createDesignBrief(input: DesignBriefInput, sources: DesignBriefS
   } : null;
   const constraints = [...new Set((input.constraints ?? []).map((c) => c.trim()).filter(Boolean))];
   const renderers = motionSignals((m) => m.stack.render);
+  const elementEvidence = usable.map((s) => ({ slug: s.slug, values: s.detail!.elements.map(token) }));
+  const cursorHover = signals(elementEvidence.map(({ slug, values }) => ({ slug, values: values.flatMap((value) => [
+    ...( /cursor|mouse/.test(value) ? ["cursor-mouse-interaction"] : []),
+    ...( /hover/.test(value) ? ["hover-interaction"] : []),
+    ...( /micro-interaction|interaction/.test(value) ? ["micro-interaction"] : []),
+  ]) })));
+  const entranceReveal = signals(elementEvidence.map(({ slug, values }) => ({ slug, values: values.flatMap((value) => [
+    ...( /preloader|loader|loading/.test(value) ? ["loading-entrance"] : []),
+    ...( /transition|reveal|entrance/.test(value) ? ["transition-reveal"] : []),
+  ]) })));
+  const scroll = motionSignals((m) => [
+    ...(m.scroll.triggerCount > 0 ? ["scroll-trigger"] : []),
+    ...(m.scroll.pinCount > 0 ? ["pinned-sections"] : []),
+    ...(m.scroll.scrubCount > 0 ? ["scrubbed-scroll"] : []),
+  ]);
+  const interactionPlan: InteractionPlan = {
+    cursorHover,
+    scroll,
+    entranceReveal,
+    easings: motionSignals((m) => m.easingVocab.map((e) => e.token)),
+    durationRange,
+    accessibility: "Respect prefers-reduced-motion; disable or simplify non-essential motion and preserve content and keyboard access.",
+  };
   const buildConstraints = constraints.length ? constraints.map((c) => `Honor constraint: ${c}`) : ["Keep the implementation grounded in the observed evidence; do not copy a single source."];
   if (constraints.some((c) => /webgl/i.test(c)) && renderers.some((s) => s.value === "webgl")) buildConstraints.push("Avoid observed WebGL rendering where the stated constraint requires it; retain WebGL in the evidence above.");
   const limitations = sources.flatMap((s) => [
@@ -76,6 +108,7 @@ export function createDesignBrief(input: DesignBriefInput, sources: DesignBriefS
       summary: `For ${input.goal.trim()}${input.audience?.trim() ? ` for ${input.audience.trim()}` : ""}, draw on the observed evidence without copying a single source.`,
       sharedPatterns, outliers, palette, technologySignals: tech, elementSignals: elements,
       motion: { availableSourceSlugs: motions.map((s) => s.slug), libraries: motionSignals((m) => m.stack.libs), renderers, scrollModels: motionSignals((m) => m.stack.scrollModel === "unknown" ? [] : [m.stack.scrollModel]), interactionSignals: motionSignals((m) => [...(m.scroll.pinCount > 0 ? ["pinned-sections"] : []), ...(m.scroll.scrubCount > 0 ? ["scrubbed-scroll"] : [])]), easings: motionSignals((m) => m.easingVocab.map((e) => e.token)), durationRange },
+      interactionPlan,
       ...(input.includeStructure ? { structure: { availableSourceSlugs: capturedStructures.map((s) => s.slug), bandCounts: capturedStructures.map((s) => ({ slug: s.slug, count: s.structure!.bands.length })).sort((a, b) => a.slug.localeCompare(b.slug)), repeatedTags: signals(capturedStructures.map((s) => ({ slug: s.slug, values: s.structure!.bands.map((b) => b.tag).filter(Boolean) }))) } } : {}),
       buildConstraints, limitations,
     },
@@ -95,6 +128,7 @@ export function renderDesignBrief(brief: DesignBrief): string {
     `## Deliberate outliers\n${lines(d.outliers, brief.sources.length)}`,
     `## Palette and technology signals\n${lines([...d.palette, ...d.technologySignals, ...d.elementSignals], brief.sources.length)}`,
     `## Motion model\n${lines([...d.motion.libraries, ...d.motion.renderers, ...d.motion.scrollModels, ...d.motion.interactionSignals, ...d.motion.easings], brief.sources.length)}${d.motion.durationRange ? `\n- Duration p25/median/p75: ${d.motion.durationRange.p25}/${d.motion.durationRange.median}/${d.motion.durationRange.p75} (${d.motion.durationRange.sourceSlugs.map((slug) => `\`${slug}\``).join(", ")})` : ""}`,
+    `## Interaction plan\n### Cursor and hover\n${lines(d.interactionPlan.cursorHover, brief.sources.length)}\n### Scroll\n${lines(d.interactionPlan.scroll, brief.sources.length)}\n### Entrance and reveal\n${lines(d.interactionPlan.entranceReveal, brief.sources.length)}\n### Timing guidance\n${lines(d.interactionPlan.easings, brief.sources.length)}${d.interactionPlan.durationRange ? `\n- Timing p25/median/p75: ${d.interactionPlan.durationRange.p25}/${d.interactionPlan.durationRange.median}/${d.interactionPlan.durationRange.p75} (${d.interactionPlan.durationRange.sourceSlugs.map((slug) => `\`${slug}\``).join(", ")})` : "\n- No cached timing evidence; do not invent durations or easing."}\n- Accessibility: ${d.interactionPlan.accessibility}`,
     ...(d.structure ? [`## Optional structure findings\n${lines(d.structure.repeatedTags, brief.sources.length)}\n${d.structure.bandCounts.map((b) => `- \`${b.slug}\`: ${b.count} bands`).join("\n")}`] : []),
     `## Build constraints\n${d.buildConstraints.map((c) => `- ${c}`).join("\n")}`,
     `## Evidence and limitations\n${brief.sources.map((s) => `- \`${s.slug}\`: detail ${s.evidence.detail}, motion ${s.evidence.motion}, elements ${s.evidence.elements}, structure ${s.evidence.structure}`).join("\n")}${d.limitations.length ? `\n${d.limitations.map((l) => `- ${l}`).join("\n")}` : ""}`,
