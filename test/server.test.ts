@@ -549,7 +549,83 @@ describe("compare_sites", () => {
 
 const SITE_TTL = 7 * 24 * 60 * 60 * 1000;
 
-describe("get_index_status", () => {
+describe("create_design_brief", () => {
+  const cachedDetail = (slug: string, liveUrl: string | null = `https://${slug}.example`) => ({
+    slug, title: slug, description: null, palette: ["#111111"], technologies: ["GSAP"],
+    elements: ["Cursor"], awards: [], nominee: false, score: null, ogImage: null, liveUrl,
+  });
+
+  it("rejects invalid direct-handler input before cache or network access", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const result = await createHandlers({ client, cache }).create_design_brief({ slugs: ["bad slug", "bad slug"], goal: "   " });
+    expect(result.isError).toBe(true);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain("distinct valid site slugs");
+  });
+
+  it("uses fresh cached details and cached Motion DNA without fetching or invoking structure", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "alpha", title: "Alpha", liveUrl: "https://alpha.example" }), site({ slug: "beta", title: "Beta", liveUrl: "https://beta.example" })]);
+    for (const slug of ["alpha", "beta"]) cache.setMeta(`detail:${slug}`, cachedDetail(slug));
+    cache.upsertMotionDna({
+      url: "https://alpha.example", stack: { libs: ["gsap"], render: [], scrollModel: "native" },
+      scroll: { triggerCount: 0, scrubCount: 0, pinCount: 0, scrubRatio: 0, sample: [] },
+      easingVocab: [], durationVocab: null, capturedAt: Date.now(),
+    });
+    const { client, fetchFn } = fakeClient();
+    const analyzeFn = vi.fn();
+    const result = await createHandlers({ client, cache, analyzeFn, motionDnaFn: vi.fn() }).create_design_brief({ slugs: ["alpha", "beta"], goal: "a studio site" });
+    expect(result.isError).toBeUndefined();
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(analyzeFn).not.toHaveBeenCalled();
+    const rendered = (result.content[0] as { text: string }).text;
+    expect(rendered).toContain("gsap");
+    expect(rendered).toContain("motion cached");
+  });
+
+  it("fetches cache misses and preserves partial source failures", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "l-i-s-a", liveUrl: "https://lisa.locomotive.ca/en" }), site({ slug: "missing" })]);
+    const { client } = fakeClient();
+    const getHtml = vi.spyOn(client, "getHtml").mockImplementation(async (path: string) => {
+      if (path.includes("/sites/missing")) throw new Error("offline");
+      return readFileSync(join(FIXTURES, "detail.html"), "utf8");
+    });
+    const result = await createHandlers({ client, cache }).create_design_brief({ slugs: ["l-i-s-a", "missing"], goal: "a portfolio" });
+    expect(result.isError).toBeUndefined();
+    expect(getHtml).toHaveBeenCalledTimes(2);
+    expect((result.content[0] as { text: string }).text).toContain("Evidence and limitations");
+    expect((result.content[0] as { text: string }).text).toContain("missing");
+  });
+
+  it("returns isError only when every reference is unavailable", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    vi.spyOn(client, "getHtml").mockRejectedValue(new Error("offline"));
+    const result = await createHandlers({ client, cache }).create_design_brief({ slugs: ["alpha", "beta"], goal: "a gallery" });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("No usable design evidence");
+  });
+
+  it("runs optional structure only on usable live URLs and isolates per-source failure", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("detail:alpha", cachedDetail("alpha"));
+    cache.setMeta("detail:beta", cachedDetail("beta", "https://beta.example"));
+    const { client, fetchFn } = fakeClient();
+    const analyzeFn = vi.fn(async (url: string) => url.includes("alpha")
+      ? { url, title: "Alpha", totalHeight: 800, bands: [] }
+      : { error: "Install playwright" });
+    const handlers = createHandlers({ client, cache, analyzeFn });
+    const result = await handlers.create_design_brief({ slugs: ["alpha", "beta"], goal: "a gallery", includeStructure: true });
+    expect(result.isError).toBeUndefined();
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(analyzeFn).toHaveBeenCalledTimes(2);
+    expect((result.content[0] as { text: string }).text).toContain("beta");
+  });
+});
+
+
   it("reports a never-indexed cache without any network calls", async () => {
     const cache = new Cache(tmpDir());
     const { client, fetchFn } = fakeClient();
@@ -629,7 +705,6 @@ describe("get_index_status", () => {
     expect(stale.lastError).toBeNull();
     expect(fetchFn).not.toHaveBeenCalled();
   });
-});
 
 describe("list_categories", () => {
   it("returns colors and filters as JSON and caches for 30 days", async () => {

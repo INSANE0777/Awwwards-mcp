@@ -118,6 +118,23 @@ server.tool(
 );
 
 server.tool(
+  "create_design_brief",
+  "Synthesize a cited design direction from 2–5 Awwwards references",
+  {
+    slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(5).refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "slugs must be distinct"),
+    goal: z.string().trim().min(1).max(2000),
+    audience: z.string().trim().min(1).max(1000).optional(),
+    constraints: z.array(z.string().trim().min(1).max(1000)).max(20).optional(),
+    includeStructure: z.boolean().default(false),
+    viewport: viewportSchema,
+    waitStrategy: waitStrategySchema,
+    maxBands: z.number().int().min(5).max(60).default(12),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  (args) => asMcpResult(handlers.create_design_brief(args)),
+);
+
+server.tool(
   "get_index_status",
   "Read offline index status: cached site count, progress, last successful finish and error, lock state and freshness. No live requests.",
   {},
