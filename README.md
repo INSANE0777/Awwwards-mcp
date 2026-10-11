@@ -23,6 +23,7 @@ queries keep AND semantics: every token must hit the same site.
 | `search_sites` | Search by color, tags, technology, award type or free-text query. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Default full results include each site's screenshot; use `responseMode: "compact"` for concise cards and inline previews of only the first two results on the requested page. |
 | `get_site_details` | Full design DNA for one site: palette, technologies, elements, awards, description. |
 | `compare_sites` | Compare 2–3 sites' design DNA and jury scores as text-only JSON. Uses cached details or fetches missing detail pages. |
+| `create_design_brief` | Turn 2–5 selected site slugs plus a required project goal into a deterministic, cited build brief. Uses cached detail/element evidence and cached Motion DNA first, fetches only missing details, returns Markdown plus versioned JSON, and runs browser band analysis only with `includeStructure: true`. |
 | `get_index_status` | Read local index count, crawl progress, last success/error, lock state and freshness without network requests. |
 | `get_site_elements` | Component-level visuals for one site: each element's poster image inline (3D models, video content, mobile layouts, microcopy…) + video URLs. |
 | `list_categories` | Every filter the agent can search by (200+ tags, 27 colors). |
@@ -35,6 +36,14 @@ queries keep AND semantics: every token must hit the same site.
 | `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
 | `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds and dumps the listing; later calls report the delta. Each first-seen winner's Elements section is backfilled into the searchable element corpus, so new winners are element-searchable immediately. |
 | `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
+
+`create_design_brief` turns 2–5 shortlisted references into a cited direction:
+
+1. Search and shortlist references with `search_sites`.
+2. Call `create_design_brief` with the slugs and a required project goal.
+3. Use its Markdown direction and versioned JSON; set `includeStructure: true` only when optional browser-derived section-band evidence is needed.
+
+The response separates observed shared signals from one-site outliers, names evidence gaps, and never records motion automatically.
 
 **Data posture**: element records store metadata + media URLs pointing at
 awwwards' own CDN — nothing is mirrored. Motion DNA records are local

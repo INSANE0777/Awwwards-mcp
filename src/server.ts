@@ -13,6 +13,7 @@ import type { ViewportName } from "./viewport.js";
 import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
+import { createDesignBrief, renderDesignBrief, type DesignBriefInput, type DesignBriefSource } from "./design-brief.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -149,6 +150,11 @@ export interface Handlers {
   search_sites(args: SearchArgs): Promise<ToolResponse>;
   get_site_details(args: { slug: string }): Promise<ToolResponse>;
   compare_sites(args: { slugs: string[] }): Promise<ToolResponse>;
+  create_design_brief(args: DesignBriefInput & {
+    viewport?: ViewportName;
+    waitStrategy?: WaitStrategy;
+    maxBands?: number;
+  }): Promise<ToolResponse>;
   get_index_status(): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   search_elements(args: {
@@ -599,6 +605,80 @@ export function createHandlers(deps: {
         });
       }
       return { content: [text(JSON.stringify({ sites }, null, 2))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function create_design_brief(args: DesignBriefInput & {
+    viewport?: ViewportName;
+    waitStrategy?: WaitStrategy;
+    maxBands?: number;
+  }): Promise<ToolResponse> {
+    if (!Array.isArray(args.slugs) || args.slugs.length < 2 || args.slugs.length > 5 ||
+        args.slugs.some((slug) => typeof slug !== "string" || !/^[\w-]+$/.test(slug)) ||
+        new Set(args.slugs.map((slug) => slug.toLowerCase())).size !== args.slugs.length ||
+        typeof args.goal !== "string" || args.goal.trim().length === 0) {
+      return { content: [text("Provide 2 to 5 distinct valid site slugs and a non-blank goal.")], isError: true };
+    }
+    try {
+      const sources: DesignBriefSource[] = [];
+      for (const slug of args.slugs) {
+        let detail = cache.getMeta<SiteDetails>(`detail:${slug}`, SITE_TTL_MS);
+        let detailStatus: DesignBriefSource["detailStatus"] = detail ? "cached" : "unavailable";
+        if (!detail) {
+          try {
+            detail = await loadDetail(slug);
+            if (detail) detailStatus = "fetched";
+          } catch {
+            detail = null;
+          }
+        }
+        const summary = cache.getSite(slug, SITE_TTL_MS);
+        const liveUrl = detail?.liveUrl ?? summary?.liveUrl ?? null;
+        const source: DesignBriefSource = {
+          slug,
+          title: detail?.title ?? summary?.title ?? slug,
+          detail,
+          detailStatus: detail ? detailStatus : "unavailable",
+          motion: liveUrl ? cache.getMotionDna(liveUrl) : null,
+          structure: null,
+          structureStatus: args.includeStructure === true ? "unavailable" : "not_requested",
+        };
+        sources.push(source);
+      }
+
+      if (!sources.some((source) => source.detail !== null)) {
+        return {
+          content: [text("No usable design evidence was available for the requested references. Check the slugs or try again after Awwwards access recovers.")],
+          isError: true,
+        };
+      }
+
+      if (args.includeStructure === true) {
+        const analyze = deps.analyzeFn ?? ((url: string, maxBands?: number, opts?: WaitOpts) =>
+          import("./structure.js").then((m) => m.analyzePageStructure(url, undefined, maxBands, opts))
+        );
+        await Promise.all(sources.map(async (source) => {
+          const liveUrl = source.detail?.liveUrl ?? cache.getSite(source.slug, SITE_TTL_MS)?.liveUrl ?? null;
+          if (!liveUrl) return;
+          try {
+            const result = await analyze(liveUrl, args.maxBands ?? 12, {
+              waitStrategy: args.waitStrategy,
+              viewport: args.viewport ?? "desktop",
+            });
+            if (!("error" in result)) {
+              source.structure = result;
+              source.structureStatus = "captured";
+            }
+          } catch {
+            source.structureStatus = "unavailable";
+          }
+        }));
+      }
+
+      const brief = createDesignBrief(args, sources);
+      return { content: [text(renderDesignBrief(brief))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1097,6 +1177,7 @@ export function createHandlers(deps: {
     search_sites,
     get_site_details,
     compare_sites,
+    create_design_brief,
     get_index_status,
     get_site_elements,
     search_elements,
