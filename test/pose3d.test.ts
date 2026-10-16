@@ -27,6 +27,7 @@ describe("reducePose", () => {
   };
   it("keeps snapshots and computes per-step scroll ratio", () => {
     const grid = reducePose({ ...base, snapshots: [snap(0, ["hero"]), snap(900, ["hero"])] });
+    expect(grid.id).toBe("pose-grid-v1");
     expect(grid.snapshots).toHaveLength(2);
     expect(grid.snapshots[1].scrollRatio).toBeCloseTo(0.5); // 900 / (1800 total)
   });

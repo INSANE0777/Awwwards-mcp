@@ -17,6 +17,8 @@ export interface PoseSnapshot {
 
 /** Reduced 3D-pose capture grid for one page. */
 export interface PoseGrid {
+  /** Grid schema version, stamped by reducePose. */
+  id: "pose-grid-v1";
   url: string;
   capturedAt: number;
   steps: number;
@@ -148,6 +150,7 @@ export function reducePose(input: PoseGridInput): PoseGrid {
     });
   }
   return {
+    id: "pose-grid-v1",
     url: input.url,
     capturedAt: input.capturedAt,
     steps: input.steps,
