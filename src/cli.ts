@@ -260,6 +260,22 @@ server.tool(
 );
 
 server.tool(
+  "analyze_hover_census",
+  ":hover interaction census of a live page: counts hover rules, samples up to 20 interactive elements, and reports which CSS properties change on hover with transition duration and easing. Use it to reproduce micro-interactions and verify interaction-state coverage. Runs on any URL — does not fetch awwwards.com.",
+  {
+    url: z.string().url().describe("Absolute page URL to census"),
+    // Inline optional enum, not waitStrategySchema: that schema's .default("load")
+    // would shadow captureHoverCensus's own networkidle default.
+    waitStrategy: z.enum(["load", "networkidle"]).optional(),
+    viewport: viewportSchema,
+    reducedMotion: z.boolean().default(false)
+      .describe("Emulate prefers-reduced-motion: reduce for this capture"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.analyze_hover_census(args)),
+);
+
+server.tool(
   "search_motion",
   "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
   {
