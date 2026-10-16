@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCROLL_CENSUS_SNIPPET, reduceScrollCensus } from "../src/census.js";
+import { SCROLL_CENSUS_SNIPPET, reduceScrollCensus, captureScrollCensus } from "../src/census.js";
 import type { RawAnim, ScrollScan } from "../src/census.js";
 
 // Fixture builder: Trigger is used verbatim in results, so tests can encode
@@ -61,5 +61,75 @@ describe("SCROLL_CENSUS_SNIPPET", () => {
     // closure refs may appear.
     expect(String(SCROLL_CENSUS_SNIPPET)).not.toContain("=>");
     expect(typeof SCROLL_CENSUS_SNIPPET).toBe("function");
+  });
+});
+
+// Offline orchestrator harness: a fake page whose evaluate returns the fixture
+// scan; a fake browser that hands it out; a loader resolving a fake chromium.
+// fakeBrowser optionally records the context opts passed to newPage and can
+// throw on newPage (reducedMotion + page-opts assertion).
+function harness(scan: ScrollScan, newPageImpl?: (opts: unknown) => Promise<any>) {
+  const fakePage = {
+    addInitScript: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    evaluate: async () => scan,
+  };
+  let seenContextOpts: unknown = null;
+  const fakeBrowser = {
+    newPage: newPageImpl ?? (async (opts: unknown) => {
+      seenContextOpts = opts;
+      return fakePage;
+    }),
+    close: async () => {},
+  };
+  const loader = async () => ({
+    chromium: { launch: async () => fakeBrowser },
+  });
+  return { loader, getSeenContextOpts: () => seenContextOpts, fakeBrowser };
+}
+
+describe("captureScrollCensus", () => {
+  const currentScan: ScrollScan = {
+    anims: [
+      anim({ selector: "div.scrub", trigger: "gsap-scrolltrigger", scrub: true }),
+    ],
+    smilSelectors: [],
+    nativeTimelines: [{ selector: "main", kind: "scroll" }],
+  };
+
+  it("captures a census through a fake browser", async () => {
+    const { loader } = harness(currentScan);
+    const result = await captureScrollCensus("https://example.com", { loader });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.url).toBe("https://example.com");
+    expect(result.reducedMotion).toBe(false);
+    expect(result.anims[0].trigger).toBe("gsap-scrolltrigger");
+  });
+
+  it("returns { error } when the browser fails to launch", async () => {
+    const loader = async () => ({
+      chromium: {
+        launch: async () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    const result = await captureScrollCensus("https://example.com", { loader });
+    expect("error" in result).toBe(true);
+    expect(JSON.stringify(result)).toContain("boom");
+  });
+
+  it("emulates reduced motion when requested", async () => {
+    const { loader, getSeenContextOpts } = harness(currentScan);
+    const result = await captureScrollCensus("https://example.com", {
+      loader,
+      reducedMotion: true,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.reducedMotion).toBe(true);
+    expect((getSeenContextOpts() as { reducedMotion?: string }).reducedMotion).toBe("reduce");
   });
 });

@@ -1,3 +1,6 @@
+import { installSnippetShims, preScroll, type WaitStrategy } from "./structure.js";
+import { resolveViewport, type ViewportName } from "./viewport.js";
+
 /** Where an animation's scroll linkage was detected. */
 export type ScrollTriggerSource =
   | "gsap-scrolltrigger"
@@ -260,3 +263,51 @@ export function reduceScrollCensus(
     reducedMotion,
   };
 }
+
+export async function captureScrollCensus(
+  url: string,
+  opts?: {
+    timeoutMs?: number;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+    reducedMotion?: boolean;
+    loader?: () => Promise<any>;
+  },
+): Promise<ScrollCensus | { error: string }> {
+  let chrome: any;
+  try {
+    // Lazy default: playwright is only touched when the tool actually runs.
+    const loader = opts?.loader ?? (() => import("playwright" as string));
+    ({ chromium: chrome } = await loader());
+    const browser = await chrome.launch();
+    try {
+      // Viewport profile split as in structure.ts: width/height fill the
+      // `viewport` key; mobile-profile flags are sibling context options.
+      const { width, height, ...contextOpts } = resolveViewport(opts?.viewport ?? "desktop");
+      const page = await browser.newPage({
+        viewport: { width, height },
+        ...contextOpts,
+        ...(opts?.reducedMotion ? { reducedMotion: "reduce" as const } : {}),
+      });
+      await installSnippetShims(page);
+      await page.goto(url, {
+        waitUntil: opts?.waitStrategy ?? "networkidle",
+        timeout: opts?.timeoutMs ?? 45_000,
+      });
+      await page.waitForTimeout(3000);
+      await preScroll(page);
+      await page.waitForTimeout(500);
+      const scan = (await page.evaluate(SCROLL_CENSUS_SNIPPET)) as ScrollScan;
+      return reduceScrollCensus(url, scan, Date.now(), !!opts?.reducedMotion);
+    } finally {
+      try {
+        await browser.close();
+      } catch {
+        /* keep the primary error */
+      }
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
