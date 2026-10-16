@@ -67,6 +67,19 @@ describe("HOVER_RULES_SNIPPET / HOVER_SNAPSHOT_SNIPPET", () => {
     expect(typeof HOVER_RULES_SNIPPET).toBe("function");
     expect(typeof HOVER_SNAPSHOT_SNIPPET).toBe("function");
   });
+
+  it("matches candidates with :hover stripped (live :hover never matches at rest)", () => {
+    expect(String(HOVER_RULES_SNIPPET)).toMatch(/replace\(\s*\/:hover\/g\s*,\s*""\s*\)/);
+  });
+
+  it("reads computed props via camelCase IDL access with kebab fallback", () => {
+    expect(String(HOVER_SNAPSHOT_SNIPPET)).toMatch(/String\(\s*cs\[p\][^)]*getPropertyValue/);
+  });
+
+  it("prop list inside HOVER_SNAPSHOT_SNIPPET covers every HOVER_PROPS entry", () => {
+    const src = String(HOVER_SNAPSHOT_SNIPPET);
+    for (const p of HOVER_PROPS) expect(src).toContain('"' + p + '"');
+  });
 });
 
 // Offline orchestrator harness. The fake page routes evaluate calls by source:

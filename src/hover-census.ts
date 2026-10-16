@@ -105,7 +105,11 @@ export const HOVER_RULES_SNIPPET = function (): {
       let matched = false;
       for (const sel of rules) {
         try {
-          if (el.matches(sel)) {
+          // ":hover" never matches at rest (live hover state is inactive), so
+          // candidates are matched with :hover stripped. Residual limitation:
+          // descendant-hover rules (.card:hover .title) label the target
+          // element (.title), not the trigger (.card).
+          if (el.matches(sel.replace(/:hover/g, ""))) {
             matched = true;
             break;
           }
@@ -151,7 +155,10 @@ export const HOVER_SNAPSHOT_SNIPPET = function (idx: number): HoverStyleRow | nu
     ];
     for (const p of props) {
       try {
-        const v = cs ? String(cs.getPropertyValue(p)) : null;
+        // getPropertyValue(p) returns "" for camelCase names in real browsers
+        // (CSSOM matches kebab-case declaration names only) — camelCase IDL
+        // property access reads the same cascade. Kebab fallback + null for "".
+        const v = cs ? String(cs[p] ?? cs.getPropertyValue(p) ?? "") : null;
         out[p] = v === "" ? null : v;
       } catch {
         out[p] = null;
