@@ -51,6 +51,9 @@ design DNA, band maps and motion recordings included.
 | `motion.ts` | ~429 | `recordSiteMotion`: webm recording + ffmpeg filmstrip under a strict 30 s budget (documented timing table at the top of the file). Virtual SVG cursor, per-call `mkdtemp` isolation, 10-min stale-tmp sweep, 60 s ffmpeg deadline. |
 | `structure.ts` | ~249 | Band map. `SCAN_SNIPPET` runs in-page via `page.evaluate` (self-contained, reaches DOM through `globalThis` — the Node tsconfig has no DOM lib). `collapseBands` is pure: 8 px sweep, smallest-covering candidate wins, sliver absorb, max-40 cap. Owns the ONE `preScroll` shared with capture. |
 | `capture.ts` | ~66 | Full-page screenshot. Intentionally circular import with `structure.ts` (call-time-only bindings; ESM resolves it). |
+| `census.ts` | ~313 | per-element scroll/SVG motion census (snippet + reducer + capture); powers `analyze_scroll_map`. |
+| `hover-census.ts` | ~300 | :hover rule extraction + computed-style diff sampling; powers `analyze_hover_census`. |
+| `verify-build.ts` | ~248 | motion fingerprint + band-map compare + verdict; powers `verify_build`. |
 | `cli.ts` | ~179 | `McpServer` wiring, zod schemas, lazy playwright/ffmpeg defaults (optional deps are only touched when a tool actually runs), background auto-reindex, daily version check — stdout stays clean for JSON-RPC. |
 | `version-check.ts` | ~131 | Daily npm-registry check, stderr-only, 3 s timeout, all failures swallowed. Self-update is opt-in via `AWWWARDS_AUTO_UPDATE=1`. |
 | `viewport.ts` | ~20 | Desktop (1440×900) / mobile (390×844, DPR 3, touch) profiles. Width/height go in playwright's `viewport` key; mobile flags spread as sibling context options. |

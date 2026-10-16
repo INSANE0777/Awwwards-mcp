@@ -4,8 +4,12 @@ import {
   motionDiffScore,
   compareBands,
   verdictFrom,
+  verifyBuild,
 } from "../src/verify-build.js";
 import type { BandRow, MotionCensusInput } from "../src/verify-build.js";
+import type { PageStructure } from "../src/structure.js";
+import type { ScrollCensus } from "../src/census.js";
+import type { HoverCensus } from "../src/hover-census.js";
 
 const base = (p: Partial<MotionCensusInput>): MotionCensusInput => ({
   counts: {
@@ -142,5 +146,112 @@ describe("verdictFrom", () => {
     expect(r.evidence.length).toBe(3);
     expect(r.overall).toBe(86);
     expect(r.evidence[2]).toContain("86");
+  });
+});
+
+describe("verifyBuild orchestrator", () => {
+  const refStruct = (): PageStructure => ({
+    url: "https://ref.test",
+    title: "Reference",
+    totalHeight: 2000,
+    bands: [
+      { index: 0, tag: "h1", label: "hero", background: "#000000", offsetTop: 0, height: 900, textStart: "" },
+      { index: 1, tag: "footer", label: "footer", background: "#000000", offsetTop: 900, height: 1100, textStart: "" },
+    ],
+  });
+  const scrollCensus = (): ScrollCensus => ({
+    url: "https://x.test",
+    capturedAt: 0,
+    counts: {
+      "gsap-scrolltrigger": 1,
+      "css-scroll-timeline": 0,
+      "css-view-timeline": 0,
+      "data-attr": 0,
+      "css-keyframe": 0,
+      smil: 0,
+      unknown: 0,
+    },
+    anims: [{ selector: "section", tag: "section", props: ["transform"], durationMs: null, delayMs: null, easing: "power2.out", trigger: "gsap-scrolltrigger", scrub: true, pin: false, svgStroke: false }],
+    svgStrokes: [],
+    nativeScrollTimelines: 0,
+    reducedMotion: false,
+  });
+  const hoverCensus = (): HoverCensus => ({
+    url: "https://x.test",
+    capturedAt: 0,
+    hoverRuleCount: 0,
+    candidates: 0,
+    samples: [],
+    reducedMotion: false,
+  });
+
+  it("scores an identical build: bands matched, verdict in pass/warn/fail, evidence, fingerprints", async () => {
+    let hoverCalls = 0;
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => ({ ...scrollCensus() }),
+      hoverFn: async () => {
+        hoverCalls++;
+        return hoverCensus();
+      },
+    });
+    expect("error" in report).toBe(false);
+    if ("error" in report) return;
+    expect(report.bands.matched).toContain("hero");
+    expect(report.verdict).toMatch(/pass|warn|fail/);
+    expect(report.evidence.length).toBeGreaterThan(2);
+    expect(report.motion.refFingerprint).toContain("k1");
+    // Presence-only: hover censuses ran for both pages but don't gate the score.
+    expect(hoverCalls).toBe(2);
+  });
+
+  it("structure-scan error short-circuits before scroll/hover run", async () => {
+    const scrollFn = async (): Promise<ScrollCensus> => {
+      throw new Error("scrollFn must not be called");
+    };
+    const hoverFn = async (): Promise<HoverCensus> => {
+      throw new Error("hoverFn must not be called");
+    };
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => ({ error: "nope" }),
+      scrollFn,
+      hoverFn,
+    });
+    expect("error" in report).toBe(true);
+    if (!("error" in report)) return;
+    expect(report.error).toContain("nope");
+    expect(report.error.toLowerCase()).toContain("reference");
+  });
+
+  it("scroll-census error mentions headless browser required", async () => {
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => ({ error: "playwright missing" }),
+      hoverFn: async () => hoverCensus(),
+    });
+    expect("error" in report).toBe(true);
+    if (!("error" in report)) return;
+    expect(report.error).toContain("headless browser required");
+  });
+
+  it("maps structure bands (incl. PageBand.background) into BandRow labels", async () => {
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => scrollCensus(),
+      hoverFn: async () => hoverCensus(),
+    });
+    expect("error" in report).toBe(false);
+    if ("error" in report) return;
+    // hero matched by label; footer matched too; nothing lost in refOnly.
+    expect(report.bands.matched).toEqual(["hero", "footer"]);
+    expect(report.bands.refOnly).toEqual([]);
   });
 });

@@ -276,6 +276,21 @@ server.tool(
 );
 
 server.tool(
+  "verify_build",
+  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify.",
+  {
+    buildUrl: z.string().url().describe("URL of the build to verify"),
+    referenceUrl: z.string().url().describe("URL of the reference site to match"),
+    // Inline optional enum, not waitStrategySchema: that schema's .default("load")
+    // would shadow the orchestrator's networkidle scroll-census default.
+    waitStrategy: z.enum(["load", "networkidle"]).optional(),
+    viewport: viewportSchema,
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.verify_build(args)),
+);
+
+server.tool(
   "search_motion",
   "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
   {

@@ -12,6 +12,7 @@ import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
 import type { HoverCensusFn } from "./hover-census.js";
+import type { VerifyBuildFn } from "./verify-build.js";
 import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
@@ -86,6 +87,7 @@ export type ScrollMapFn = (
 // Re-exported for consumers that spell deps in terms of server.ts types;
 // captureHoverCensus (hover-census.ts) owns the canonical shape.
 export type { HoverCensusFn };
+export type { VerifyBuildFn };
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -210,6 +212,7 @@ export interface Handlers {
     viewport?: ViewportName;
     reducedMotion?: boolean;
   }): Promise<ToolResponse>;
+  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
     scrubOnly?: boolean;
@@ -239,6 +242,7 @@ export function createHandlers(deps: {
   motionDnaFn?: MotionDnaFn;
   scrollMapFn?: ScrollMapFn;
   hoverCensusFn?: HoverCensusFn;
+  verifyBuildFn?: VerifyBuildFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1062,6 +1066,35 @@ export function createHandlers(deps: {
     }
   }
 
+  async function verify_build(args: {
+    buildUrl: string;
+    referenceUrl: string;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+  }): Promise<ToolResponse> {
+    try {
+      // Lazy default: playwright is only touched when the tool actually runs.
+      const verify =
+        deps.verifyBuildFn ??
+        ((verifyArgs: {
+          buildUrl: string;
+          referenceUrl: string;
+          waitStrategy?: WaitStrategy;
+          viewport?: ViewportName;
+        }) => import("./verify-build.js").then((m) => m.verifyBuild(verifyArgs)));
+      const result = await verify({
+        buildUrl: args.buildUrl,
+        referenceUrl: args.referenceUrl,
+        waitStrategy: args.waitStrategy,
+        viewport: args.viewport,
+      });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function record_site_motion(args: {
     url: string;
     frames?: number;
@@ -1264,6 +1297,7 @@ export function createHandlers(deps: {
     analyze_page_structure,
     analyze_scroll_map,
     analyze_hover_census,
+    verify_build,
     record_site_motion,
     get_motion_dna,
     search_motion,

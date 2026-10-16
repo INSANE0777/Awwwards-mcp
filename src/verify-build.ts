@@ -1,8 +1,12 @@
 // Pure verify-build layer: motion fingerprinting, band comparison, verdict.
-// Zero imports (mirrors easings.ts) so tests and later server.ts wiring can
-// pull this in without Playwright or node deps. The fingerprint string is the
-// ONLY interchange format: motionDiffScore re-parses it, so caller and
-// verifier don't need to share an object type.
+// Zero runtime imports (mirrors easings.ts) so tests and later server.ts
+// wiring can pull this in without Playwright or node deps. The fingerprint
+// string is the ONLY interchange format: motionDiffScore re-parses it, so
+// caller and verifier don't need to share an object type.
+import type { PageBand, PageStructure, WaitStrategy } from "./structure.js";
+import type { ScrollCensus } from "./census.js";
+import type { HoverCensus } from "./hover-census.js";
+import type { ViewportName } from "./viewport.js";
 
 export interface MotionCensusInput {
   counts: Record<string, number>;
@@ -153,4 +157,113 @@ export function verdictFrom(bandScore: number, motionScore: number) {
     `Overall: ${overall}/100 → ${verdict.toUpperCase()}`,
   ];
   return { overall, verdict, evidence };
+}
+
+// Task 6 wiring contract: server.ts createHandlers deps get an optional
+// verifyBuildFn of this shape (peers: ScrollMapFn/HoverCensusFn in server.ts).
+export type VerifyBuildFn = (
+  args: {
+    buildUrl: string;
+    referenceUrl: string;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+  },
+) => Promise<VerifyReport | { error: string }>;
+
+// Orchestrates the design loop: structure-scan both pages → scroll-census
+// both → hover-census both (presence only — the score stays scroll-focused).
+type VerifyStructureFn = (
+  url: string,
+) => Promise<PageStructure | { error: string }>;
+type VerifyScrollFn = (url: string) => Promise<ScrollCensus | { error: string }>;
+type VerifyHoverFn = (url: string) => Promise<HoverCensus | { error: string }>;
+
+export async function verifyBuild(
+  args: {
+    buildUrl: string;
+    referenceUrl: string;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+    // Injectable fakes for tests; lazily-imported defaults otherwise.
+    structureFn?: VerifyStructureFn;
+    scrollFn?: VerifyScrollFn;
+    hoverFn?: VerifyHoverFn;
+  },
+): Promise<VerifyReport | { error: string }> {
+  // One shared wait/viewport profile for every capture of a verification run.
+  const opts = { waitStrategy: args.waitStrategy, viewport: args.viewport };
+  const structureFn =
+    args.structureFn ??
+    ((url: string) =>
+      import("./structure.js").then((m) =>
+        m.analyzePageStructure(url, undefined, undefined, opts),
+      ));
+  const scrollFn =
+    args.scrollFn ??
+    ((url: string) => import("./census.js").then((m) => m.captureScrollCensus(url, opts)));
+  const hoverFn =
+    args.hoverFn ??
+    ((url: string) =>
+      import("./hover-census.js").then((m) => m.captureHoverCensus(url, opts)));
+  try {
+    // Structure scan first: bands gate everything downstream, so a page that
+    // won't load is reported before any motion capture spends time on it.
+    const [refStruct, buildStruct] = await Promise.all([
+      structureFn(args.referenceUrl),
+      structureFn(args.buildUrl),
+    ]);
+    if ("error" in refStruct)
+      return { error: `could not structure-scan reference page: ${refStruct.error}` };
+    if ("error" in buildStruct)
+      return { error: `could not structure-scan build page: ${buildStruct.error}` };
+
+    const [refScroll, buildScroll] = await Promise.all([
+      scrollFn(args.referenceUrl),
+      scrollFn(args.buildUrl),
+    ]);
+    // Headless browser is the likely cause — the censuses need Playwright.
+    if ("error" in refScroll)
+      return { error: `motion census failed for reference page: ${refScroll.error} (headless browser required)` };
+    if ("error" in buildScroll)
+      return { error: `motion census failed for build page: ${buildScroll.error} (headless browser required)` };
+
+    // Hover censuses are presence-only: surfaced in the JSON but they never
+    // move the score, which stays scroll-focused.
+    const [refHover, buildHover] = await Promise.allSettled([
+      hoverFn(args.referenceUrl),
+      hoverFn(args.buildUrl),
+    ]);
+    const hoverNote = (r: PromiseSettledResult<HoverCensus | { error: string }>) =>
+      r.status === "fulfilled" && !("error" in r.value)
+        ? `${r.value.samples.length} samples`
+        : "unavailable";
+    const hoverEvidence = `Hover: reference ${hoverNote(refHover)}, build ${hoverNote(buildHover)} (presence only)`;
+
+    // Structure bands reach compareBands's BandRow shape. PageBand names the
+    // field `background`, but tests/fixture-census callers may pass the `bg`
+    // spelling — accept both.
+    const bandRows = (bands: (PageBand & { bg?: string | null })[]) =>
+      bands.map((b) => ({
+        label: b.label ?? "",
+        bg: b.bg ?? b.background ?? "",
+        tag: b.tag,
+      }));
+    const bands = compareBands(bandRows(refStruct.bands), bandRows(buildStruct.bands));
+    const refFp = motionFingerprint(refScroll);
+    const buildFp = motionFingerprint(buildScroll);
+    const motionScore = motionDiffScore(refFp, buildFp);
+    const { overall, verdict, evidence } = verdictFrom(bands.score, motionScore);
+
+    return {
+      buildUrl: args.buildUrl,
+      referenceUrl: args.referenceUrl,
+      bands,
+      motion: { score: motionScore, refFingerprint: refFp, buildFingerprint: buildFp },
+      overall,
+      verdict,
+      evidence: [evidence[0], evidence[1], evidence[2], hoverEvidence],
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
