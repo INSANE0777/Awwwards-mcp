@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   HOVER_PROPS,
   HOVER_RULES_SNIPPET,
@@ -79,6 +81,15 @@ describe("HOVER_RULES_SNIPPET / HOVER_SNAPSHOT_SNIPPET", () => {
   it("prop list inside HOVER_SNAPSHOT_SNIPPET covers every HOVER_PROPS entry", () => {
     const src = String(HOVER_SNAPSHOT_SNIPPET);
     for (const p of HOVER_PROPS) expect(src).toContain('"' + p + '"');
+  });
+
+  it("installs snippet shims before navigation (tsx __name injection breaks evaluate)", () => {
+    // tsx/esbuild keepNames injects __name() into HOVER_RULES_SNIPPET (it has
+    // an inner `collect` function), so evaluate needs the init-script shim.
+    const src = readFileSync(join(__dirname, "../src/hover-census.ts"), "utf8");
+    expect(src.indexOf("await installSnippetShims(page);")).toBeGreaterThan(
+      src.indexOf("browser.newPage("),
+    );
   });
 });
 

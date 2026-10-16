@@ -1,3 +1,4 @@
+import { installSnippetShims } from "./structure.js";
 import { resolveViewport, type ViewportName } from "./viewport.js";
 
 /** One element's measured :hover response. */
@@ -213,8 +214,7 @@ export function diffHoverStyles(
 // Playwright orchestrator for the hover census. Same pattern as
 // captureScrollCensus (census.ts): lazy/injectable loader, resolveViewport
 // contextOpts with reduce-motion spread, goto + settle, outer catch →
-// { error }, finally { browser.close() } with inner try/catch. No
-// installSnippetShims — hover census needs no shims.
+// { error }, finally { browser.close() } with inner try/catch.
 export async function captureHoverCensus(
   url: string,
   opts?: {
@@ -238,6 +238,7 @@ export async function captureHoverCensus(
         ...contextOpts,
         ...(opts?.reducedMotion ? { reducedMotion: "reduce" as const } : {}),
       });
+      await installSnippetShims(page);
       await page.goto(url, {
         waitUntil: opts?.waitStrategy ?? "networkidle",
         timeout: opts?.timeoutMs ?? 45_000,
