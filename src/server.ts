@@ -13,6 +13,8 @@ import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { VerifyBuildFn } from "./verify-build.js";
+import type { PoseGrid } from "./pose3d.js";
+import { buildPoseStubHtml, poseSuggestions } from "./pose-stub.js";
 import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
@@ -83,6 +85,18 @@ export type ScrollMapFn = (
     reducedMotion?: boolean;
   },
 ) => Promise<ScrollCensus | { error: string }>;
+
+// Gap 4 wiring peers: capture browses the page (Playwright), the stub fn is
+// pure given grid (+ optional census) — both optional in deps for DI tests.
+export type Pose3dFn = (
+  url: string,
+  opts?: { steps?: number; viewport?: ViewportName },
+) => Promise<PoseGrid | { error: string }>;
+
+export type PoseStubFn = (
+  grid: PoseGrid,
+  census?: ScrollCensus,
+) => { stubHtml: string; notes: string[] };
 
 // Re-exported for consumers that spell deps in terms of server.ts types;
 // captureHoverCensus (hover-census.ts) owns the canonical shape.
@@ -213,6 +227,15 @@ export interface Handlers {
     reducedMotion?: boolean;
   }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
+  capture_pose_3d(args: {
+    url: string;
+    steps?: number;
+    viewport?: ViewportName;
+  }): Promise<ToolResponse>;
+  build_pose_stub(args: {
+    poseGrid: PoseGrid;
+    scrollCensus?: ScrollCensus;
+  }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
     scrubOnly?: boolean;
@@ -243,6 +266,8 @@ export function createHandlers(deps: {
   scrollMapFn?: ScrollMapFn;
   hoverCensusFn?: HoverCensusFn;
   verifyBuildFn?: VerifyBuildFn;
+  pose3dFn?: Pose3dFn;
+  poseStubFn?: PoseStubFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1095,6 +1120,67 @@ export function createHandlers(deps: {
     }
   }
 
+  // Gap 4: captures the page's 3D pose grid (headless browser via the
+  // injected/default capturePose3d) and renders a scroll-scrubbed three.js
+  // stub from a grid — the default stub path is the pure builder in
+  // pose-stub.ts, so no browser is ever launched for build_pose_stub.
+  async function capture_pose_3d(args: {
+    url: string;
+    steps?: number;
+    viewport?: ViewportName;
+  }): Promise<ToolResponse> {
+    try {
+      const capture =
+        deps.pose3dFn ??
+        ((url: string, opts?: { steps?: number; viewport?: ViewportName }) =>
+          import("./pose3d.js").then((m) => m.capturePose3d(url, opts)));
+      const result = await capture(args.url, { steps: args.steps, viewport: args.viewport });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function build_pose_stub(args: {
+    poseGrid: PoseGrid;
+    scrollCensus?: ScrollCensus;
+  }): Promise<ToolResponse> {
+    try {
+      // Snapshot schemas may drift; only grids stamped pose-grid-v1 build.
+      if (args.poseGrid?.id !== "pose-grid-v1") {
+        return {
+          content: [
+            text("poseGrid.id must be \"pose-grid-v1\" — re-capture with capture_pose_3d."),
+          ],
+          isError: true,
+        };
+      }
+      const build =
+        deps.poseStubFn ??
+        ((grid: PoseGrid, census?: ScrollCensus) => ({
+          stubHtml: buildPoseStubHtml(grid, { scrollCensus: census }),
+          notes: [
+            `steps=${grid.steps}`,
+            `canvas=${grid.canvasW}x${grid.canvasH}`,
+            ...(census
+              ? (() => {
+                  const s = poseSuggestions(census);
+                  return [
+                    `suggestions(st)=${s.st}`,
+                    `suggestions(pin)=${s.pin}`,
+                    `suggestions(ease)=${s.ease.length}`,
+                  ];
+                })()
+              : []),
+          ],
+        }));
+      return { content: [text(JSON.stringify(build(args.poseGrid, args.scrollCensus), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function record_site_motion(args: {
     url: string;
     frames?: number;
@@ -1298,6 +1384,8 @@ export function createHandlers(deps: {
     analyze_scroll_map,
     analyze_hover_census,
     verify_build,
+    capture_pose_3d,
+    build_pose_stub,
     record_site_motion,
     get_motion_dna,
     search_motion,
