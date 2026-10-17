@@ -133,6 +133,11 @@ npm run smoke   # manual live smoke test (test/live-smoke.ts)
 npm run build   # tsc → dist/
 ```
 
+Run via `npm run build` + `node dist/cli.js`, not tsx: tsx's esbuild
+`keepNames` injects `__name` into page.evaluate-serialized snippets, which
+throws `ReferenceError` in the page; and always rebuild `dist` after pulling,
+or the motion evidence sheet silently degrades to `null`.
+
 Suites: `parsers` (fixtures pin every anchor), `cache` (FTS on/off, TTLs),
 `server` (the merge semantics above — the largest suite), `indexer` (lock,
 resume, abort), `motion` / `capture` / `structure` (fake playwright +

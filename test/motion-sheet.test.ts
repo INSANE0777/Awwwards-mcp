@@ -215,4 +215,18 @@ describe("buildMotionSheet", () => {
     expect(html).not.toContain('class="ph ph-scroll"');
     expect(html).not.toContain("<polyline");
   });
+
+  it("omits the trail polyline + note when the timeline has an empty trail", async () => {
+    const { dir, video } = setup();
+    const res = await buildMotionSheet(
+      video,
+      { url: "https://example.com", timeline: { ...TIMELINE, trail: [] } },
+      { ffmpegPath: "ffmpeg-stub-bin", ffmpegFn: fakeFfmpeg([]) },
+    );
+    const html = readFileSync(res.htmlPath, "utf8");
+    expect(html).not.toContain("<polyline");
+    expect(html).not.toContain("cursor trail");
+    // Timeline strip still renders.
+    expect(html).toContain('<div class="ph ph-dwell"');
+  });
 });

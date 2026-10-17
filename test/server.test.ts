@@ -1210,6 +1210,52 @@ describe("record_site_motion", () => {
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("ffmpeg-static");
   });
+
+  it("appends sheet paths to the text block when the motion fn returns a sheet", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({
+      client,
+      cache,
+      motionFn: async () => ({
+        file: "/cache/motion-abc1234567.webm",
+        base64: Buffer.from("strip-jpeg").toString("base64"),
+        frames: 16,
+        sheet: {
+          htmlPath: "/cache/motion-abc1234567/sheet.html",
+          mdPath: "/cache/motion-abc1234567/sheet.md",
+          keyframes: 4,
+          masks: 3,
+        },
+      }),
+    });
+    const res = await h.record_site_motion({ url: "https://example.com" });
+    expect(res.isError).toBeUndefined();
+    expect((res.content[0] as any).text).toBe(
+      "Motion recording saved to /cache/motion-abc1234567.webm — motion sheet: /cache/motion-abc1234567/sheet.html + /cache/motion-abc1234567/sheet.md (4 keyframes, 3 masks)",
+    );
+  });
+
+  it("appends the sheet error to the text block when sheetError is present", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({
+      client,
+      cache,
+      motionFn: async () => ({
+        file: "/cache/motion-abc1234567.webm",
+        base64: Buffer.from("strip-jpeg").toString("base64"),
+        frames: 16,
+        sheet: null,
+        sheetError: "ffmpeg not found",
+      }),
+    });
+    const res = await h.record_site_motion({ url: "https://example.com" });
+    expect(res.isError).toBeUndefined();
+    expect((res.content[0] as any).text).toBe(
+      "Motion recording saved to /cache/motion-abc1234567.webm (motion sheet failed: ffmpeg not found)",
+    );
+  });
 });
 
 describe("viewport threading", () => {

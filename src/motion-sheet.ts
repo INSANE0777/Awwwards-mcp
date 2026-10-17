@@ -298,16 +298,20 @@ export async function buildMotionSheet(video: string, ctx: SheetCtx, opts: Sheet
   // trail is an SVG polyline over the grid's first cell; the timeline strip
   // is pure CSS (phase blocks positioned on a seconds axis).
   const trailSvg = tl
-    ? `<svg viewBox="0 0 ${TILE_W} ${TILE_H}" preserveAspectRatio="none"><polyline points="${tl.trail
-        .map((p) => `${(p.x * 0.5).toFixed(1)},${(p.y * 0.5).toFixed(1)}`)
-        .join(" ")}"/></svg><p class="note">cursor trail (scaled to tile cell, shown over cell 0)</p>`
+    ? `<svg viewBox="0 0 ${TILE_W} ${TILE_H}" preserveAspectRatio="none">${
+        tl.trail.length > 0
+          ? `<polyline points="${tl.trail
+              .map((p) => `${(p.x * 0.5).toFixed(1)},${(p.y * 0.5).toFixed(1)}`)
+              .join(" ")}"/></svg><p class="note">cursor trail (scaled to tile cell, shown over cell 0)</p>`
+          : "</svg>"
+      }`
     : "";
   const kinds = tl ? [...new Set(tl.phases.map((p) => p.kind))] : [];
   const strip = tl
     ? `<div class="legend">${kinds
         .map((k) => `<span class="sw" style="background:${KIND_COLOR[k]}"></span>${k}`)
         .join("")}</div>
-<div class="axis"><span>0s</span><span>${durS}s</span></div>
+<div class="axis"><span>0s</span><span>${durS}</span></div>
 <div class="strip">${tl.phases
         .map((p) => {
           const left = ((p.startMs / durationMs!) * 100).toFixed(2);
@@ -331,7 +335,7 @@ export async function buildMotionSheet(video: string, ctx: SheetCtx, opts: Sheet
     "img{max-width:100%;display:block;border:1px solid #ddd}",
     ".kfrow{display:flex;flex-wrap:wrap;gap:6px}.kfrow img{width:220px}",
     ".wrap{position:relative;width:720px;max-width:100%}",
-    ".wrap svg{position:absolute;left:0;top:0;width:" + ((100 / cols) | 0 ? (100 / cols).toFixed(2) : "100") + "%;height:" + (100 / rows).toFixed(2) + "%}",
+    ".wrap svg{position:absolute;left:0;top:0;width:" + (100 / cols).toFixed(2) + "%;height:" + (100 / rows).toFixed(2) + "%}",
     "svg polyline{fill:none;stroke:#e33;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}",
     ".strip{position:relative;height:36px;background:#f2f2f2;border:1px solid #ddd}",
     ".ph{position:absolute;top:0;bottom:0;opacity:.85}",

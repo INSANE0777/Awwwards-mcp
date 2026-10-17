@@ -71,7 +71,16 @@ export type MotionFn = (
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
   },
-) => Promise<{ file: string; base64: string; frames: number } | { error: string }>;
+) => Promise<
+  | {
+      file: string;
+      base64: string;
+      frames: number;
+      sheet?: { htmlPath: string; mdPath: string; keyframes: number; masks: number } | null;
+      sheetError?: string;
+    }
+  | { error: string }
+>;
 
 export type MotionDnaFn = (
   url: string,
@@ -1244,11 +1253,17 @@ export function createHandlers(deps: {
         viewport: args.viewport ?? "desktop",
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
+      // Undefined-checks, not `in`: sheet keys may be present-with-undefined.
+      const parts = [`Motion recording saved to ${result.file}`];
+      if (result.sheetError !== undefined) {
+        parts.push(` (motion sheet failed: ${result.sheetError})`);
+      } else if (result.sheet) {
+        parts.push(
+          ` — motion sheet: ${result.sheet.htmlPath} + ${result.sheet.mdPath} (${result.sheet.keyframes} keyframes, ${result.sheet.masks} masks)`,
+        );
+      }
       return {
-        content: [
-          text(`Motion recording saved to ${result.file}`),
-          { type: "image", data: result.base64, mimeType: "image/jpeg" },
-        ],
+        content: [text(parts.join("")), { type: "image", data: result.base64, mimeType: "image/jpeg" }],
       };
     } catch (err) {
       return errorResponse(err);
