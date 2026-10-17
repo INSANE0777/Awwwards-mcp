@@ -51,13 +51,12 @@ export interface CaptureComponentOptions {
 }
 
 /** Bounded computed-style subset collected per node (brief Step 3 list). */
-const STYLE_PROPS: string[] = [
-  "display", "position", "flexDirection", "gridTemplateColumns", "gap", "padding",
-  "margin", "width", "height", "background", "backgroundColor", "color",
-  "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing",
-  "textTransform", "borderRadius", "boxShadow", "border", "transform",
-  "transition", "opacity", "overflow", "zIndex",
-];
+type StyleProp =
+  | "display" | "position" | "flexDirection" | "gridTemplateColumns" | "gap" | "padding"
+  | "margin" | "width" | "height" | "background" | "backgroundColor" | "color"
+  | "fontFamily" | "fontSize" | "fontWeight" | "lineHeight" | "letterSpacing"
+  | "textTransform" | "borderRadius" | "boxShadow" | "border" | "transform"
+  | "transition" | "opacity" | "overflow" | "zIndex";
 
 // Runs IN THE PAGE via page.evaluate(COMPONENT_SNIPPET, { selector, maxNodes }).
 // Plain `function` expression (no arrow — page.evaluate re-serializes the
@@ -69,6 +68,15 @@ const STYLE_PROPS: string[] = [
 export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: number }): RawComponentScan {
   const g = globalThis as any;
   const doc = g.document;
+  // Declared INSIDE the snippet: page.evaluate serializes the function source
+  // only — module-scope constants would be undefined in the page.
+  const STYLE_PROPS: StyleProp[] = [
+    "display", "position", "flexDirection", "gridTemplateColumns", "gap", "padding",
+    "margin", "width", "height", "background", "backgroundColor", "color",
+    "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing",
+    "textTransform", "borderRadius", "boxShadow", "border", "transform",
+    "transition", "opacity", "overflow", "zIndex",
+  ];
   const maxNodes = arg && arg.maxNodes > 0 ? Math.floor(arg.maxNodes) : 400;
   const fonts: string[] = [];
   const colors: string[] = [];
@@ -124,10 +132,13 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
         try {
           const a = anims[i];
           const effect = a && a.effect;
+          // CSSTransition exposes the animated property on a.propertyName
+          // (transitionProperty is not a real accessor); CSSAnimation keeps
+          // animationName. Undefined-safe, dropped when both probes miss.
           let props: string[] = [];
           try {
-            const tp = effect && effect.transitionProperty;
-            if (tp && tp !== "all") props = String(tp).split(/\s+/);
+            const tp = a.propertyName ?? a.transitionProperty;
+            if (tp && tp !== "all") props = String(tp).split(/\s+/).filter(Boolean);
           } catch {}
           if (props.length === 0) {
             try {
@@ -278,11 +289,6 @@ export function reduceComponent(
   };
 }
 
-// Clamps the orchestrator's maxNodes to the brief's 50..2000 band.
-function clampMaxNodes(maxNodes?: number): number {
-  return Math.min(2000, Math.max(50, maxNodes ?? 400));
-}
-
 // Captures one component subtree: house lifecycle (shims → goto → settle →
 // preScroll → back to top → 500ms so entrance animations land and the
 // component is at rest) then one COMPONENT_SNIPPET evaluate. Mirrors
@@ -317,7 +323,7 @@ export async function captureComponent(
       // 500ms after returning to top: entrance animations fire and the
       // component is at rest before serialization.
       await page.waitForTimeout(500);
-      const arg = { selector: opts?.selector ?? "header", maxNodes: clampMaxNodes() };
+      const arg = { selector: opts?.selector ?? "header", maxNodes: 400 };
       const scan = (await page.evaluate(COMPONENT_SNIPPET, arg)) as RawComponentScan;
       return reduceComponent(
         { url: url, capturedAt: Date.now(), selector: arg.selector, viewport: { width: width, height: height }, scan: scan },

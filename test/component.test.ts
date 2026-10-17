@@ -11,6 +11,11 @@ describe("COMPONENT_SNIPPET source contract", () => {
   it("mirrors census capture contract: no direct awwwards references", () => {
     expect(String(COMPONENT_SNIPPET)).not.toMatch(/awwwards/i);
   });
+  it("declares its style-prop list inline (page.evaluate serializes no closure)", () => {
+    // A module-scope STYLE_PROPS referenced inside the snippet would be
+    // undefined in the page — the declaration must live in the function body.
+    expect(String(COMPONENT_SNIPPET)).toContain("const STYLE_PROPS");
+  });
 });
 
 // --- reducer fixtures -------------------------------------------------------
