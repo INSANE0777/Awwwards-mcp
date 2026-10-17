@@ -516,11 +516,11 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   // undefined; callers undefined-check).
   if (!collect) return base;
   let sheetFn = opts.sheetFn;
-  if (!sheetFn) {
-    // Lazy default: motion-sheet.js is only touched when the sheet is built.
-    sheetFn = (await import("./motion-sheet.js")).buildMotionSheet;
-  }
   try {
+    // Lazy default: motion-sheet.js is only touched when the sheet is built —
+    // inside the degrade try so a module-load failure degrades like any other
+    // sheet failure instead of escaping as an unhandled rejection.
+    sheetFn ??= (await import("./motion-sheet.js")).buildMotionSheet;
     const result = await sheetFn(videoPath, { url, timeline, totalHeight }, { outDir: opts.cacheImagesDir });
     return { ...base, sheet: { htmlPath: result.htmlPath, mdPath: result.mdPath, keyframes: result.keyframes, masks: result.masks } };
   } catch (err) {
