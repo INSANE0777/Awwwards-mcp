@@ -17,6 +17,9 @@ import { CAPTURE_INSTALL_HINT } from "./capture.js";
 // verified safe). The pre-scroll itself is motion-local: boundedPreScroll
 // below caps the walk so a huge page cannot blow the recording budget.
 import { type WaitStrategy } from "./structure.js";
+// Type-only: erased at compile time, so motion → motion-sheet stays acyclic
+// at runtime (motion-sheet imports this module for MOTION_FFMPEG_HINT).
+import { type buildMotionSheet } from "./motion-sheet.js";
 import { resolveViewport, type ViewportName } from "./viewport.js";
 
 export const MOTION_FFMPEG_HINT =
@@ -41,7 +44,19 @@ export interface MotionTimeline {
 }
 
 export type MotionResult =
-  | { file: string; base64: string; frames: number; timeline?: MotionTimeline }
+  | {
+      file: string;
+      base64: string;
+      frames: number;
+      timeline?: MotionTimeline;
+      // Motion Evidence Sheet, built after the strip succeeds. The four
+      // tool-facing fields only — the builder's file arrays never leak into
+      // tool output. null = the builder threw (sheetError says why); the
+      // recording itself still succeeded. undefined (key absent) = the sheet
+      // was skipped (collectTimeline:false). Always undefined-check, never `in`.
+      sheet?: { htmlPath: string; mdPath: string; keyframes: number; masks: number } | null;
+      sheetError?: string;
+    }
   | { error: string };
 
 export interface MotionOpts {
@@ -58,6 +73,11 @@ export interface MotionOpts {
   // Injectable ffmpeg invocation for offline tests; default spawns the real
   // binary (runFfmpeg below). Spawn/encode failure → MOTION_FFMPEG_HINT.
   ffmpegFn?: (bin: string, video: string, strip: string, frames: number) => Promise<void>;
+  // Injectable sheet builder (default: lazy import of motion-sheet.js) so
+  // tests never run real ffmpeg. Only runs when the strip succeeded AND
+  // collectTimeline !== false; a throw degrades to sheet:null + sheetError
+  // instead of failing the recording.
+  sheetFn?: typeof buildMotionSheet;
   waitStrategy?: WaitStrategy;
   // Recording-context profile: "desktop" (default, 1440x900) or "mobile"
   // (390x844 @ DPR 3, isMobile + hasTouch).
@@ -242,6 +262,9 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   const phases: MotionTimeline["phases"] = [];
   const trail: MotionTimeline["trail"] = [];
   const rel = (): number => Date.now() - t0;
+  // Page height, probed during the pass (feeds the scroll tour; survives the
+  // try-block for the sheet's SheetCtx.totalHeight).
+  let totalHeight = 0;
   // Wrap a block as a phase; the block itself is untouched (lifecycle frozen).
   const phase = async <T>(kind: MotionTimeline["phases"][number]["kind"], body: () => Promise<T>, extra?: Partial<{ scrollY: number; targetX: number; targetY: number }>): Promise<T> => {
     if (!collect) return body();
@@ -306,7 +329,7 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
       };
 
       // Slow scroll down so every scroll-triggered animation fires on camera.
-      const totalHeight: number = await page.evaluate(
+      totalHeight = await page.evaluate(
         () => Math.round((globalThis as any).document.body.scrollHeight),
       );
       const steps = Math.min(Math.ceil(totalHeight / SCROLL_STEP), MAX_SCROLL_STEPS);
@@ -482,5 +505,27 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   if (!existsSync(stripPath)) return { error: MOTION_FFMPEG_HINT };
   const timeline: MotionTimeline | undefined =
     collect ? { t0, phases, trail } : undefined;
-  return { file: videoPath, base64: (await readFile(stripPath)).toString("base64"), frames, timeline };
+  const base = {
+    file: videoPath,
+    base64: (await readFile(stripPath)).toString("base64"),
+    frames,
+    timeline,
+  };
+  // Sheet only when the strip succeeded AND a timeline exists (a
+  // collectTimeline:false recording skips it entirely — `sheet` stays
+  // undefined; callers undefined-check).
+  if (!collect) return base;
+  let sheetFn = opts.sheetFn;
+  if (!sheetFn) {
+    // Lazy default: motion-sheet.js is only touched when the sheet is built.
+    sheetFn = (await import("./motion-sheet.js")).buildMotionSheet;
+  }
+  try {
+    const result = await sheetFn(videoPath, { url, timeline, totalHeight }, { outDir: opts.cacheImagesDir });
+    return { ...base, sheet: { htmlPath: result.htmlPath, mdPath: result.mdPath, keyframes: result.keyframes, masks: result.masks } };
+  } catch (err) {
+    // Degrade, never fail: the recording + filmstrip are already good.
+    const msg = err instanceof Error ? err.message.replace(/\s+/g, " ").trim() : String(err);
+    return { ...base, sheet: null, sheetError: msg };
+  }
 }

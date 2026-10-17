@@ -254,6 +254,124 @@ describe("recordSiteMotion", () => {
     expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
   });
 
+  it("emits a Motion Evidence Sheet after strip success: sheetFn called once with (video, {url, timeline, totalHeight})", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const sheetCalls: Array<{ video: string; ctx: any; opts: any }> = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, [], (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+      sheetFn: async (video, ctx, opts) => {
+        sheetCalls.push({ video, ctx, opts });
+        return {
+          htmlPath: join(dir, "sheet.html"),
+          mdPath: join(dir, "motion-sheet.md"),
+          keyframes: 5,
+          masks: 4,
+          keyframeFiles: [join(dir, "sheet-kf-0.jpg")],
+          maskFiles: [join(dir, "sheet-diff-0.jpg")],
+        };
+      },
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) return;
+    // Only the four tool-facing fields — the file arrays never leak into the result.
+    expect(res.sheet).toEqual({
+      htmlPath: join(dir, "sheet.html"),
+      mdPath: join(dir, "motion-sheet.md"),
+      keyframes: 5,
+      masks: 4,
+    });
+    expect(res.sheetError).toBeUndefined();
+    expect(sheetCalls.length).toBe(1);
+    expect(sheetCalls[0].video).toBe(res.file);
+    expect(sheetCalls[0].ctx.url).toBe(URL_UNDER_TEST);
+    expect(sheetCalls[0].ctx.timeline).toBe(res.timeline);
+    expect(sheetCalls[0].ctx.totalHeight).toBe(1200); // fake page height
+    expect(sheetCalls[0].opts).toEqual({ outDir: dir }); // same dir as the video
+    // Old success fields intact.
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.frames).toBe(16);
+    expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
+  });
+
+  it("a throwing sheetFn degrades to sheet:null + one-line sheetError without failing the run", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, [], (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+      // Multi-line message must be collapsed to one line (no stack).
+      sheetFn: async () => {
+        throw new Error("ffmpeg\nblew up");
+      },
+    });
+    expect("error" in res).toBe(false); // the tool call still succeeds
+    if ("error" in res) return;
+    expect(res.sheet).toBeNull();
+    expect(res.sheetError).toBe("ffmpeg blew up");
+    // Old fields intact.
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.frames).toBe(16);
+    expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
+    expect(res.timeline).toBeDefined();
+  });
+
+  it("collectTimeline:false skips the sheet entirely: no sheetFn call, sheet stays undefined", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    let sheetFnCalls = 0;
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      collectTimeline: false,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, [], (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+      sheetFn: async () => {
+        sheetFnCalls++;
+        return {
+          htmlPath: join(dir, "sheet.html"),
+          mdPath: join(dir, "motion-sheet.md"),
+          keyframes: 1,
+          masks: 0,
+          keyframeFiles: [],
+          maskFiles: [],
+        };
+      },
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) return;
+    expect(sheetFnCalls).toBe(0);
+    expect(res.sheet).toBeUndefined();
+    expect(res.sheetError).toBeUndefined();
+    expect(res.timeline).toBeUndefined();
+  });
+
   it("discovery script is page-safe: hover cap arrives as an evaluate argument, not a Node-scope free identifier", async () => {
     // Regression: the discovery callback used to reference the module
     // constant MAX_HOVER_TARGETS directly — page.evaluate serializes the
