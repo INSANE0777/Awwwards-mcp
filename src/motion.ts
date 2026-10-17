@@ -24,8 +24,24 @@ export const MOTION_FFMPEG_HINT =
   "Install it where this server runs (globally works for a global install):  npm install -g ffmpeg-static\n" +
   "Then retry record_site_motion.";
 
+// Additive recording evidence (Node-side timestamps only — no page time):
+// windows around the waits/scrolls/hovers/clicks the pass already does, plus
+// one cursor-trail point per moveCursor call. Consumed by the motion sheet.
+export interface MotionTimeline {
+  t0: number; // Date.now() origin; every *Ms field is an offset from it
+  phases: Array<{
+    kind: "dwell" | "scroll" | "hover" | "click" | "return";
+    startMs: number;
+    endMs: number;
+    scrollY?: number;
+    targetX?: number;
+    targetY?: number;
+  }>;
+  trail: Array<{ tMs: number; x: number; y: number }>;
+}
+
 export type MotionResult =
-  | { file: string; base64: string; frames: number }
+  | { file: string; base64: string; frames: number; timeline?: MotionTimeline }
   | { error: string };
 
 export interface MotionOpts {
@@ -46,6 +62,10 @@ export interface MotionOpts {
   // Recording-context profile: "desktop" (default, 1440x900) or "mobile"
   // (390x844 @ DPR 3, isMobile + hasTouch).
   viewport?: ViewportName;
+  // Node-side timeline capture around the existing waits/moves (default true).
+  // false: no phases/trail are collected and the success result omits
+  // `timeline` entirely.
+  collectTimeline?: boolean;
 }
 
 // Recording-pass timings, tuned against the 30s MCP tool ceiling. The
@@ -215,6 +235,24 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   const videoTmp = mkdtempSync(join(opts.cacheImagesDir, ".video-tmp-"));
 
   const waitStrategy: WaitStrategy = opts.waitStrategy ?? "load";
+  // Timeline capture is additive Node-side bookkeeping (Date.now() around the
+  // waits/moves the pass already performs — zero new page time or evaluates).
+  const collect = opts.collectTimeline !== false;
+  const t0 = Date.now();
+  const phases: MotionTimeline["phases"] = [];
+  const trail: MotionTimeline["trail"] = [];
+  const rel = (): number => Date.now() - t0;
+  // Wrap a block as a phase; the block itself is untouched (lifecycle frozen).
+  const phase = async <T>(kind: MotionTimeline["phases"][number]["kind"], body: () => Promise<T>, extra?: Partial<{ scrollY: number; targetX: number; targetY: number }>): Promise<T> => {
+    if (!collect) return body();
+    const startMs = rel();
+    try {
+      return await body();
+    } finally {
+      phases.push({ kind, startMs, endMs: rel(), ...extra });
+    }
+  };
+
   try {
     // Viewport profile split (same as structure/capture): width/height fill
     // the `viewport` key; the mobile-profile flags (deviceScaleFactor/
@@ -230,10 +268,10 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
     });
     try {
       const page = await context.newPage();
-      await page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 });
+      await phase("dwell", () => page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 }));
       // Preloader + entrance animations on camera. This top-of-page wait also
       // stands in for capture.ts's fixed 3s "load" settle (see budget above).
-      await page.waitForTimeout(DWELL_MS);
+      await phase("dwell", () => page.waitForTimeout(DWELL_MS));
       // Pre-render lazy sections so the tour films settled layout (bounded —
       // see boundedPreScroll; a huge page must not burn the budget here).
       await boundedPreScroll(page);
@@ -256,6 +294,7 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
         doc.body.appendChild(cur);
       });
       const moveCursor = async (x: number, y: number): Promise<void> => {
+        if (collect) trail.push({ tMs: rel(), x, y });
         await page.mouse.move(x, y, { steps: 12 });
         await page.evaluate(
           ([mx, my]: number[]) => {
@@ -272,11 +311,17 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
       );
       const steps = Math.min(Math.ceil(totalHeight / SCROLL_STEP), MAX_SCROLL_STEPS);
       for (let i = 1; i <= steps; i++) {
-        await page.evaluate(
-          (top: number) => (globalThis as any).window.scrollTo({ top, behavior: "instant" }),
-          i * SCROLL_STEP,
+        await phase(
+          "scroll",
+          async () => {
+            await page.evaluate(
+              (top: number) => (globalThis as any).window.scrollTo({ top, behavior: "instant" }),
+              i * SCROLL_STEP,
+            );
+            await page.waitForTimeout(SCROLL_SETTLE_MS);
+          },
+          { scrollY: i * SCROLL_STEP },
         );
-        await page.waitForTimeout(SCROLL_SETTLE_MS);
       }
 
       // Interaction-pass target discovery (runs IN THE PAGE): classic
@@ -372,12 +417,22 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
           );
           if (!box) continue;
           await moveCursor(box.x, box.y);
-          await page.waitForTimeout(HOVER_DWELL_MS); // let the hover transition play
+          await phase(
+            "hover",
+            () => page.waitForTimeout(HOVER_DWELL_MS), // let the hover transition play
+            { targetX: t.x, targetY: t.y },
+          );
           if (t.safeClick && clicked < MAX_CLICKS) {
-            await page.mouse.down();
-            await page.mouse.up(); // :active + click effects
-            clicked++;
-            await page.waitForTimeout(CLICK_SETTLE_MS); // let the click animation play
+            await phase(
+              "click",
+              async () => {
+                await page.mouse.down();
+                await page.mouse.up(); // :active + click effects
+                clicked++;
+                await page.waitForTimeout(CLICK_SETTLE_MS); // let the click animation play
+              },
+              { targetX: t.x, targetY: t.y },
+            );
           }
         } catch {
           // detached/overlaid element — skip and continue the tour
@@ -385,8 +440,10 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
       }
 
       // Return to top so the video ends where it started.
-      await page.evaluate(() => (globalThis as any).window.scrollTo({ top: 0, behavior: "instant" }));
-      await page.waitForTimeout(TOP_RETURN_MS);
+      await phase("return", async () => {
+        await page.evaluate(() => (globalThis as any).window.scrollTo({ top: 0, behavior: "instant" }));
+        await page.waitForTimeout(TOP_RETURN_MS);
+      });
     } finally {
       // Closing the context is what flushes the .webm to disk.
       try {
@@ -423,5 +480,7 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
     return { error: MOTION_FFMPEG_HINT };
   }
   if (!existsSync(stripPath)) return { error: MOTION_FFMPEG_HINT };
-  return { file: videoPath, base64: (await readFile(stripPath)).toString("base64"), frames };
+  const timeline: MotionTimeline | undefined =
+    collect ? { t0, phases, trail } : undefined;
+  return { file: videoPath, base64: (await readFile(stripPath)).toString("base64"), frames, timeline };
 }

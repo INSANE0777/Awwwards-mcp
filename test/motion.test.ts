@@ -177,6 +177,83 @@ describe("recordSiteMotion", () => {
     expect(calls[calls.length - 1]).toBe("context:close"); // flush point
   });
 
+  it("captures a motion timeline: dwell + scroll + hover + click + return phases and a cursor trail", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const mouse = { down: 0, up: 0 };
+    const contextOpts: any[] = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: async () => ({
+        chromium: fakeChromium(calls, mouse, contextOpts, (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) return;
+    // Old success fields unchanged (timeline is additive).
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.frames).toBe(16);
+    expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
+
+    const tl = res.timeline!;
+    expect(typeof tl.t0).toBe("number");
+    // ≥1 dwell + N scroll phases (N = fake tour steps: 1200px / 450px) + return.
+    expect(tl.phases.filter((p) => p.kind === "dwell").length).toBeGreaterThanOrEqual(1);
+    const scrolls = tl.phases.filter((p) => p.kind === "scroll");
+    expect(scrolls.length).toBe(3);
+    expect(scrolls.map((p) => p.scrollY)).toEqual([450, 900, 1350]);
+    expect(tl.phases.some((p) => p.kind === "return")).toBe(true);
+    // Hover phases match the fake discovery targets, in tour order (y-sorted).
+    const hovers = tl.phases.filter((p) => p.kind === "hover");
+    expect(hovers.map((p) => [p.targetX, p.targetY])).toEqual([
+      [60, 300],
+      [400, 700],
+    ]);
+    // One click phase — only the single safeClick target is clicked.
+    expect(tl.phases.filter((p) => p.kind === "click").length).toBe(1);
+    // All timestamps are relative and sane: non-negative start, end ≥ start.
+    for (const p of tl.phases) {
+      expect(p.startMs).toBeGreaterThanOrEqual(0);
+      expect(p.endMs).toBeGreaterThanOrEqual(p.startMs);
+    }
+    // Trail: one point per moveCursor (2 targets, both resolve a hit-box),
+    // monotonically non-decreasing tMs.
+    expect(tl.trail.length).toBe(2);
+    for (let i = 1; i < tl.trail.length; i++) {
+      expect(tl.trail[i].tMs).toBeGreaterThanOrEqual(tl.trail[i - 1].tMs);
+    }
+  });
+
+  it("collectTimeline:false keeps the old success fields and omits the timeline", async () => {
+    const dir = tmpDir();
+    const calls: string[] = [];
+    const res = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      collectTimeline: false,
+      loader: async () => ({
+        chromium: fakeChromium(calls, { down: 0, up: 0 }, [], (recDir) => {
+          writeFileSync(join(recDir, "recording.webm"), "fake-webm");
+        }),
+      }),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn: async (_bin, _video, strip) => {
+        const fs = await import("node:fs/promises");
+        await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+      },
+    });
+    expect("error" in res).toBe(false);
+    if ("error" in res) return;
+    expect(res.timeline).toBeUndefined();
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+  });
+
   it("discovery script is page-safe: hover cap arrives as an evaluate argument, not a Node-scope free identifier", async () => {
     // Regression: the discovery callback used to reference the module
     // constant MAX_HOVER_TARGETS directly — page.evaluate serializes the
