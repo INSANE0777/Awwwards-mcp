@@ -307,6 +307,31 @@ server.tool(
 );
 
 server.tool(
+  "capture_pose_3d",
+  "Capture a page's WebGL/canvas 3D pose grid: samples the largest canvas (toDataURL, viewport-screenshot fallback) at up to 10 scroll steps with per-step scroll ratios, for reconstructing scroll-driven 3D camera paths. Runs on any URL — does not fetch awwwards.com. Requires the optional playwright dependency.",
+  {
+    url: z.string().url().describe("Absolute page URL to capture (https:// or file://)"),
+    steps: z.number().int().min(3).max(10).optional()
+      .describe("Scroll samples across the page (default 6)"),
+    viewport: viewportSchema,
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.capture_pose_3d(args)),
+);
+
+server.tool(
+  "build_pose_stub",
+  "Render a captured pose grid (pose-grid-v1 from capture_pose_3d) as a standalone scroll-scrubbed three.js stub page: frames preloaded inline, camera path interpolated between snapshot scroll ratios, prefers-reduced-motion static fallback, optional census-derived st/pin/ease suggestions. Pure build — no page fetches, no awwwards.com access.",
+  {
+    poseGrid: z.any().describe("PoseGrid object as returned by capture_pose_3d (id pose-grid-v1)"),
+    scrollCensus: z.any().optional()
+      .describe("Optional ScrollCensus from analyze_scroll_map — adds suggestion notes + comment hints"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  (args) => asMcpResult(handlers.build_pose_stub(args)),
+);
+
+server.tool(
   "search_motion",
   "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
   {
