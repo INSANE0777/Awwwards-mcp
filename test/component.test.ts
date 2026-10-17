@@ -24,6 +24,36 @@ describe("COMPONENT_SNIPPET source contract", () => {
   });
 });
 
+describe("COMPONENT_SNIPPET fidelity source contract", () => {
+  const src = String(COMPONENT_SNIPPET);
+  it("captures ::before/::after through the content gate (source-lock)", () => {
+    expect(src).toContain('getComputedStyle(el, "::before")');
+    expect(src).toContain('getComputedStyle(el, "::after")');
+    // Pseudo styles reuse stylesOf with the pseudo arg (same STYLE_PROPS list).
+    expect(src).toContain('stylesOf(el, "::before")');
+    expect(src).toContain('stylesOf(el, "::after")');
+  });
+  it("gates pseudo capture on a real content value", () => {
+    expect(src).toContain('cs.content !== "none"');
+    expect(src).toContain('cs.content !== "normal"');
+  });
+  it("declares the 18 new fidelity style keys inline", () => {
+    const keys = [
+      "left", "top", "right", "bottom",
+      "backgroundImage", "backgroundSize", "backgroundPosition",
+      "alignItems", "justifyContent", "flexWrap", "textAlign",
+      "minHeight", "maxHeight", "minWidth", "maxWidth",
+      "filter", "backdropFilter", "objectFit", "aspectRatio",
+    ];
+    for (const key of keys) expect(src).toContain('"' + key + '"');
+  });
+  it("clamps maxNodes in-page for safety (source-lock)", () => {
+    // Numeric literals are transpiled (2000 → 2e3), so match the operator form.
+    expect(src).toContain("Math.max(1, Math.min(");
+    expect(src).toContain("|| 400)");
+  });
+});
+
 // --- reducer fixtures -------------------------------------------------------
 
 const n = (children: ComponentNode[] = [], over: Partial<ComponentNode> = {}): ComponentNode => ({
@@ -97,6 +127,23 @@ describe("reduceComponent", () => {
   it("maps a notFound scan to the selector error contract", () => {
     const miss = reduceComponent(input({ notFound: true, root: null, nodeCount: 0 }));
     expect(miss).toEqual({ error: "selector not found: header" });
+  });
+
+  it("passes pseudos through untouched and harvests fonts/colors from them", () => {
+    const withPseudo = n([], {
+      tag: "h1",
+      pseudos: [
+        {
+          kind: "before",
+          content: '"★"',
+          styles: { fontFamily: "Iconic", color: "#ff0000" },
+        },
+      ],
+    });
+    const pack = reduceComponent(input({ root: withPseudo, nodeCount: 1 })) as ComponentPack;
+    expect(pack.root.pseudos).toEqual(withPseudo.pseudos); // pass-through, untouched
+    expect(pack.fonts).toEqual(["Arial", "Iconic", "Zig"]); // "Iconic" harvested from pseudo styles
+    expect(pack.colors).toEqual(["#000000", "#ff0000", "#ffffff"]); // "#ff0000" from pseudo styles
   });
 });
 
@@ -204,6 +251,17 @@ describe("captureComponent", () => {
     expect("error" in result).toBe(false);
     if ("error" in result) return;
     expect(result.selector).toBe(".hero");
+  });
+
+  it("honors the maxNodes opt end-to-end", async () => {
+    const { loader, evaluateCalls } = harness(scan({}));
+    const result = await captureComponent("u", { loader, maxNodes: 50 });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    // Orchestrator forwards the raw opt to the snippet arg...
+    expect(evaluateCalls[evaluateCalls.length - 1][1]).toEqual({ selector: "header", maxNodes: 50 });
+    // ...and to the reducer, whose 50..2000 clamp keeps it (fixture is 3 nodes).
+    expect(result.nodeCount).toBe(3);
   });
 
   it("returns the selector error contract when the scan misses", async () => {
