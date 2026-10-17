@@ -17,6 +17,8 @@ export interface ComponentNode {
   svg?: string;
   /** Element animations ≤10 per node, timing from effect.getTiming(). */
   anims?: { props: string[]; durationMs: number | null; easing: string | null }[];
+  /** Captured ::before/::after (only when content is set; ≤2 per node). */
+  pseudos?: { kind: "before" | "after"; content: string; styles: Record<string, string> }[];
   children: ComponentNode[];
 }
 
@@ -47,6 +49,8 @@ export interface CaptureComponentOptions {
   selector?: string;
   timeoutMs?: number;
   viewport?: ViewportName;
+  /** Max nodes the in-page walk may serialize (default 400; clamp lives in the reducer 50..2000). */
+  maxNodes?: number;
   loader?: () => Promise<any>;
 }
 
@@ -56,7 +60,12 @@ type StyleProp =
   | "margin" | "width" | "height" | "background" | "backgroundColor" | "color"
   | "fontFamily" | "fontSize" | "fontWeight" | "lineHeight" | "letterSpacing"
   | "textTransform" | "borderRadius" | "boxShadow" | "border" | "transform"
-  | "transition" | "opacity" | "overflow" | "zIndex";
+  | "transition" | "opacity" | "overflow" | "zIndex"
+  | "left" | "top" | "right" | "bottom"
+  | "backgroundImage" | "backgroundSize" | "backgroundPosition"
+  | "alignItems" | "justifyContent" | "flexWrap" | "textAlign"
+  | "minHeight" | "maxHeight" | "minWidth" | "maxWidth"
+  | "filter" | "backdropFilter" | "objectFit" | "aspectRatio";
 
 // Runs IN THE PAGE via page.evaluate(COMPONENT_SNIPPET, { selector, maxNodes }).
 // Plain `function` expression (no arrow — page.evaluate re-serializes the
@@ -76,8 +85,15 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
     "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing",
     "textTransform", "borderRadius", "boxShadow", "border", "transform",
     "transition", "opacity", "overflow", "zIndex",
+    "left", "top", "right", "bottom",
+    "backgroundImage", "backgroundSize", "backgroundPosition",
+    "alignItems", "justifyContent", "flexWrap", "textAlign",
+    "minHeight", "maxHeight", "minWidth", "maxWidth",
+    "filter", "backdropFilter", "objectFit", "aspectRatio",
   ];
-  const maxNodes = arg && arg.maxNodes > 0 ? Math.floor(arg.maxNodes) : 400;
+  // In-page safety clamp: the reducer clamps 50..2000 too, but a hostile arg
+  // must not explode the walk before the pack ever reaches the reducer.
+  const maxNodes = Math.max(1, Math.min(2000, (arg && arg.maxNodes) || 400));
   const fonts: string[] = [];
   const colors: string[] = [];
   let count = 0;
@@ -96,11 +112,13 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
   }
 
   // Bounded computed-style subset; each probe try/caught, undefined skipped.
-  function stylesOf(el: any): Record<string, string> {
+  // Pseudo arg (::before/::after) reuses the same STYLE_PROPS list; the fonts
+  // and colors harvested inside also feed the pack's sets (requirement 2).
+  function stylesOf(el: any, pseudo?: string): Record<string, string> {
     const out: Record<string, string> = {};
     let s: any = null;
     try {
-      s = g.getComputedStyle(el);
+      s = pseudo ? g.getComputedStyle(el, pseudo) : g.getComputedStyle(el);
     } catch {}
     if (!s) return out;
     for (let i = 0; i < STYLE_PROPS.length; i++) {
@@ -120,6 +138,26 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
       } catch {}
     }
     return out;
+  }
+
+  // ::before/::after, ≤2 per node: captured only when a real content value is
+  // set (the marker of an intentional decorative pseudo-element). Each probe
+  // try/caught; the style fetch reuses stylesOf with the pseudo arg.
+  function pseudosOf(el: any): { kind: "before" | "after"; content: string; styles: Record<string, string> }[] {
+    const rows: { kind: "before" | "after"; content: string; styles: Record<string, string> }[] = [];
+    try {
+      const cs = g.getComputedStyle(el, "::before");
+      if (cs.content && cs.content !== "none" && cs.content !== "normal") {
+        rows.push({ kind: "before", content: String(cs.content), styles: stylesOf(el, "::before") });
+      }
+    } catch {}
+    try {
+      const cs = g.getComputedStyle(el, "::after");
+      if (cs.content && cs.content !== "none" && cs.content !== "normal") {
+        rows.push({ kind: "after", content: String(cs.content), styles: stylesOf(el, "::after") });
+      }
+    } catch {}
+    return rows;
   }
 
   // ≤10 element animations per node: props from transitionProperty (transitions)
@@ -181,6 +219,10 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
       node.rect = { x: r.x, y: r.y, w: r.width, h: r.height };
     } catch {}
     node.styles = stylesOf(el);
+    try {
+      const ps = pseudosOf(el);
+      if (ps.length > 0) node.pseudos = ps; // absent = none (lean packs)
+    } catch {}
     try {
       if (!el.children || el.children.length === 0) {
         const t = el.textContent;
@@ -251,9 +293,25 @@ export function reduceComponent(
     return { error: "selector not found: " + input.selector };
   }
   // Fonts/colors are collected in-page by the snippet; the reducer only
-  // dedupes+sorts the scan's collected values.
+  // dedupes+sorts the scan's collected values — plus anything harvestable
+  // from captured pseudo styles (fake/manual snippet output may include them
+  // without the in-page sets having run).
   const fonts = new Set<string>(input.scan.fonts ?? []);
   const colors = new Set<string>(input.scan.colors ?? []);
+  function harvestPseudo(node: ComponentNode): void {
+    if (node.pseudos) {
+      for (const p of node.pseudos) {
+        const ff = p.styles["fontFamily"];
+        if (ff) fonts.add(ff);
+        for (const key of ["color", "backgroundColor", "background"]) {
+          const cv = p.styles[key];
+          if (cv && cv !== "none") colors.add(cv);
+        }
+      }
+    }
+    for (const child of node.children) harvestPseudo(child);
+  }
+  harvestPseudo(input.scan.root);
   let nodeCount = 0;
 
   // Keeps `node` plus as much of its subtree as `budget` allows; prunes
@@ -323,7 +381,7 @@ export async function captureComponent(
       // 500ms after returning to top: entrance animations fire and the
       // component is at rest before serialization.
       await page.waitForTimeout(500);
-      const arg = { selector: opts?.selector ?? "header", maxNodes: 400 };
+      const arg = { selector: opts?.selector ?? "header", maxNodes: opts?.maxNodes ?? 400 };
       const scan = (await page.evaluate(COMPONENT_SNIPPET, arg)) as RawComponentScan;
       return reduceComponent(
         { url: url, capturedAt: Date.now(), selector: arg.selector, viewport: { width: width, height: height }, scan: scan },
