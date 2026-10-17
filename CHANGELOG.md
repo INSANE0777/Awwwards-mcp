@@ -3,7 +3,33 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## v1.8.0 — 2026-10-12
+## v1.9.0 - 2026-10-17
+
+Motion Evidence, fidelity capture, and the recreation pipeline.
+
+- New `capture_component` tool: serialize any page component (structure,
+  computed-style tokens, animations, pseudo-elements) into a portable
+  component pack for rebuild tooling. Runs on any URL. New `maxNodes`
+  option (50–2000, default 400) for large sections.
+- New `capture_pose_3d` tool: hero-canvas reference frames across a scroll
+  journey → camera pose grid.
+- New `build_pose_stub` tool: pose grid → offline three.js + GSAP replay
+  skeleton (reduced-motion guarded, deterministic).
+- `record_site_motion` now emits a Motion Evidence Sheet beside the filmstrip:
+  census-timed keyframe grid, consecutive-frame difference masks, onion-skin
+  composite, cursor-trail overlay, inspector-style timeline strip, and
+  `motion-sheet.md` (video→document captions stamped with t / phase / scrollY).
+  Degrades gracefully — the recording never fails because the sheet does.
+- Fidelity capture: `capture_component` now records 44 computed-style keys
+  (layout offsets, background image/size/position, flex/grid alignment,
+  aspect-ratio, filters) plus `::before`/`::after` pseudo-elements —
+  pixel-adjacent rebuilds, not just structure.
+- New `analyze_hover_census` refinements: real-page hover semantics
+  (IDL camelCase access, :hover-stripped candidate matching).
+- Fixed a tsx-only snippet-injection failure in the hover census
+  (`installSnippetShims` now applied everywhere snippets are evaluated).
+
+## v1.8.0 - 2026-10-12
 
 Deterministic design briefs and evidence-backed interaction guidance.
 
