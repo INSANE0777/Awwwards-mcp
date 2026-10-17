@@ -192,7 +192,29 @@ End every capture/study pass by recording what verification caught:
   design.
 - **Studying nothing, animating from vibes** — "it probably fades in" is
   how builds drift from references.
-- **Republishing recordings** — captures are local study evidence.
+- **Republishing recordings** - captures are local study evidence.
+
+## Instrument-first pass (data before video)
+
+The MCP now ships data instruments that answer questions video can only hint
+at. Run them BEFORE recording - then record only what they can't express:
+
+- `analyze_scroll_map` - per-element scroll census: which elements animate,
+  their triggers (scroll/pin/scrub), durations, easings. This is the motion
+  inventory video would take 10 minutes of scrubbing to approximate.
+- `analyze_hover_census` - hover rules + computed-style diffs with transition
+  timing, no recording needed.
+- `get_motion_dna` - the site's motion vocabulary in one call: libraries,
+  easing tokens, duration quartiles. Feeds a rebuild's type scale directly.
+- `capture_pose_3d` - WebGL/canvas heroes, which screen recording captures
+  worst (flat pixels of a 3D scene). Pose grids + `build_pose_stub` give the
+  camera path instead.
+
+Video keeps what data cannot express: feel, choreography, sequencing, where
+the eye goes. The study order is: censuses first, recording second, then
+reconcile - anything the video shows that the census missed is a finding, not
+a redundancy. When the study feeds a rebuild, close the loop with
+`verify_build` (motion fingerprint + band compare) instead of eyeballing.
 
 <!-- skill-memory:start -->
 <!-- skill-memory:end -->
