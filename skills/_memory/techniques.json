@@ -7,6 +7,18 @@
       "summary": "From recording to model-ready motion context. Field consensus 2025-2026: scene detection FIRST, keyframes per scene, adaptive any-k budget, then structured context to the model. Our tile-per-element doctrine is the special case for short UI loops; layered analysis + superprompt hand-off extends it beyond in-session builds.",
       "techniques": [
         {
+          "id": "section-loop-band-gate",
+          "when": "Rebuilding any multi-section page from a reference (see skills/awwwards-section-loop).",
+          "how": [
+            "analyze_page_structure band map = build order; one giant band (5000px+) means collapsed sections - switch to explicit class/id selectors per real section",
+            "capture_component per section in band order; selector ladder: class/id > role attr > tag names (real sites often lack <header>)",
+            "verify_build per band after each section builds - read ONLY that band's score; iterate until it passes; LOCK the section before starting the next",
+            "Shared WebGL/canvas across bands = page does not slice - capture_pose_3d for that region as ONE unit",
+            "Final whole-page verify_build = coherence pass (spacing rhythm, easing family, scroll continuity), fixed at token level not by re-opening locked sections"
+          ],
+          "source": "Recreation-kit dogfooding 2026-10-17: estherwong.fun (header tag miss, 2-band map) + neutomni.com (20631px collapsed band, Webflow selector ladder)"
+        },
+        {
           "id": "scene-detect-first",
           "when": "Before tiling any recording longer than ~20s or with multiple distinct animations (preloader → scroll → transition).",
           "how": [
