@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { COMPONENT_SNIPPET, captureComponent, reduceComponent } from "../src/component.js";
 import type { ComponentNode, ComponentPack } from "../src/component.js";
+import { createHandlers } from "../src/server.js";
+import { AwwwardsClient } from "../src/awwwards.js";
+import { Cache } from "../src/cache.js";
 
 describe("COMPONENT_SNIPPET source contract", () => {
   it("is a plain function expression (no arrows)", () => {
@@ -91,6 +97,65 @@ describe("reduceComponent", () => {
   it("maps a notFound scan to the selector error contract", () => {
     const miss = reduceComponent(input({ notFound: true, root: null, nodeCount: 0 }));
     expect(miss).toEqual({ error: "selector not found: header" });
+  });
+});
+
+// --- MCP handler (DI fake captureComponentFn, mirrors server.test.ts) ------
+
+describe("capture_component handler", () => {
+  const dirs: string[] = [];
+  const tmpDir = () => {
+    const d = mkdtempSync(join(tmpdir(), "awwwards-comp-"));
+    dirs.push(d);
+    return d;
+  };
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const pack: ComponentPack = {
+    id: "component-pack-v1",
+    url: "https://example.com",
+    selector: "header",
+    capturedAt: 1700000000000,
+    viewport: { width: 1440, height: 900 },
+    nodeCount: 3,
+    root: { tag: "header", classes: [], rect: { x: 0, y: 0, w: 10, h: 10 }, styles: {}, children: [] },
+    fonts: ["Arial"],
+    colors: ["#ffffff"],
+  };
+
+  it("returns the pack as a JSON text block (pass-through of pack fields)", async () => {
+    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string } }> = [];
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(tmpDir()),
+      captureComponentFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return pack;
+      },
+    });
+    const res = await h.capture_component({ url: pack.url, selector: ".hero", viewport: "mobile" });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.id).toBe("component-pack-v1");
+    expect(parsed.selector).toBe("header");
+    expect(parsed.nodeCount).toBe(3);
+    expect(parsed.fonts).toEqual(["Arial"]);
+    expect(parsed.colors).toEqual(["#ffffff"]);
+    // args map onto the capture fn's opts
+    expect(seen[0]).toEqual({ url: pack.url, opts: { selector: ".hero", viewport: "mobile" } });
+  });
+
+  it("maps { error } results to error responses", async () => {
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(tmpDir()),
+      captureComponentFn: async () => ({ error: "selector not found: header" }),
+    });
+    const res = await h.capture_component({ url: "https://example.com" });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("selector not found: header");
   });
 });
 

@@ -291,6 +291,22 @@ server.tool(
 );
 
 server.tool(
+  "capture_component",
+  "Serialize a page component (structure, computed-style tokens, animations) into a portable pack for rebuild tooling. Runs on any URL — does not fetch awwwards.com.",
+  {
+    url: z.string().url().describe("Absolute page URL whose component to serialize"),
+    selector: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("CSS selector of the component root (default 'header')"),
+    viewport: viewportSchema,
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.capture_component(args)),
+);
+
+server.tool(
   "search_motion",
   "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
   {

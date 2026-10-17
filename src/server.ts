@@ -13,6 +13,7 @@ import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { VerifyBuildFn } from "./verify-build.js";
+import type { ComponentPack } from "./component.js";
 import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
@@ -88,6 +89,12 @@ export type ScrollMapFn = (
 // captureHoverCensus (hover-census.ts) owns the canonical shape.
 export type { HoverCensusFn };
 export type { VerifyBuildFn };
+export type { ComponentPack };
+
+export type CaptureComponentFn = (
+  url: string,
+  opts?: { selector?: string; viewport?: ViewportName },
+) => Promise<ComponentPack | { error: string }>;
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -213,6 +220,11 @@ export interface Handlers {
     reducedMotion?: boolean;
   }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
+  capture_component(args: {
+    url: string;
+    selector?: string;
+    viewport?: ViewportName;
+  }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
     scrubOnly?: boolean;
@@ -243,6 +255,7 @@ export function createHandlers(deps: {
   scrollMapFn?: ScrollMapFn;
   hoverCensusFn?: HoverCensusFn;
   verifyBuildFn?: VerifyBuildFn;
+  captureComponentFn?: CaptureComponentFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1095,6 +1108,28 @@ export function createHandlers(deps: {
     }
   }
 
+  async function capture_component(args: {
+    url: string;
+    selector?: string;
+    viewport?: ViewportName;
+  }): Promise<ToolResponse> {
+    try {
+      // Lazy default: playwright is only touched when the tool actually runs.
+      const capture =
+        deps.captureComponentFn ??
+        ((url: string, opts?: { selector?: string; viewport?: ViewportName }) =>
+          import("./component.js").then((m) => m.captureComponent(url, opts)));
+      const result = await capture(args.url, {
+        selector: args.selector,
+        viewport: args.viewport ?? "desktop",
+      });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function record_site_motion(args: {
     url: string;
     frames?: number;
@@ -1298,6 +1333,7 @@ export function createHandlers(deps: {
     analyze_scroll_map,
     analyze_hover_census,
     verify_build,
+    capture_component,
     record_site_motion,
     get_motion_dna,
     search_motion,

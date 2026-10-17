@@ -54,6 +54,7 @@ design DNA, band maps and motion recordings included.
 | `census.ts` | ~313 | per-element scroll/SVG motion census (snippet + reducer + capture); powers `analyze_scroll_map`. |
 | `hover-census.ts` | ~300 | :hover rule extraction + computed-style diff sampling; powers `analyze_hover_census`. |
 | `verify-build.ts` | ~248 | motion fingerprint + band-map compare + verdict; powers `verify_build`. |
+| `component.ts` | ~342 | component capture: bounded DOM walk (snippet + pure reducer) serializing one component's structure, 26 computed-style props, fonts/colors and element animations into `component-pack-v1`; powers `capture_component`. |
 | `cli.ts` | ~179 | `McpServer` wiring, zod schemas, lazy playwright/ffmpeg defaults (optional deps are only touched when a tool actually runs), background auto-reindex, daily version check — stdout stays clean for JSON-RPC. |
 | `version-check.ts` | ~131 | Daily npm-registry check, stderr-only, 3 s timeout, all failures swallowed. Self-update is opt-in via `AWWWARDS_AUTO_UPDATE=1`. |
 | `viewport.ts` | ~20 | Desktop (1440×900) / mobile (390×844, DPR 3, touch) profiles. Width/height go in playwright's `viewport` key; mobile flags spread as sibling context options. |
