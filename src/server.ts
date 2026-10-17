@@ -107,7 +107,7 @@ export type { ComponentPack };
 
 export type CaptureComponentFn = (
   url: string,
-  opts?: { selector?: string; viewport?: ViewportName },
+  opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number },
 ) => Promise<ComponentPack | { error: string }>;
 
 export function slugifyTag(s: string): string {
@@ -238,6 +238,7 @@ export interface Handlers {
     url: string;
     selector?: string;
     viewport?: ViewportName;
+    maxNodes?: number;
   }): Promise<ToolResponse>;
   capture_pose_3d(args: {
     url: string;
@@ -1159,16 +1160,18 @@ export function createHandlers(deps: {
     url: string;
     selector?: string;
     viewport?: ViewportName;
+    maxNodes?: number;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
       const capture =
         deps.captureComponentFn ??
-        ((url: string, opts?: { selector?: string; viewport?: ViewportName }) =>
+        ((url: string, opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number }) =>
           import("./component.js").then((m) => m.captureComponent(url, opts)));
       const result = await capture(args.url, {
         selector: args.selector,
         viewport: args.viewport ?? "desktop",
+        maxNodes: args.maxNodes,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };

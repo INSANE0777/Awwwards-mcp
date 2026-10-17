@@ -173,7 +173,7 @@ describe("capture_component handler", () => {
   };
 
   it("returns the pack as a JSON text block (pass-through of pack fields)", async () => {
-    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string } }> = [];
+    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number } }> = [];
     const h = createHandlers({
       client: new AwwwardsClient(),
       cache: new Cache(tmpDir()),
@@ -182,7 +182,12 @@ describe("capture_component handler", () => {
         return pack;
       },
     });
-    const res = await h.capture_component({ url: pack.url, selector: ".hero", viewport: "mobile" });
+    const res = await h.capture_component({
+      url: pack.url,
+      selector: ".hero",
+      viewport: "mobile",
+      maxNodes: 1200,
+    });
     expect(res.isError).toBeUndefined();
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.id).toBe("component-pack-v1");
@@ -190,8 +195,11 @@ describe("capture_component handler", () => {
     expect(parsed.nodeCount).toBe(3);
     expect(parsed.fonts).toEqual(["Arial"]);
     expect(parsed.colors).toEqual(["#ffffff"]);
-    // args map onto the capture fn's opts
-    expect(seen[0]).toEqual({ url: pack.url, opts: { selector: ".hero", viewport: "mobile" } });
+    // args map onto the capture fn's opts (maxNodes included — MIT-I1)
+    expect(seen[0]).toEqual({
+      url: pack.url,
+      opts: { selector: ".hero", viewport: "mobile", maxNodes: 1200 },
+    });
   });
 
   it("maps { error } results to error responses", async () => {
@@ -203,6 +211,21 @@ describe("capture_component handler", () => {
     const res = await h.capture_component({ url: "https://example.com" });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("selector not found: header");
+  });
+
+  it("passes maxNodes through to the capture fn (MIT-I1)", async () => {
+    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number } }> = [];
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(tmpDir()),
+      captureComponentFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return pack;
+      },
+    });
+    const res = await h.capture_component({ url: pack.url, maxNodes: 1200 });
+    expect(res.isError).toBeUndefined();
+    expect(seen[0]).toEqual({ url: pack.url, opts: { viewport: "desktop", maxNodes: 1200 } });
   });
 });
 

@@ -300,6 +300,8 @@ server.tool(
       .min(1)
       .optional()
       .describe("CSS selector of the component root (default 'header')"),
+    maxNodes: z.number().int().min(50).max(2000).optional()
+      .describe("Max DOM nodes to serialize (default 400, clamp 50-2000)"),
     viewport: viewportSchema,
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
