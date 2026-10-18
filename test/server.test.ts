@@ -1509,6 +1509,38 @@ describe("analyze_stack handler", () => {
   });
 });
 
+describe("build_gsap_stub handler", () => {
+  it("passes args through to the gsap-stub fn and returns JSON", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const seen: Array<{ scrollCensus: unknown; poseGrid?: unknown }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      gsapStubFn: (a) => {
+        seen.push(a);
+        return { stubHtml: "STUB" };
+      },
+    });
+    const res = await h.build_gsap_stub({ scrollCensus: { anims: [] }, poseGrid: { canvasW: 0 } });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual([{ scrollCensus: { anims: [] }, poseGrid: { canvasW: 0 } }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.stubHtml).toBe("STUB");
+  });
+
+  it("falls back to the real builder when no fn is injected", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.build_gsap_stub({ scrollCensus: {} });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.stubHtml).toContain("gsap.registerPlugin(ScrollTrigger)");
+    expect(parsed.stubHtml).toContain("no usable scroll-census anims");
+  });
+});
+
 describe("search_motion handler", () => {
   const dnaFixture = {
     url: "https://example.com/a",

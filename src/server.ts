@@ -17,6 +17,7 @@ import type { ComponentPack } from "./component.js";
 import type { PoseGrid } from "./pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "./pose-stub.js";
 import type { StackFingerprint } from "./stack.js";
+import { buildGsapStub, type GsapStubFn } from "./gsap-stub.js";
 import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, SiteSummary } from "./types.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
@@ -114,6 +115,9 @@ export type StackFn = (
   url: string,
   opts?: { timeoutMs?: number; fetchFn?: typeof fetch },
 ) => Promise<StackFingerprint | { error: string }>;
+
+// build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
+export type { GsapStubFn };
 
 // Re-exported for consumers that spell deps in terms of server.ts types;
 // captureHoverCensus (hover-census.ts) owns the canonical shape.
@@ -266,6 +270,7 @@ export interface Handlers {
     scrollCensus?: ScrollCensus;
   }): Promise<ToolResponse>;
   analyze_stack(args: { url: string; timeoutMs?: number }): Promise<ToolResponse>;
+  build_gsap_stub(args: { scrollCensus: unknown; poseGrid?: unknown }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
     scrubOnly?: boolean;
@@ -300,6 +305,7 @@ export function createHandlers(deps: {
   pose3dFn?: Pose3dFn;
   poseStubFn?: PoseStubFn;
   stackFn?: StackFn;
+  gsapStubFn?: GsapStubFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1255,6 +1261,22 @@ export function createHandlers(deps: {
     }
   }
 
+  async function build_gsap_stub(args: {
+    scrollCensus: unknown;
+    poseGrid?: unknown;
+  }): Promise<ToolResponse> {
+    try {
+      const build =
+        deps.gsapStubFn ??
+        ((a: { scrollCensus: unknown; poseGrid?: unknown }) => ({
+          stubHtml: buildGsapStub(a.poseGrid, a.scrollCensus),
+        }));
+      return { content: [text(JSON.stringify(build(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function record_site_motion(args: {
     url: string;
     frames?: number;
@@ -1468,6 +1490,7 @@ export function createHandlers(deps: {
     capture_pose_3d,
     build_pose_stub,
     analyze_stack,
+    build_gsap_stub,
     record_site_motion,
     get_motion_dna,
     search_motion,

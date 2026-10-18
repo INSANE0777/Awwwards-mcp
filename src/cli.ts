@@ -345,6 +345,14 @@ server.tool(
 );
 
 server.tool(
+  "build_gsap_stub",
+  "Generate a runnable GSAP+ScrollTrigger timeline stub from captured motion evidence (scroll census anims + optional pose grid camera anchors) — pure build from provided JSON, no page fetches",
+  { scrollCensus: z.any().describe("ScrollCensus JSON from analyze_scroll_map"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  (args) => asMcpResult(handlers.build_gsap_stub(args)),
+);
+
+server.tool(
   "search_motion",
   "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
   {
