@@ -352,7 +352,13 @@ toolset and re-served locally with the site's own DOM, stylesheet, and scripts
 rehost when the original vendor vanishes. Faithful because nothing was
 re-derived — geometry, motion, and copy come along exactly.
 
-![NEUTOMNI one-shot rehost — full-page capture of the local rehost](assets/neutomni-rehost.png)
+![NEUTOMNI rehost — loader band with the giant wordmark](assets/neutomni-rehost-loader.png)
+
+![NEUTOMNI rehost — focus statement on the blue gradient](assets/neutomni-rehost-focus.png)
+
+![NEUTOMNI rehost — Win-95 desktop with the pricing TV](assets/neutomni-rehost-desktop.png)
+
+![NEUTOMNI rehost — red footer with contact and wordmark](assets/neutomni-rehost-footer.png)
 
 ## Skills used to build these
 
