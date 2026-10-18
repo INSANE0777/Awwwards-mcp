@@ -9,7 +9,7 @@ structured, how the data flows, and how to work on it without breaking it.
 A free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/). No API key, no account: it politely
 scrapes public pages (1 request/second, robots.txt-compliant paths), caches
-them in local SQLite, and serves them through 21 MCP tools — screenshots,
+them in local SQLite, and serves them through 24 MCP tools — screenshots,
 design DNA, band maps and motion recordings included.
 
 ```
@@ -32,7 +32,7 @@ design DNA, band maps and motion recordings included.
         └───────────────────────────┬───────────────────────────┘
                                     │
         ┌───────────────────────────▼───────────────────────────┐
-        │ src/server.ts  21 MCP tools over createHandlers(deps) │
+        │ src/server.ts  24 MCP tools over createHandlers(deps) │
         └───────────────────────────┬───────────────────────────┘
                                     │
                     src/cli.ts ── stdio McpServer (awwwards-mcp)
@@ -58,6 +58,8 @@ design DNA, band maps and motion recordings included.
 | `component.ts` | ~342 | component capture: bounded DOM walk (snippet + pure reducer) serializing one component's structure, 26 computed-style props, fonts/colors and element animations into `component-pack-v1`; powers `capture_component`. |
 | `pose3d.ts` | ~261 | Pose capture core. `POSE_SNIPPET` mirrors the census/structure in-page snippets (self-contained, `globalThis`, every probe try/caught); `reducePose` is pure; `capturePose3d` orchestrates step capture and stamps the `pose-grid-v1` grid. Powers `capture_pose_3d`. |
 | `pose-stub.ts` | ~159 | Pure + synchronous `buildPoseStubHtml`: renders a PoseGrid as a standalone scroll-scrubbed three.js stub page (frames inline, camera path interpolated between snapshot scroll ratios, reduced-motion static frame; no eval, no `Date.now` - byte-identical output for identical grids). Powers `build_pose_stub`. |
+| `stack.ts` | ~115 | Marker-based stack fingerprint: `detectFramework` (8-framework table-order precedence), `detectCss` (class-attr-scoped Tailwind density vs Bootstrap markers, arbitration ladder), `collectLibs`, deterministic `buildStack` (`stack-fingerprint-v1`, no timestamps), and `analyzeStack` (one polite fetch, neutral UA, AbortController timeout; never throws — returns `{ error }`). Powers `analyze_stack`. |
+| `gsap-stub.ts` | ~230 | Pure + synchronous `buildGsapStub` + `normalizeEase`: one GSAP timeline per scroll-census anim (trigger, `start: "top 80%"`, scrub/pin, `durationMs` → seconds, cubic-bezier → nearest GSAP token via a 20-row bezier table with 1-decimal rounding), optional scroll-driven camera module from pose-grid anchors (y=r·2.5, z=12−r·4, gated on `canvasW>0` + ≥2 snapshots), unconditional reduced-motion guard, `<` neutralized for script safety, no `eval`, byte-deterministic, never throws. Powers `build_gsap_stub`. |
 | `cli.ts` | ~179 | `McpServer` wiring, zod schemas, lazy playwright/ffmpeg defaults (optional deps are only touched when a tool actually runs), background auto-reindex, daily version check — stdout stays clean for JSON-RPC. |
 | `version-check.ts` | ~131 | Daily npm-registry check, stderr-only, 3 s timeout, all failures swallowed. Self-update is opt-in via `AWWWARDS_AUTO_UPDATE=1`. |
 | `viewport.ts` | ~20 | Desktop (1440×900) / mobile (390×844, DPR 3, touch) profiles. Width/height go in playwright's `viewport` key; mobile flags spread as sibling context options. |

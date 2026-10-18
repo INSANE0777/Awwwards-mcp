@@ -12,8 +12,9 @@ Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
 e-commerce"), sees **real screenshots inline**, and can pull the **design DNA**
 of any site: color palette, tech stack, design elements, award history. Beyond
 inspiration it's a full evidence loop: band-map any page, census its scroll and
-hover motion, capture canvas/pose grids, and **verify your build against the
-reference** with band + motion scoring.
+hover motion, fingerprint its framework, capture canvas/pose grids, then
+**verify your build against the reference** (band + motion scoring) and generate
+GSAP timeline stubs from the captured motion.
 Free-text queries run on a porter-stemmed, prefix-matching FTS5 index with BM25
 ranking — "magazines" now finds Magazine-tagged sites (68 on the live index),
 best matches first, where the old substring path returned zero. Multi-word
@@ -42,8 +43,8 @@ queries keep AND semantics: every token must hit the same site.
 | `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000), fonts, colors and element animations — for pixel-informed rebuilds. Runs on any URL. (needs [playwright](https://playwright.dev)). |
 | `capture_pose_3d` | Hero canvas reference frames → camera pose grid; runs on any URL. Samples the page's largest canvas at up to 10 scroll steps with per-step scroll ratios, a `pose-grid-v1` grid ready for 3D replay (`viewport: "mobile"` supported). (needs [playwright](https://playwright.dev)). |
 | `build_pose_stub` | Pose grid → offline three.js+GSAP replay skeleton. Renders a `pose-grid-v1` grid as a standalone scroll-scrubbed stub page: frames preloaded inline, camera path interpolated between snapshot scroll ratios, reduced-motion static fallback; optional `analyze_scroll_map` census adds st/pin/ease suggestions. Pure build — no page fetches. |
-
-
+| `analyze_stack` | Fingerprint any page's stack from one polite HTML fetch (no browser): framework (Next.js/Astro/Nuxt/Remix/SvelteKit/WordPress/Webflow/Framer), CSS framework (Tailwind/Bootstrap) with marker lists and honest confidence, plus a `stack-fingerprint-v1` payload. |
+| `build_gsap_stub` | Captured motion evidence → runnable single-file GSAP+ScrollTrigger stub: one timeline per scroll-census anim (trigger, `start: "top 80%"`, scrub/pin, census duration, cubic-bezier easing normalized to the nearest GSAP token), plus an optional scroll-driven camera module from pose-grid anchors (synthesized dolly-in over the page's three.js canvas). Always-on `prefers-reduced-motion` guard; lenient — empty inputs still build a valid page. Pure build from provided JSON — no page fetches. |
 | `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
 | `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds and dumps the listing; later calls report the delta. Each first-seen winner's Elements section is backfilled into the searchable element corpus, so new winners are element-searchable immediately. |
 | `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |

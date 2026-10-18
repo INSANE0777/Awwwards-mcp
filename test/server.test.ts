@@ -1465,6 +1465,82 @@ describe("get_motion_dna handler", () => {
   });
 });
 
+describe("analyze_stack handler", () => {
+  it("passes url/timeout through to the stack fn and returns JSON", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const seen: Array<{ url: string; opts?: { timeoutMs?: number } }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      stackFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return {
+          id: "stack-fingerprint-v1",
+          framework: "next",
+          frameworkMarkers: ["/_next/"],
+          frameworkConfidence: "high",
+          css: "custom",
+          cssMarkers: [],
+          cssConfidence: "low",
+          libs: [],
+        };
+      },
+    });
+    const res = await h.analyze_stack({ url: "https://example.com", timeoutMs: 3000 });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual([{ url: "https://example.com", opts: { timeoutMs: 3000 } }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.id).toBe("stack-fingerprint-v1");
+    expect(parsed.framework).toBe("next");
+  });
+
+  it("surfaces a stack-fn error as isError text", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({
+      client,
+      cache,
+      stackFn: async () => ({ error: "HTTP 404 fetching https://example.com" }),
+    });
+    const res = await h.analyze_stack({ url: "https://example.com" });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("HTTP 404");
+  });
+});
+
+describe("build_gsap_stub handler", () => {
+  it("passes args through to the gsap-stub fn and returns JSON", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const seen: Array<{ scrollCensus: unknown; poseGrid?: unknown }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      gsapStubFn: (a) => {
+        seen.push(a);
+        return { stubHtml: "STUB" };
+      },
+    });
+    const res = await h.build_gsap_stub({ scrollCensus: { anims: [] }, poseGrid: { canvasW: 0 } });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual([{ scrollCensus: { anims: [] }, poseGrid: { canvasW: 0 } }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.stubHtml).toBe("STUB");
+  });
+
+  it("falls back to the real builder when no fn is injected", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.build_gsap_stub({ scrollCensus: {} });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.stubHtml).toContain("gsap.registerPlugin(ScrollTrigger)");
+    expect(parsed.stubHtml).toContain("no usable scroll-census anims");
+  });
+});
+
 describe("search_motion handler", () => {
   const dnaFixture = {
     url: "https://example.com/a",

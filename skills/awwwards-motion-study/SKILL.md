@@ -199,6 +199,11 @@ End every capture/study pass by recording what verification caught:
 The MCP now ships data instruments that answer questions video can only hint
 at. Run them BEFORE recording - then record only what they can't express:
 
+- `analyze_stack` - fingerprint the site's framework (Next/Astro/Webflow/...)
+  and CSS framework before you re-derive any of it. One polite request, no
+  browser. Knowing "this is Webflow + Tailwind" up front tells you which
+  parts of the rebuild are conventions you can copy-minded vs. runtime magic
+  to re-instrument.
 - `analyze_scroll_map` - per-element scroll census: which elements animate,
   their triggers (scroll/pin/scrub), durations, easings. This is the motion
   inventory video would take 10 minutes of scrubbing to approximate.
@@ -214,7 +219,11 @@ Video keeps what data cannot express: feel, choreography, sequencing, where
 the eye goes. The study order is: censuses first, recording second, then
 reconcile - anything the video shows that the census missed is a finding, not
 a redundancy. When the study feeds a rebuild, close the loop with
-`verify_build` (motion fingerprint + band compare) instead of eyeballing.
+`verify_build` (motion fingerprint + band compare) instead of eyeballing —
+and turn the motion inventory into starting code with `build_gsap_stub`
+(feed it the scroll census + optional pose grid; it emits a runnable
+GSAP+ScrollTrigger stub with the captured durations, easings, scrub/pin, a
+camera module for canvas heroes, and a reduced-motion guard you must keep).
 
 <!-- skill-memory:start -->
 <!-- skill-memory:end -->
