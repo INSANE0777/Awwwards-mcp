@@ -255,7 +255,7 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
-## Built with awwwards-mcp: four real sites
+## Built with awwwards-mcp: five real sites
 
 Four complete sites were built through the full inspiration loop this MCP
 enables, using nothing but the server's tools plus the shipped
@@ -343,6 +343,16 @@ motion film, and the reusable pre-scroll capture script live in
 ![The Meridian editorial journal — full-page build capture](assets/meridian-build.jpg)
 
 ![The Meridian — motion filmstrip from record_site_motion](assets/meridian-filmstrip.jpg)
+
+**5. NEUTOMNI one-shot rehost** (`A:/nio/`) — a 1:1 capture-and-rehost of
+neutomni.com built in a single MCP pass: the live page was captured with the
+toolset and re-served locally with the site's own DOM, stylesheet, and scripts
+(relaunched as a standalone static copy — no CMS, no build step). This is the
+**migration-recovery** posture: for sites you own or are authorized to
+rehost when the original vendor vanishes. Faithful because nothing was
+re-derived — geometry, motion, and copy come along exactly.
+
+![NEUTOMNI one-shot rehost — full-page capture of the local rehost](assets/neutomni-rehost.png)
 
 ## Skills used to build these
 
