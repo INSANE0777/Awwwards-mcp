@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Digital Design &amp; Webflow Studio - Neutomni (Recreation)</title>
+<link href="assets/neutomni.css" rel="stylesheet" type="text/css"/>
+<style>
+body { -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+html, body { margin: 0; }
+.line-mask { overflow: hidden; display: block; }
+.h1 .line { display: block; }
+.loader { display: flex; } /* base CSS hides it; IX2 used to unhide */
+</style>
+<noscript><style>#page-loader{display:none!important}</style></noscript>
+</head>
+<body>
+
+<div id="page-loader" data-w-id="79be7187-fe5b-2aba-364a-ec7d5ae87a47" class="loader"><div class="loader_cover"><div data-w-id="42129b64-d98e-f20a-35c1-20c2af657d5f" class="top_cover"><div class="load_logo_wrap"><div class="loader_logo w-embed"><svg
+  viewBox="0 0 1400 230"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+  style="display:block; width:100%; height:auto;"
+>
+<path d="M1361.62 204.665V0H1400V204.665H1361.62Z" fill="currentColor"/>
+<path d="M1165.51 204.665V0H1238.49L1278.91 174.582V194.886H1284.15V0H1321.95V204.665H1248.96L1208.54 28.3932V8.08889H1203.31V204.665H1165.51Z" fill="currentColor"/>
+<path d="M910.391 204.665V0H981.632L1016.82 178.643V194.886H1022.05V178.643L1057.24 0H1128.48V204.665H1091.26V8.08913H1086.02V28.3932L1051.13 204.665H987.739L952.845 28.3932V8.08913H947.611V204.665H910.391Z" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M794.879 61.3066C825.612 61.3067 877.081 74.9782 877.081 133.727C877.081 194.501 840.309 213.999 794.879 213.999C749.449 213.999 714.783 190.196 714.783 133.727C714.783 78.779 761.783 61.3066 794.879 61.3066ZM798.299 93.21C767.31 93.2101 751.551 111.19 751.551 137.019C751.551 162.847 764.945 181.586 798.299 181.586C831.653 181.586 840.582 154.997 840.582 137.019C840.582 119.04 829.288 93.21 798.299 93.21Z" fill="currentColor"/>
+<path d="M883 35H710V0H883V35Z" fill="currentColor"/>
+<path d="M593.288 35.0854V204.665H631.671V35.0854H689.647V0H533.969V35.0854H593.288Z" fill="currentColor"/>
+<path d="M513.998 205H354.998V170H513.998V205Z" fill="currentColor"/>
+<path d="M393.031 67.248C393.031 79.7227 396.521 89.5664 403.5 96.7783C410.673 103.99 420.947 107.596 434.322 107.596C447.698 107.596 457.876 103.99 464.854 96.7783C472.027 89.5664 475.613 79.7227 475.613 67.248V0H513.996V66.0781C513.996 81.6716 510.798 95.2186 504.4 106.719C498.197 118.024 489.086 126.796 477.067 133.033C465.242 139.076 450.994 142.097 434.322 142.097C417.651 142.097 403.306 139.076 391.287 133.033C379.462 126.796 370.35 118.024 363.953 106.719C357.75 95.2186 354.648 81.6716 354.648 66.0781V0H393.031V67.248Z" fill="currentColor"/>
+<path d="M194.797 0V204.665H325.648V169.579H233.18V118.998H317.507V83.9125H233.18V35.0854H325.648V0H194.797Z" fill="currentColor"/>
+<path d="M0 204.665V0H72.9861L113.405 174.582V194.886H118.639V0H156.44V204.665H83.4542L43.0356 28.3932V8.08913H37.8016V204.665H0Z" fill="currentColor"/>
+</svg></div></div></div><div data-w-id="7596727f-c8f7-3e90-413e-7830a82cfcfd" class="bottom_cover"><div class="loader_dots_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c27125089d0b0d55cf0bee_Wheel.png" loading="lazy" data-w-id="bcf8cc3c-8939-f31a-ae5d-1c58653f263d" alt="White diamond shape on a black background." class="loader_dot _01"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c27125735deb60a34dd5dc_Wheel-1.png" loading="lazy" data-w-id="df7e4af0-28c7-f737-afbb-cf14956a3ebe" alt="Polygon" class="loader_dot _02"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c271257e55ed1709875a2f_Wheel-2.png" loading="lazy" data-w-id="de2b13c8-6670-339d-5003-55eac92f9303" alt="White octagonal shape with slightly rounded corners on a black background." class="loader_dot _03"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c27125025f3f49c2ff0201_Wheel-3.png" loading="lazy" data-w-id="7a87128d-1f3f-b972-6072-ac04981219ea" alt="Solid white circle against transparent background." class="loader_dot _04"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c2712649067d6ffc1e2ba3_Wheel-4.png" loading="lazy" data-w-id="904d694a-462d-6a1c-5c6e-17cae43dbfa7" alt="White abstract gear-shaped icon on a black background." class="loader_dot _05"/></div></div></div><div data-w-id="f7490c53-434b-5812-0fe2-f196a27d21e4" class="progress_wrapper"><div class="count_wrapper"><div class="count-code w-embed w-script"><div id="countup-counter" style="display:flex; gap:2px;">
+  <div class="digit-col"><div class="digit-strip" id="strip-h"></div></div>
+  <div class="digit-col"><div class="digit-strip" id="strip-t"></div></div>
+  <div class="digit-col"><div class="digit-strip" id="strip-o"></div></div>
+</div>
+
+<style>
+  #countup-counter .digit-col {
+    width: 10px;
+    height: 20px;
+    overflow: hidden;
+    position: relative;
+  }
+  #countup-counter .digit-col::before,
+  #countup-counter .digit-col::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 6px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  #countup-counter .digit-col::before {
+    top: 0;
+    background: linear-gradient(to bottom, #CF1830, transparent);
+  }
+  #countup-counter .digit-col::after {
+    bottom: 0;
+    background: linear-gradient(to top, #CF1830, transparent);
+  }
+  #countup-counter .digit-strip {
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  #countup-counter .digit-char {
+    height: 20px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #f0ede6;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+
+<script>
+  (function() {
+    const DIGIT_H = 20;
+    const ONES_STEP = 5;
+
+    function buildStrip(el, digits) {
+      digits.forEach(d => {
+        const span = document.createElement('div');
+        span.className = 'digit-char';
+        span.textContent = d;
+        el.appendChild(span);
+      });
+    }
+
+    const onesDigits = [];
+    for (let i = 0; i < 12; i++) [0, 5].forEach(d => onesDigits.push(d));
+    const tensDigits = [];
+    for (let i = 0; i < 12; i++) for (let d = 0; d <= 9; d++) tensDigits.push(d);
+
+    buildStrip(document.getElementById('strip-h'), [0, 1]);
+    buildStrip(document.getElementById('strip-t'), tensDigits);
+    buildStrip(document.getElementById('strip-o'), onesDigits);
+
+    window.addEventListener('DOMContentLoaded', function() {
+      const proxy = { val: 0 };
+      const stripH = document.getElementById('strip-h');
+      const stripT = document.getElementById('strip-t');
+      const stripO = document.getElementById('strip-o');
+
+      gsap.set([stripH, stripT, stripO], { y: 0 });
+
+      gsap.to(proxy, {
+        val: 100,
+        duration: 3,
+        ease: 'power2.inOut',
+        onUpdate() {
+          const v = proxy.val;
+          gsap.set(stripH, { y: -(v / 100) * DIGIT_H });
+          gsap.set(stripT, { y: -(v / 10) * DIGIT_H });
+          gsap.set(stripO, { y: -(v / ONES_STEP) * DIGIT_H });
+        }
+      });
+    });
+  })();
+</script></div></div><div data-w-id="d3f2c984-d25a-191e-d7bb-c0a07bde4e27" class="scissors_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69bd455af03722278a958711_Scisors.png" loading="lazy" alt="White scissors icon." class="scissors"/></div><div class="line_wrap"><div data-w-id="7d4f9dcc-6549-b507-19d7-07410c128d49" class="solid_line"></div><div class="dashed_line w-embed"><svg width="2000" height="2" viewBox="0 0 2000 2" fill="none" xmlns="http://www.w3.org/2000/svg">
+<line y1="1" x2="2000" y2="1" stroke="white" stroke-width="2" stroke-dasharray="8 8"/>
+</svg></div></div><div class="cuting_text_wrap"><div class="cuting_text">cut along line</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="Three white right-pointing arrows indicating fast forward or next." class="cut_icon"/></div></div></div>
+<div class="logo_trigger_wrap"><div data-w-id="2c264165-eb93-01ae-6e37-073c10cbe564" class="logo_trigger"></div></div>
+<div class="utility"><div class="time_and_date w-embed w-script"><script>
+document.addEventListener("DOMContentLoaded", function () {
+  function updateDateTime() {
+    const now = new Date();
+
+    const dateEl = document.querySelector(".date");
+    const timeEl = document.querySelector(".time");
+
+    if (!dateEl || !timeEl) return;
+
+    const date = now.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric"
+    });
+
+    const time = now.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
+
+    dateEl.textContent = date;
+    timeEl.textContent = time;
+  }
+
+  updateDateTime();
+  setInterval(updateDateTime, 60);
+});
+</script></div><div class="link-underline w-embed"><style>
+
+.service_link {
+    position: relative;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+
+.service_link::before {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 1px; 
+    background: currentColor;
+    top: 100%;
+    left: 0;
+    transform-origin: 100% 50%;
+    transform: scaleX(0);
+    transition: transform 500ms cubic-bezier(0.25, 1, 0.5, 1); /* Ease-in-quart */
+}
+
+.service_link:hover::before {
+    transform-origin: 0% 50%;
+    transform: scaleX(1);
+}
+</style></div><div class="logo light w-embed"><svg width="100%" height="100%" viewBox="0 0 1400 234" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 204.666V0.00195312H72.986L113.405 174.584V194.888H118.639V0.00195312H156.44V204.666H83.454L43.036 28.395V8.09095H37.802V204.666H0ZM194.801 204.666V0.00195312H325.652V35.087H233.184V83.914H317.51V119.001H233.184V169.582H325.652V204.667H354.65V169.581H513.998V204.666H194.801ZM593.285 204.666V35.087H533.965V0.00195312H883.081V35.087H709.783V0.00195312H689.644V35.087H631.668V204.666H593.285ZM910.395 204.666V0.00195312H981.636L1016.82 178.645V194.888H1022.05V178.645L1057.24 0.00195312H1128.48V204.666H1091.26V8.09095H1086.03V28.395L1051.13 204.666H987.743L952.849 28.395V8.09095H947.615V204.666H910.395ZM1361.62 204.666V0.00195312H1400V204.666H1361.62ZM1165.51 204.667V0.00195312H1238.49L1278.91 174.584V194.888H1284.15V0.00195312H1321.95V204.667H1248.96L1208.54 28.395V8.09095H1203.31V204.667H1165.51Z" fill="currentcolor"/>
+<path d="M434.322 142.096C417.65 142.096 403.305 139.075 391.286 133.033C379.462 126.795 370.351 118.024 363.953 106.719C357.75 95.219 354.648 81.6723 354.648 66.079V0H393.031V67.248C393.031 79.7227 396.521 89.566 403.499 96.778C410.673 103.99 420.947 107.596 434.322 107.596C447.698 107.596 457.875 103.99 464.854 96.778C472.028 89.566 475.614 79.7227 475.613 67.248V0H513.996V66.078C513.996 81.6713 510.798 95.2183 504.4 106.719C498.197 118.024 489.086 126.795 477.067 133.033C465.242 139.075 450.994 142.096 434.322 142.096Z" fill="currentcolor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M794.876 61.3066C825.609 61.3066 877.079 74.9786 877.079 133.728C877.079 194.502 840.306 214 794.876 214C749.446 214 714.781 190.197 714.781 133.728C714.781 78.7796 761.78 61.3066 794.876 61.3066ZM798.297 93.2116C829.286 93.2116 840.58 119.041 840.58 137.02C840.58 154.999 831.651 181.587 798.297 181.587C764.943 181.587 751.549 162.849 751.549 137.02C751.549 111.192 767.308 93.2116 798.297 93.2116Z" fill="currentcolor"/>
+</svg></div><div class="link-underline w-embed"><style>
+.nav_link,
+.footer_link {
+    position: relative;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.nav_link::before,
+.footer_link::before {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 1px;
+    background: currentColor;
+    top: 100%;
+    left: 0;
+    transform-origin: 100% 50%;
+    transform: scaleX(0);
+    transition: transform 500ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.nav_link:hover::before,
+.footer_link:hover::before {
+    transform-origin: 0% 50%;
+    transform: scaleX(1);
+}
+</style></div><a href="#" class="nav_link light">Services</a></div>
+<div class="nav_wrap"><a data-w-id="0f0b8530-3e55-58f7-bb00-3328ac8ca2af" href="/" aria-current="page" class="link w-inline-block w--current"><div class="logo w-embed"><svg
+  viewBox="0 0 1400 230"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+  style="display:block; width:100%; height:auto;"
+>
+<path d="M1361.62 204.665V0H1400V204.665H1361.62Z" fill="currentColor"/>
+<path d="M1165.51 204.665V0H1238.49L1278.91 174.582V194.886H1284.15V0H1321.95V204.665H1248.96L1208.54 28.3932V8.08889H1203.31V204.665H1165.51Z" fill="currentColor"/>
+<path d="M910.391 204.665V0H981.632L1016.82 178.643V194.886H1022.05V178.643L1057.24 0H1128.48V204.665H1091.26V8.08913H1086.02V28.3932L1051.13 204.665H987.739L952.845 28.3932V8.08913H947.611V204.665H910.391Z" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M794.879 61.3066C825.612 61.3067 877.081 74.9782 877.081 133.727C877.081 194.501 840.309 213.999 794.879 213.999C749.449 213.999 714.783 190.196 714.783 133.727C714.783 78.779 761.783 61.3066 794.879 61.3066ZM798.299 93.21C767.31 93.2101 751.551 111.19 751.551 137.019C751.551 162.847 764.945 181.586 798.299 181.586C831.653 181.586 840.582 154.997 840.582 137.019C840.582 119.04 829.288 93.21 798.299 93.21Z" fill="currentColor"/>
+<path d="M883 35H710V0H883V35Z" fill="currentColor"/>
+<path d="M593.288 35.0854V204.665H631.671V35.0854H689.647V0H533.969V35.0854H593.288Z" fill="currentColor"/>
+<path d="M513.998 205H354.998V170H513.998V205Z" fill="currentColor"/>
+<path d="M393.031 67.248C393.031 79.7227 396.521 89.5664 403.5 96.7783C410.673 103.99 420.947 107.596 434.322 107.596C447.698 107.596 457.876 103.99 464.854 96.7783C472.027 89.5664 475.613 79.7227 475.613 67.248V0H513.996V66.0781C513.996 81.6716 510.798 95.2186 504.4 106.719C498.197 118.024 489.086 126.796 477.067 133.033C465.242 139.076 450.994 142.097 434.322 142.097C417.651 142.097 403.306 139.076 391.287 133.033C379.462 126.796 370.35 118.024 363.953 106.719C357.75 95.2186 354.648 81.6716 354.648 66.0781V0H393.031V67.248Z" fill="currentColor"/>
+<path d="M194.797 0V204.665H325.648V169.579H233.18V118.998H317.507V83.9125H233.18V35.0854H325.648V0H194.797Z" fill="currentColor"/>
+<path d="M0 204.665V0H72.9861L113.405 174.582V194.886H118.639V0H156.44V204.665H83.4542L43.0356 28.3932V8.08913H37.8016V204.665H0Z" fill="currentColor"/>
+</svg></div></a><div class="navbar"><div data-w-id="6de33c22-cc54-d548-9c40-1e51b9355977" class="cover"></div><div class="container nav"><img sizes="(max-width: 1439px) 100vw, 1440px" srcset="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c65f5681f54bbbca6b5f49_logo%20(1)-p-500.png 500w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c65f5681f54bbbca6b5f49_logo%20(1)-p-800.png 800w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c65f5681f54bbbca6b5f49_logo%20(1).png 1440w" alt="NEUTOMNI logo" src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69c65f5681f54bbbca6b5f49_logo%20(1).png" loading="lazy" class="logo_invis"/><a href="/" aria-current="page" class="logo_link tablet w-inline-block w--current"><div class="logo w-embed"><svg
+  viewBox="0 0 1400 230"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+  style="display:block; width:100%; height:auto;"
+>
+<path d="M1361.62 204.665V0H1400V204.665H1361.62Z" fill="currentColor"/>
+<path d="M1165.51 204.665V0H1238.49L1278.91 174.582V194.886H1284.15V0H1321.95V204.665H1248.96L1208.54 28.3932V8.08889H1203.31V204.665H1165.51Z" fill="currentColor"/>
+<path d="M910.391 204.665V0H981.632L1016.82 178.643V194.886H1022.05V178.643L1057.24 0H1128.48V204.665H1091.26V8.08913H1086.02V28.3932L1051.13 204.665H987.739L952.845 28.3932V8.08913H947.611V204.665H910.391Z" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M794.879 61.3066C825.612 61.3067 877.081 74.9782 877.081 133.727C877.081 194.501 840.309 213.999 794.879 213.999C749.449 213.999 714.783 190.196 714.783 133.727C714.783 78.779 761.783 61.3066 794.879 61.3066ZM798.299 93.21C767.31 93.2101 751.551 111.19 751.551 137.019C751.551 162.847 764.945 181.586 798.299 181.586C831.653 181.586 840.582 154.997 840.582 137.019C840.582 119.04 829.288 93.21 798.299 93.21Z" fill="currentColor"/>
+<path d="M883 35H710V0H883V35Z" fill="currentColor"/>
+<path d="M593.288 35.0854V204.665H631.671V35.0854H689.647V0H533.969V35.0854H593.288Z" fill="currentColor"/>
+<path d="M513.998 205H354.998V170H513.998V205Z" fill="currentColor"/>
+<path d="M393.031 67.248C393.031 79.7227 396.521 89.5664 403.5 96.7783C410.673 103.99 420.947 107.596 434.322 107.596C447.698 107.596 457.876 103.99 464.854 96.7783C472.027 89.5664 475.613 79.7227 475.613 67.248V0H513.996V66.0781C513.996 81.6716 510.798 95.2186 504.4 106.719C498.197 118.024 489.086 126.796 477.067 133.033C465.242 139.076 450.994 142.097 434.322 142.097C417.651 142.097 403.306 139.076 391.287 133.033C379.462 126.796 370.35 118.024 363.953 106.719C357.75 95.2186 354.648 81.6716 354.648 66.0781V0H393.031V67.248Z" fill="currentColor"/>
+<path d="M194.797 0V204.665H325.648V169.579H233.18V118.998H317.507V83.9125H233.18V35.0854H325.648V0H194.797Z" fill="currentColor"/>
+<path d="M0 204.665V0H72.9861L113.405 174.582V194.886H118.639V0H156.44V204.665H83.4542L43.0356 28.3932V8.08913H37.8016V204.665H0Z" fill="currentColor"/>
+</svg></div></a><div class="nav_menu"><div class="nav_menu_inner"><div fs-mirrorclick-element="ttarget" data-w-id="2bf6d415-3b33-74fe-6deb-7b8bdd1efffa" class="menu_button open"><div data-is-ix2-target="1" class="menu_hamburger" data-w-id="f3a1116e-4895-f127-2efd-eec4be7e4f0f" data-animation-type="lottie" data-src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69df57ea3be7671ebac9915b_Scene-1%20(12).json" data-loop="0" data-direction="1" data-autoplay="0" data-renderer="svg" data-default-duration="0" data-duration="0.9" data-loading="eager" data-ix2-initial-state="0"></div></div><div data-w-id="ded5515b-d5a1-d891-a922-461a850ae7b6" class="nav_menu_wrap"><div data-w-id="a6df3031-2eea-04bf-a166-ec7e1c32cfc4" class="navlink_wrap"><div class="menu_logo_wrap"><a href="/" aria-current="page" class="logo_link menu w-inline-block w--current"><div class="mobile_menu_logo w-embed"><svg
+  viewBox="0 0 1400 230"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+  style="display:block; width:100%; height:auto;"
+>
+<path d="M1361.62 204.665V0H1400V204.665H1361.62Z" fill="currentColor"/>
+<path d="M1165.51 204.665V0H1238.49L1278.91 174.582V194.886H1284.15V0H1321.95V204.665H1248.96L1208.54 28.3932V8.08889H1203.31V204.665H1165.51Z" fill="currentColor"/>
+<path d="M910.391 204.665V0H981.632L1016.82 178.643V194.886H1022.05V178.643L1057.24 0H1128.48V204.665H1091.26V8.08913H1086.02V28.3932L1051.13 204.665H987.739L952.845 28.3932V8.08913H947.611V204.665H910.391Z" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M794.879 61.3066C825.612 61.3067 877.081 74.9782 877.081 133.727C877.081 194.501 840.309 213.999 794.879 213.999C749.449 213.999 714.783 190.196 714.783 133.727C714.783 78.779 761.783 61.3066 794.879 61.3066ZM798.299 93.21C767.31 93.2101 751.551 111.19 751.551 137.019C751.551 162.847 764.945 181.586 798.299 181.586C831.653 181.586 840.582 154.997 840.582 137.019C840.582 119.04 829.288 93.21 798.299 93.21Z" fill="currentColor"/>
+<path d="M883 35H710V0H883V35Z" fill="currentColor"/>
+<path d="M593.288 35.0854V204.665H631.671V35.0854H689.647V0H533.969V35.0854H593.288Z" fill="currentColor"/>
+<path d="M513.998 205H354.998V170H513.998V205Z" fill="currentColor"/>
+<path d="M393.031 67.248C393.031 79.7227 396.521 89.5664 403.5 96.7783C410.673 103.99 420.947 107.596 434.322 107.596C447.698 107.596 457.876 103.99 464.854 96.7783C472.027 89.5664 475.613 79.7227 475.613 67.248V0H513.996V66.0781C513.996 81.6716 510.798 95.2186 504.4 106.719C498.197 118.024 489.086 126.796 477.067 133.033C465.242 139.076 450.994 142.097 434.322 142.097C417.651 142.097 403.306 139.076 391.287 133.033C379.462 126.796 370.35 118.024 363.953 106.719C357.75 95.2186 354.648 81.6716 354.648 66.0781V0H393.031V67.248Z" fill="currentColor"/>
+<path d="M194.797 0V204.665H325.648V169.579H233.18V118.998H317.507V83.9125H233.18V35.0854H325.648V0H194.797Z" fill="currentColor"/>
+<path d="M0 204.665V0H72.9861L113.405 174.582V194.886H118.639V0H156.44V204.665H83.4542L43.0356 28.3932V8.08913H37.8016V204.665H0Z" fill="currentColor"/>
+</svg></div></a><div class="navbar_underlogo"><p class="logo_text light">Digital Design &amp; Webflow Studio</p><div fs-mirrorclick-element="ttarget" data-w-id="1d50336c-e972-6109-18f9-f50fcf050539" class="menu_button close"><div data-is-ix2-target="1" class="menu_hamburger" data-w-id="1d50336c-e972-6109-18f9-f50fcf05053a" data-animation-type="lottie" data-src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69df57ea3be7671ebac9915b_Scene-1%20(12).json" data-loop="0" data-direction="1" data-autoplay="0" data-renderer="svg" data-default-duration="0" data-duration="0.9" data-loading="eager" data-ix2-initial-state="0"></div></div></div></div><div data-w-id="35805d4a-5263-cde3-b8a1-73b6e034dddc" class="navlinks_flex"><a href="#process" class="nav_link">Process</a><a href="#portfolio" class="nav_link desktop">Portfolio</a><a data-scroll-offset="0.2" href="#our_work" class="nav_link mobile">Portfolio</a><a href="#pricing" class="nav_link">Pricing</a><a href="https://calendar.app.google/xy7GT64TvAPQzpbw9" target="_blank" class="nav_link">Book a call</a></div><div class="dashed_line_menu_top w-embed"><svg width="2000" height="2" viewBox="0 0 2000 2" fill="none" xmlns="http://www.w3.org/2000/svg">
+<line y1="1" x2="2000" y2="1" stroke="white" stroke-width="2" stroke-dasharray="8 8"/>
+</svg></div></div><a href="mailto:contact@neutomni.com?subject=Neutomni%20Website" class="nav_link mail">contact@neutomni.com</a><div data-w-id="99adb4e0-2b5c-afcf-d755-5227c2a04e24" class="menu_bottom"><div class="dashed_line_menu_bottom w-embed"><svg width="2000" height="2" viewBox="0 0 2000 2" fill="none" xmlns="http://www.w3.org/2000/svg">
+<line y1="1" x2="2000" y2="1" stroke="white" stroke-width="2" stroke-dasharray="8 8"/>
+</svg></div><div data-w-id="9f37864e-919e-6f42-fc2f-2be6df9e4787" class="menu_content"><a href="mailto:contact@neutomni.com?subject=Neutomni%20Website" class="footer_link mail">contact@neutomni.com</a><div class="sm_wrap"><a href="https://www.instagram.com/neutomni_design/" target="_blank" class="footer_link">Instagram</a><a href="https://dribbble.com/Neutomni" target="_blank" class="footer_link">Dribbble</a><a href="https://www.behance.net/neutomni_design" target="_blank" class="footer_link">Behance</a><a href="https://www.linkedin.com/company/neutomni/" target="_blank" class="footer_link">LinkedIn</a><a href="https://clutch.co/profile/neutomni" target="_blank" class="footer_link">Clutch</a></div><div class="nav_aditionals"><div id="nav_time" class="timezone white">local time</div><div class="nav_pulsing_dotty"><div class="w-embed"><style>
+.pulse_dotty {
+  border-radius: 0;
+  color: currentColor;
+  --pulse-alpha: 0.8;
+  animation: pulse-animation-white 2s linear infinite;
+}
+@keyframes pulse-animation-white {
+  0% {
+    transform: rotate(45deg) scale(1.1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.55);
+  }
+  50% {
+    transform: rotate(90deg) scale(1.2);
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0);
+  }
+  100% {
+    transform: rotate(135deg) scale(1.1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+</style></div><div class="pulse_dotty"></div><div class="cta_link small">Open for work</div></div></div></div></div></div><p class="logo_text">Digital Design &amp; Webflow Studio</p></div></div></div></div></div>
+<main class="main-wrap"><section class="section light _30vh_mobile"><div class="w-layout-blockcontainer container hero w-container"></div></section><section class="section dark video"><div class="w-layout-blockcontainer container video w-container"><div data-w-id="d43726bf-e372-e661-036e-f9c3be1559ec" class="h1_wrap"><h1 class="h1">We build websites for people who care <span class="italic-text">as much as we do</span></h1></div><div class="hero_additional_wrap"><div id="local-time" data-w-id="e5f153e2-f7f0-2577-f219-99c6afb3b61f" class="timezone">our local time</div><div data-w-id="e3bf998e-04a3-6524-fc3f-3d0c4da0fb0a" class="hero_button_wrapper"><div class="w-embed"><style>
+.pulse_dot {
+  border-radius: 0;
+  color: currentColor;
+  --pulse-alpha: 0.8;
+  animation: pulse-animation 2s linear infinite;
+}
+
+@keyframes pulse-animation {
+  0% {
+    transform: rotate(45deg) scale(1.1);
+    box-shadow: 0 0 0 0 rgba(207, 24, 48, 0.55);
+  }
+  50% {
+    transform: rotate(90deg) scale(1.2);
+    box-shadow: 0 0 0 4px rgba(0, 0, 0, 0);
+  }
+  100% {
+    transform: rotate(135deg) scale(1.1);
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+</style></div><div class="pulse_dot"></div><div class="cta_link small">Open for work</div></div></div><div class="flex-container"><div class="flex"><div class="video_wrap"><div class="img w-embed"><video class="wb-video-styles-controller" wb-embed="image" playsinline loop muted autoplay style="background-image: url('');" data-wf-ignore="true">
+	<source src="https://pub-72fbbd6aa7d54a70b04aaa87235f19c9.r2.dev/Scene-2%20(1)%20(1).mp4" data-wf-ignore="true"/>
+</video>
+
+
+</div><div class="w-embed"><style>
+.video-controller {
+  position: absolute;
+  left: 0%;
+  top: 0%;
+  right: 0%;
+  bottom: 0%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 50%;
+}
+
+.wb-video-styles-controller {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+</style></div></div></div></div></div></section><section id="process" data-scroll-offset="0" class="section light"><div class="w-layout-blockcontainer process_container w-container"><div data-w-id="e4216f13-66e1-c7a5-3076-6c462b846851" class="stratchy-text"><div class="under_video_text">Design</div><div class="under_video_text">+</div><div class="under_video_text">Webflow</div><div class="under_video_text">+</div><div class="under_video_text">Strategy</div><div class="under_video_text">=</div><div class="under_video_text">Full Circle</div></div><div class="about-text-wrap"><h2 data-reveal="blur" id="w-node-_7aef3244-95e0-6400-0ca1-1525e519eb83-59c6eb04" class="h2 about">Your website isn&#x27;t an expensive decoration. <span class="italic-text">It&#x27;s the sharpest point of your digital presence.</span></h2><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68aa63b30470f3ff48e30d_Group%20483851%20(3).webp" loading="lazy" style="opacity:0;filter:blur(5px)" data-w-id="fc1e2385-1078-31a5-fe40-5639d666892a" alt="Neutomni team" id="w-node-fc1e2385-1078-31a5-fe40-5639d666892a-59c6eb04" class="about_image"/><div id="w-node-d2fcb18a-38f5-6cd7-c8c6-01ea09a19b8c-59c6eb04" class="about_wrap"><p data-reveal="blur" class="about_text _03">Design, strategy, development, automation, you name it. We cover the full loop so your business never has to start over somewhere new.  <span class="italic-text">One studio → Full circle.</span></p></div><p data-reveal="blur" id="w-node-a99ad698-5272-3aa6-475a-bfc55e1b2e25-59c6eb04" class="about_text _02">First, we understand where you are <span class="italic-text">→ then we build the clearest path to where you&#x27;re going.</span></p></div><div id="pw_long" data-w-id="fb1be6ae-acce-c9b3-78d6-8cfd2b931101" class="process_long_wrap"><div id="pw-sticky" class="pw-sticky"><div class="process_content_wrap"><div class="heading_paragraph_wrap"><p data-reveal="blur" class="paragraph process">The road can get <span class="italic">bumpy</span>. We keep you <span class="italic">rolling</span> regardless.</p><div data-w-id="cfc8ac3b-32c9-0b5b-5f9a-d6db9a2ca8f4" style="filter:blur(5px);-webkit-transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0);-moz-transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0);-ms-transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0);transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0)" class="ab_wrap mobile"><div class="ab_text">A </div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69e61218e9bf98ea868e1e22_%E2%86%92.png" loading="lazy" alt="Red arrow pointing to the right." class="ab_arrow"/><div class="ab_text">B</div></div></div><div class="title_wrap"><div data-reveal="blur" class="title_text">Our Process</div></div></div><div class="process-wrap"><div class="cards_wrap"><div class="process_card first"><div class="item_num">01</div><div class="w-layout-vflex process-card-container _01"><h3 class="h3 process">Discovery  <br/><span class="italic">&amp; Strategy</span></h3><p class="paragraph balanced">We map the angles before we smooth them out. Where you are, where you&#x27;re going, what&#x27;s standing in between.</p></div><div class="process_cover _01"></div><div data-w-id="47958ad6-b5fd-c0f5-a0ea-9aabe59cb068" style="filter:blur(5px);-webkit-transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0);-moz-transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0);-ms-transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0);transform:translate3d(0, 15px, 0) scale3d(1, 1, 1) rotateX(0) rotateY(0) rotateZ(0) skew(0, 0)" class="ab_wrap desktop"><div class="ab_text">A </div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69e61218e9bf98ea868e1e22_%E2%86%92.png" loading="lazy" alt="Red arrow to the right" class="ab_arrow"/><div class="ab_text">B</div></div></div><div class="process_card"><div class="item_num">02</div><div class="w-layout-vflex process-card-container _02"><h3 class="h3 process">Design <br/>‍<span class="italic">Iterations</span></h3><p class="paragraph balanced">Brand, visual systems, web design — crafted into something credible and built to last. No templates.</p></div><div class="process_cover _02"></div></div><div class="process_card"><div class="item_num">03</div><div class="w-layout-vflex process-card-container _03"><h3 class="h3 process">Webflow  <br/><span class="italic">Build</span></h3><p class="paragraph balanced">We build with the precision of designer and the speed of dev who&#x27;ve done it a hundred times. </p></div><div class="process_cover _03"></div></div><div class="process_card"><div class="item_num">04</div><div class="w-layout-vflex process-card-container _04"><h3 class="h3 process">Post-launch <br/><span class="italic">Support</span></h3><p class="paragraph balanced">We don’t shape you to fit our process. It’s the <span class="italic">process that bends</span> to make you comfortable to collaborate</p></div><div class="process_cover _04"></div></div></div><div class="progress_animation w-embed w-script"><style>
+  #pw_long { position: relative; height: 500vh; width: 100%; }
+  @media (max-width: 767px) { #pw_long { height: 300vh; } }
+
+  #pw-sticky {
+    position: sticky; top: 0; width: 100%; height: 100vh; overflow: hidden;
+  }
+  #pw-canvas { display: block; position: absolute; top: 0; left: 0; }
+</style>
+
+<div id="pw_long">
+  <div id="pw-sticky">
+    <canvas id="pw-canvas"></canvas>
+  </div>
+</div>
+
+<script>
+(function () {
+  if (window.__pwInit) return;
+  window.__pwInit = true;
+
+  const outer  = document.getElementById('pw_long');
+  const sticky = document.getElementById('pw-sticky');
+  const canvas = document.getElementById('pw-canvas');
+  const ctx    = canvas.getContext('2d');
+
+  /* ── Config ────────────────────────────────────────────── */
+  const N_MIN = 4, N_MAX = 12;
+  const C_LINE = 'white', C_AXLE = 'white', C_FILL = 'transparent';
+  const MOBILE_BP = 767, TABLET_BP = 991;
+  const MARGIN_X = 0, BOTTOM_MARGIN = 360, VERTICAL_POS = 0.50;
+  const SMOOTHING = 0.2;
+  const STOP_EPSILON = 0.0005;
+  const SCROLL_OFFSET_DESKTOP = 0.25, SCROLL_OFFSET_MOBILE = 0;
+  const PHASE2 = 0.3;
+
+  /* ── State ─────────────────────────────────────────────── */
+  let W, H, R, dpr = 1;
+  let isMobile = false, isTabletOrMobile = false;
+  let targetProgress = 0, progress = 0;
+  let rafId = null;
+  let scrollDirty = false;
+  const prefersReduced = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* Cached geometry — recomputed only on resize */
+  let scrollable = 0, offsetFrac = 0, xLeft = 0, xRight = 0, tEntry = 0;
+  let vertsCache = new Float32Array(0);
+
+  const easeInOut = t => t * t * (3 - 2 * t);
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  /* ── Precompute ideal-vertex tables (constant per n) ───── */
+  const idealCache = {};
+  function idealVerts(n, r) {
+    let base = idealCache[n];
+    if (!base) {
+      base = new Float64Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        const a = Math.PI / 2 + (2 * Math.PI * i) / n;
+        base[i * 2] = Math.cos(a);
+        base[i * 2 + 1] = Math.sin(a);
+      }
+      idealCache[n] = base;
+    }
+    const v = new Float64Array(n * 2);
+    for (let i = 0; i < n * 2; i++) v[i] = base[i] * r;
+    return v;
+  }
+
+  function alignedIdealVerts(n, r, refx, refy) {
+    const raw = idealVerts(n, r);
+    const refAngle = Math.atan2(refy, refx);
+    let best = 0, bestDiff = Infinity;
+    for (let o = 0; o < n; o++) {
+      const a = Math.atan2(raw[o * 2 + 1], raw[o * 2]);
+      let d = Math.abs(a - refAngle);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d < bestDiff) { bestDiff = d; best = o; }
+    }
+    const out = new Float64Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const s = ((i + best) % n) * 2;
+      out[i * 2] = raw[s]; out[i * 2 + 1] = raw[s + 1];
+    }
+    return out;
+  }
+
+  /* Returns Float64Array [x0,y0,x1,y1,...] of length 2*count */
+  function continuousVerts(nf, r) {
+    const nLo = Math.floor(nf);
+    const frac = nf - nLo;
+    if (frac < 1e-9) return idealVerts(nLo, r);
+
+    const nHi = nLo + 1;
+    const base = idealVerts(nLo, r);
+    const start = new Float64Array(nHi * 2);
+    // insert midpoint of edge 0-1 at index 1
+    start[0] = base[0]; start[1] = base[1];
+    start[2] = (base[0] + base[2]) / 2;
+    start[3] = (base[1] + base[3]) / 2;
+    for (let i = 2; i < nHi; i++) {
+      start[i * 2] = base[(i - 1) * 2];
+      start[i * 2 + 1] = base[(i - 1) * 2 + 1];
+    }
+    const target = alignedIdealVerts(nHi, r, base[0], base[1]);
+    const out = new Float64Array(nHi * 2);
+    for (let i = 0; i < nHi * 2; i++) out[i] = lerp(start[i], target[i], frac);
+    return out;
+  }
+
+  /* ── Resize — DPR-aware, caches scroll geometry ────────── */
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    const cssW = sticky.clientWidth || window.innerWidth;
+    const cssH = sticky.clientHeight || window.innerHeight;
+
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width  = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineJoin = 'round';
+    ctx.lineCap  = 'round';
+
+    W = cssW; H = cssH;
+    isMobile = W <= MOBILE_BP;
+    isTabletOrMobile = W <= TABLET_BP;
+
+    const RADIUS_SCALE = isMobile ? 0.13 * 1.2 : 0.13;
+    R = Math.min(W, H) * RADIUS_SCALE;
+
+    // cache scroll-derived constants
+    scrollable = Math.max(0, outer.offsetHeight - window.innerHeight);
+    offsetFrac = isMobile ? SCROLL_OFFSET_MOBILE : SCROLL_OFFSET_DESKTOP;
+    // On mobile the whole shape is visible just inside the left edge at the
+    // start (center one radius in); desktop keeps its roll-in entrance.
+    xLeft  = isMobile ? R : -R;
+    xRight = W - MARGIN_X - R;
+    // Even pacing on mobile: small fixed head-start before the morph begins,
+    // so shape-change spreads evenly across the scroll instead of cramming
+    // into the back half.
+    tEntry = isMobile ? 0.05 : (2 * R + MARGIN_X) / (xRight - xLeft);
+
+    updateTargetProgress();
+    render(progress);
+  }
+
+  /* ── Scroll → targetProgress ───────────────────────────── */
+  function updateTargetProgress() {
+    const rect = outer.getBoundingClientRect();
+    const scrolled = Math.max(0, -rect.top);
+    const rawProgress = scrollable > 0 ? Math.min(1, scrolled / scrollable) : 0;
+    targetProgress = Math.max(0, (rawProgress - offsetFrac) / (1 - offsetFrac));
+
+    if (prefersReduced) { progress = targetProgress; render(progress); return; }
+    if (!rafId) rafId = requestAnimationFrame(animate);
+  }
+
+  function onScroll() {
+    if (scrollDirty) return;
+    scrollDirty = true;
+    requestAnimationFrame(() => { scrollDirty = false; updateTargetProgress(); });
+  }
+
+  /* ── Animation loop ────────────────────────────────────── */
+  function animate() {
+    progress = lerp(progress, targetProgress, SMOOTHING);
+    if (Math.abs(targetProgress - progress) < STOP_EPSILON) progress = targetProgress;
+
+    render(progress);
+
+    rafId = Math.abs(targetProgress - progress) >= STOP_EPSILON
+      ? requestAnimationFrame(animate)
+      : null;
+  }
+
+  /* ── Render ────────────────────────────────────────────── */
+  function render(p) {
+    const t = p < 0 ? 0 : p > 1 ? 1 : p;
+    const span = xRight - xLeft;
+    const wheelX = lerp(xLeft, xRight, t);
+
+    const tMorphRaw = Math.max(0, (t - tEntry) / (1 - tEntry));
+    const tMorph = easeInOut(Math.min(1, tMorphRaw));
+
+    const tPoly = Math.min(tMorph / PHASE2, 1);
+    const tCirc = Math.max(0, (tMorph - PHASE2) / (1 - PHASE2));
+    const circT = easeInOut(tCirc);
+
+    const nf = N_MIN + tPoly * (N_MAX - N_MIN);
+    const nLo = Math.floor(nf);
+    const nHi = Math.min(N_MAX, nLo + 1);
+    const frac = nf - nLo;
+
+    const sLo = 2 * R * Math.sin(Math.PI / nLo);
+    const sHi = 2 * R * Math.sin(Math.PI / nHi);
+    const s = lerp(sLo, sHi, frac);
+
+    const aLo = R * Math.cos(Math.PI / nLo);
+    const aHi = R * Math.cos(Math.PI / nHi);
+    const a = lerp(aLo, aHi, frac);
+
+    const bottomMargin = isMobile ? 340 : BOTTOM_MARGIN;
+    const roadPeakY = (H - bottomMargin) * VERTICAL_POS + a;
+    const axleY = roadPeakY - (a + (R - a) * circT);
+
+    ctx.clearRect(0, 0, W, H);
+
+    /* ── road (catenary arches) ── */
+    const firstPeakX = xLeft + Math.ceil((-xLeft - s) / s) * s;
+    const numArches  = Math.ceil((W + s * 2) / s) + 2;
+    const steps = Math.max(48, Math.round(s));
+    const invA = 1 / a;
+    const oneMinusCirc = 1 - circT;
+
+    ctx.beginPath();
+    for (let ai = 0; ai < numArches; ai++) {
+      const peakX = firstPeakX + ai * s;
+      const archLeft = peakX - s / 2;
+      for (let si = 0; si <= steps; si++) {
+        const frac2 = si / steps;
+        const lx = archLeft + frac2 * s;
+        const localX = lx - peakX;
+        const catenaryY = roadPeakY + a * Math.cosh(localX * invA) - a;
+        const worldY = catenaryY * oneMinusCirc + roadPeakY * circT;
+        if (si === 0) ctx.moveTo(lx, worldY);
+        else ctx.lineTo(lx, worldY);
+      }
+    }
+    ctx.strokeStyle = C_LINE;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    /* ── rolling shape ── */
+    const d = t * span;
+    const rotation = (d / s) * (2 * Math.PI / nf) - Math.PI / nf;
+    const verts = continuousVerts(nf, R);
+    const vCount = verts.length / 2;
+
+    ctx.save();
+    ctx.translate(wheelX, axleY);
+    ctx.rotate(rotation);
+    ctx.beginPath();
+
+    if (circT < 0.999) {
+      const STEPS = isMobile ? 90 : 360;
+      const per = vCount / STEPS;
+      for (let i = 0; i <= STEPS; i++) {
+        const vi = i * per;
+        const vi0 = Math.floor(vi) % vCount;
+        const vi1 = (vi0 + 1) % vCount;
+        const vf = vi - Math.floor(vi);
+        const px = lerp(verts[vi0 * 2], verts[vi1 * 2], vf);
+        const py = lerp(verts[vi0 * 2 + 1], verts[vi1 * 2 + 1], vf);
+        const pr = Math.sqrt(px * px + py * py);
+        const scale = lerp(pr, R, circT) / pr;
+        const bx = px * scale, by = py * scale;
+        if (i === 0) ctx.moveTo(bx, by);
+        else ctx.lineTo(bx, by);
+      }
+      ctx.closePath();
+    } else {
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+    }
+
+    if (!isTabletOrMobile) { ctx.fillStyle = C_FILL; ctx.fill(); }
+    ctx.strokeStyle = C_LINE;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fillStyle = C_LINE;
+    ctx.fill();
+    ctx.restore();
+
+    /* ── axle guide ── */
+    ctx.save();
+    ctx.strokeStyle = C_AXLE;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 10]);
+    ctx.beginPath();
+    ctx.moveTo(0, axleY);
+    ctx.lineTo(W, axleY);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ── Wiring ────────────────────────────────────────────── */
+  window.addEventListener('resize', resize, { passive: true });
+  window.addEventListener('scroll', onScroll, { passive: true });
+  resize();
+})();
+</script>
+
+
+</div></div></div></div></div></section><section class="section light desktop_version"><div class="w-layout-blockcontainer container case w-container"><div id="portfolio" data-scroll-label="s1" class="sticky_wrap"><div class="case_wrapper"><div class="about_horizontal_wrap absolute"><h2 data-reveal="blur" class="h2 sticky">Selected <br/><span class="italic-text">Work</span></h2><p data-reveal="blur" class="paragraph work">Thoughtful design shaped by curiosity, crafted with intention, and delivered with the attention you deserve.</p></div><div data-w-id="e864b613-acb6-9c5a-c88a-b5e6ebe8c240" class="left_panel"><div data-index="0" data-w-id="6456ac05-5dd3-8471-2ad6-2acad6aeb596" class="work_item _01"><div class="case_title"><div class="item_num">01.</div><div class="item_name">Pomio</div></div><div class="case_services_wrap"><div class="item-tags">Brand, Design, Webflow</div></div></div><div data-index="1" data-w-id="a4a669f2-7808-b757-f64a-69a2ff5ef6dd" class="work_item _02"><div class="case_title"><div class="item_num">02.</div><div class="item_name">rsb-ac</div></div><div class="case_services_wrap"><div class="item-tags">Brand, Design</div></div></div><div data-index="3" data-w-id="f6abf0eb-d7ab-22b1-7e48-ce28c2b78655" class="work_item last"><div class="case_title"><div class="item_num">03.</div><div class="item_name">Matematica</div></div><div class="case_services_wrap"><div class="item-tags">Brand, Design, Webflow</div></div></div></div><div data-w-id="52e6adfb-ed54-9971-ae39-40c603dfecd7" class="right_panel"><div id="mask1" class="slide_mask"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a7edd0938121cbf205f879a_Frame%20484276.webp" loading="lazy" alt="Pomio – healthcare saas landing page" class="case_image"/><a href="https://www.behance.net/gallery/253188347/Pomiorx-Brand-Webflow-Site-for-Healthtech-AI" target="_blank" class="circle-cta w-inline-block"><div class="circle"></div><div class="circle-text">•••Explore More•••Explore More•••Explore More</div><div class="arrow-icon w-embed"><svg fill="none" viewBox="0 0 24 24">
+  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17.25 15.25V6.75H8.75"></path>
+  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 7L6.75 17.25"></path>
+</svg></div></a></div><div id="mask2" class="slide_mask"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69e22c23e07c2726303610f7_Frame%20484304%20(3)%20(1).avif" loading="lazy" alt="RSB AC: Driving Automotive Consulting Forward" class="case_image"/><a href="https://www.behance.net/gallery/253426325/RSB-AC-Brand-Website-Design-for-Automotive-Tech" target="_blank" class="circle-cta w-inline-block"><div class="circle"></div><div class="circle-text">•••Explore More•••Explore More•••Explore More</div><div class="arrow-icon w-embed"><svg fill="none" viewBox="0 0 24 24">
+  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17.25 15.25V6.75H8.75"></path>
+  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 7L6.75 17.25"></path>
+</svg></div></a></div><div id="mask4" class="slide_mask"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ef56402e38efd97459d475_Mockup%20(72)%20(1).avif" loading="lazy" sizes="100vw" srcset="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ef56402e38efd97459d475_Mockup%20(72)%20(1)-p-500.png 500w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ef56402e38efd97459d475_Mockup%20(72)%20(1).avif 2760w" alt="Matematica – math school website design built in Webflow" class="case_image"/><a href="https://www.behance.net/gallery/253012817/matematicapl-Webflow-Site-Brand-for-Math-School" target="_blank" class="circle-cta w-inline-block"><div class="circle"></div><div class="circle-text">•••Explore More•••Explore More•••Explore More</div><div class="arrow-icon w-embed"><svg fill="none" viewBox="0 0 24 24">
+  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17.25 15.25V6.75H8.75"></path>
+  <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 7L6.75 17.25"></path>
+</svg></div></a></div></div></div></div></div></section><section id="our_work" class="section light mobile_version"><div class="w-layout-blockcontainer container case w-container"><div class="case_wrap"><h2 class="h2 sticky">Selected <br/><span class="italic-text">Works</span></h2><p class="paragraph portfolio">Thoughtful design shaped by curiosity, crafted with intention, and delivered with <span class="italic">attention you deserve.</span></p></div><div class="swiper"><div class="slides-stack"><div class="swiper-slide"><div class="slider_mask"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ef6b2df0eb90f6f76e7717_Frame%20484311.webp" loading="eager" width="1000" alt="Pomio – healthcare saas landing page" class="slide_img pomio"/></div><div data-index="0" class="slide_content_wrap"><div class="case_services_wrap"><div class="item-tags">Brand, Design, Webflow</div></div><a href="https://www.behance.net/gallery/253188347/Pomiorx-Brand-Webflow-Site-for-Healthtech-AI" target="_blank" class="case_title w-inline-block"><div class="item_num">01.</div><div class="item_name">Pomio ↗</div></a></div></div><div class="swiper-slide is-stacked"><div class="slider_mask"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ef6b2b449fc5fec4f8666e_Frame%20484312.webp" loading="eager" width="1000" alt="Pomio – healthcare saas landing page" class="slide_img"/></div><div data-index="0" class="slide_content_wrap"><div class="case_services_wrap"><div class="item-tags">Brand, Design</div></div><a href="https://www.behance.net/gallery/253426325/RSB-AC-Brand-Website-Design-for-Automotive-Tech" target="_blank" class="case_title w-inline-block"><div class="item_num">02.</div><div class="item_name">rsb-ac ↗</div></a></div></div><div class="swiper-slide is-stacked"><div class="slider_mask"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ef6cd4e7a3820e20dd0962_Frame%20484314%20(1).webp" loading="eager" alt="Pomio – healthcare saas landing page" class="slide_img"/></div><div data-index="0" class="slide_content_wrap"><div class="case_services_wrap"><div class="item-tags">Brand, Design, Webflow</div></div><a href="https://www.behance.net/gallery/253012817/matematicapl-Webflow-Site-Brand-for-Math-School" target="_blank" class="case_title w-inline-block"><div class="item_num">03.</div><div class="item_name">Matematica ↗</div></a></div></div></div><div class="slider_button_wrap"><div class="swiper-button-prev"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69d7688447b9fb3d83257020_460000443.png" loading="lazy" alt="Red arrow pointing to the left." class="arrow_img"/></div><div class="swiper-pagination"><div class="pagination_count">01</div></div><div class="swiper-button-next"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69d76881f9d2adcbf1c91450_460000444.png" loading="lazy" alt="Red arrow pointing to the right." class="arrow_img"/></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69d769725f1c73b0b29d4c92_Frame%20484299.png" loading="lazy" alt="Red elliptical outline on a transparent background." class="outline_img"/></div></div></div></section><section id="pricing" data-scroll-offset="0.6" data-w-id="e140d6a8-34bd-ef2b-6a22-0fbe3d097dde" class="section dark above"><div class="sticky_blur_wrapper"><div class="sticky_blur"><div class="external_ps_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68987e814285f163da4f3e_Monitor%20(3).webp" loading="lazy" sizes="100vw" srcset="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68987e814285f163da4f3e_Monitor%20(3)-p-500.webp 500w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68987e814285f163da4f3e_Monitor%20(3)-p-800.webp 800w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68987e814285f163da4f3e_Monitor%20(3)-p-1080.webp 1080w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68987e814285f163da4f3e_Monitor%20(3)-p-1600.webp 1600w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a68987e814285f163da4f3e_Monitor%20(3).webp 2000w" alt="Blue vintage CRT monitor displaying green rolling hills under a blue sky with scattered white clouds." class="retro_ps"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69d6196b3a985f90f0b8cbfc_Untitled%20Project%20-%20illustrationImage%20(1).avif" loading="lazy" sizes="100vw" srcset="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69d6196b3a985f90f0b8cbfc_Untitled%20Project%20-%20illustrationImage%20(1)-p-500.avif 500w, https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69d6196b3a985f90f0b8cbfc_Untitled%20Project%20-%20illustrationImage%20(1).avif 1464w" alt="Light blue smartphone displaying the Windows XP default Bliss wallpaper with green rolling hills and a partly cloudy blue sky." class="retro_mobile"/><div class="desktop_display"><div class="pricing_icon"><div data-w-id="acca4e42-2b03-0ead-74fd-e3b97d318e19" class="file_item html"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69ca4fb53287878393b635c4_Group%20116%20(4).png" loading="lazy" alt="File icon showing a blue compass dial with red and white needles above the text HTML." class="file_img text_file"/><div class="file_name">Pricing.html</div></div></div><div class="pricing_wrapper"><div class="pricing_inner_wrap"><div class="pricing_grabb"><div class="dots_wrap big"><div class="pricing_close"></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b0308e4504c24e1e13cfe2_Polygon%2025.png" loading="lazy" alt="Three stacked light gray hexagonal shapes arranged in a diagonal pattern on a white background." class="dot big"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b030a51523ef0b389a277b_Polygon%2026.png" loading="lazy" alt="Gray diamond shape on a white background." class="dot big"/></div><div class="faq_name big">Pricing.html</div></div><div class="pricing_border left"></div><div class="pricing_border right"></div><div class="pricing_border bottom"></div><div class="container_pricing"><div class="title_wrap white"><div class="title_text">Our packages</div></div><div class="servises_wrap"><div class="service_card _01"><div class="w-layout-vflex service_card_front"><div class="service_content_wrap"><div class="pricing_title_wrap"><h3 class="h3">Essentials</h3><p class="paragraph">We shape your early presence into a sharp, credible website built to <span class="italic">launch fast</span> and <span class="italic">roll smoothly</span>.</p></div><div class="service_list_wrap"><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce5ad51f117c614ffa90_Polygon%2017%20(2).svg" loading="lazy" alt="" class="list_dot"/><div class="paragraph">1-3 pages</div></div><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce572f043c5045b6acf3_Polygon%2018.svg" loading="lazy" alt="" class="list_dot"/><div class="paragraph">Custom visual direction</div></div><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce5459494dcc190660c2_Polygon%2018%20(1).svg" loading="lazy" alt="" class="list_dot"/><div class="paragraph">Conversion focused layout</div></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996dc77fdc109b630795d58_Divider.svg" loading="eager" alt="" class="bottom_devider"/><a href="#" class="underline_link invisible w-inline-block"><div class="link_text">Learn More</div><div class="link_underline"></div><div class="link_underline is-currentcolor"></div><div class="link_underline is-white"></div></a></div><div class="card_bottom _01"><div class="card_botom_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996dc77fdc109b630795d58_Divider.svg" loading="eager" alt="" class="top_devider"/><div class="price-wrap"><p class="tech_text">Price starts At:</p><p class="paragraph"><span class="tech_text big">$2,500</span></p></div><a href="https://calendar.app.google/xy7GT64TvAPQzpbw9" target="_blank" class="barcode-wrap w-inline-block"><div data-w-id="6398b494-c00c-9c79-7c43-e5cc1d911e09" data-is-ix2-target="1" class="barcode" data-animation-type="lottie" data-src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69bbff8004f216f9d2cca7f9_Scene-1%20(8).json" data-loop="0" data-direction="1" data-autoplay="0" data-renderer="svg" data-default-duration="0" data-duration="0.5" data-loading="eager" data-ix2-initial-state="0"></div><div class="button-text _01">Schedule Free Call</div></a><p class="tech_text">Ideas are not recyclable</p></div></div></div><div class="w-layout-vflex service_card_back"><div class="back-top"><div class="qr-code_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c25d8ab2fe2e2b2ce2e8b_Group%20105.svg" loading="lazy" alt="" class="qr-image"/><div class="tech_text">NEU/PKG.01-E1</div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2667c97184fe81505288_Group%20107.png" loading="lazy" alt="White target crosshair symbol on a black background." class="corner-icon"/><div class="back_content_wrap"><div class="back_content"><div class="esn">ESN</div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27610f0eaff6acf1eec3_Group%20111.png" loading="lazy" alt="White diamond-shaped outline with the letter E in white centered inside, on a black background." class="e-icon"/></div><div class="back_additionals-wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="Three white fast-forward arrow icons on black background." class="arrows-icon"/><div class="tech_text right-sided">TEAR along line</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="Three white right-pointing arrowheads in a row on a transparent background." class="arrows-icon"/></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2b5f8a927fe43031fa7a_Divider%20(2).png" loading="lazy" alt="Red dashed horizontal line on a white background." class="bottom_devider"/></div><div class="back-bottom"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2667c97184fe81505288_Group%20107.png" loading="lazy" alt="White target or crosshair symbol on a black background." class="corner-icon left_bottom"/><div class="organic-label">CREATIVE MATERIAL, DO NOT RECYCLE!</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2b5f8a927fe43031fa7a_Divider%20(2).png" loading="lazy" alt="Red dashed horizontal line divider on a white background." class="top_devider"/></div></div></div><div class="service_card _02"><div class="w-layout-vflex service_card_front"><div class="service_content_wrap"><div class="pricing_title_wrap"><h3 class="h3">Growth</h3><p class="paragraph">You already have motion. Now we <span class="italic">reduce friction</span>. A structured system designed to keep you <span class="italic">moving forward</span>.</p></div><div class="service_list_wrap"><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce5ad51f117c614ffa90_Polygon%2017%20(2).svg" loading="lazy" alt="Dot" class="list_dot"/><div class="paragraph">5-8 custom pages <span class="italic">+ unlimited CMS</span></div></div><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce572f043c5045b6acf3_Polygon%2018.svg" loading="lazy" alt="Dot" class="list_dot"/><div class="paragraph">Complete brand identity</div></div><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce5459494dcc190660c2_Polygon%2018%20(1).svg" loading="lazy" alt="Dot" class="list_dot"/><div class="paragraph">External Integrations</div></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996dc77fdc109b630795d58_Divider.svg" loading="eager" alt="Dushed line" class="bottom_devider front"/><a href="#" class="underline_link invisible w-inline-block"><div class="link_text">Learn More</div><div class="link_underline"></div><div class="link_underline is-currentcolor"></div><div class="link_underline is-white"></div></a></div><div class="card_bottom _02"><div class="card_botom_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996dc77fdc109b630795d58_Divider.svg" loading="eager" alt="Dushed line" class="top_devider front"/><div class="price-wrap"><p class="tech_text">Price starts At:</p><p class="paragraph"><span class="tech_text big">$5,000</span></p></div><a href="https://calendar.app.google/xy7GT64TvAPQzpbw9" target="_blank" class="barcode-wrap w-inline-block"><div data-w-id="585c819f-e1b2-6d8d-3c71-6133f4f92fd3" data-is-ix2-target="1" class="barcode" data-animation-type="lottie" data-src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69bbff8004f216f9d2cca7f9_Scene-1%20(8).json" data-loop="0" data-direction="1" data-autoplay="0" data-renderer="svg" data-default-duration="0" data-duration="0.5" data-loading="eager" data-ix2-initial-state="0"></div><div class="button-text _02">Schedule Free Call</div></a><p class="tech_text">100% original and human-made</p></div></div></div><div class="w-layout-vflex service_card_back"><div class="back-top"><div class="qr-code_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c25d8ab2fe2e2b2ce2e8b_Group%20105.svg" loading="lazy" alt="Qr Code" class="qr-image"/><div class="tech_text">NEU/PKG.02-G1</div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2667c97184fe81505288_Group%20107.png" loading="lazy" alt="White crosshair target symbol on a black background." class="corner-icon"/><div class="back_content_wrap"><div class="back_content"><div class="esn">GRO</div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c300995edffbdcecab644_Group%20111%20(1).png" loading="lazy" alt="Hexagon shape with the letter G centered inside." class="e-icon"/></div><div class="back_additionals-wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="" class="arrows-icon"/><div class="tech_text right-sided">TEAR along line</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="" class="arrows-icon"/></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2b5f8a927fe43031fa7a_Divider%20(2).png" loading="lazy" alt="Red dashed horizontal line divided into evenly spaced segments on a white background." class="bottom_devider"/></div><div class="back-bottom"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2667c97184fe81505288_Group%20107.png" loading="lazy" alt="" class="corner-icon left_bottom"/><div class="organic-label">100% organic and human produced</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2b5f8a927fe43031fa7a_Divider%20(2).png" loading="lazy" alt="Dashed line" class="top_devider"/></div></div></div><div class="service_card _03"><div class="w-layout-vflex service_card_front"><div class="service_content_wrap"><div class="pricing_title_wrap"><h3 class="h3">Enterprise</h3><p class="paragraph">At scale, <span class="italic">rough edges</span> cost time and revenue. We design scalable system that keep your company rolling <span class="italic">at full speed</span>.</p></div><div class="service_list_wrap"><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce5ad51f117c614ffa90_Polygon%2017%20(2).svg" loading="lazy" alt="Dot" class="list_dot"/><div class="paragraph">&gt;10 pages <span class="italic">+ unlimited CMS</span></div></div><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce572f043c5045b6acf3_Polygon%2018.svg" loading="lazy" alt="Dot" class="list_dot"/><div class="paragraph">Full design system</div></div><div class="service_list"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996ce5459494dcc190660c2_Polygon%2018%20(1).svg" loading="lazy" alt="Dot" class="list_dot"/><div class="paragraph">Custom solutions</div></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996dc77fdc109b630795d58_Divider.svg" loading="eager" alt="Dushed line" class="bottom_devider front"/><a href="#" class="underline_link invisible w-inline-block"><div class="link_text">Learn More</div><div class="link_underline"></div><div class="link_underline is-currentcolor"></div><div class="link_underline is-white"></div></a></div><div class="card_bottom _03"><div class="card_botom_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6996dc77fdc109b630795d58_Divider.svg" loading="eager" alt="Dushed line" class="top_devider front"/><div class="price-wrap"><p class="tech_text">Price starts At:</p><p class="paragraph"><span class="tech_text big">$8,000</span></p></div><a href="https://calendar.app.google/xy7GT64TvAPQzpbw9" target="_blank" class="barcode-wrap w-inline-block"><div data-w-id="d063ee6c-1fbc-86e3-0077-10418230cd57" data-is-ix2-target="1" class="barcode" data-animation-type="lottie" data-src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69bbff8004f216f9d2cca7f9_Scene-1%20(8).json" data-loop="0" data-direction="1" data-autoplay="0" data-renderer="svg" data-default-duration="0" data-duration="0.5" data-loading="eager" data-ix2-initial-state="0"></div><div class="button-text _03">Schedule Free Call</div></a><p class="tech_text">Stores in direct access of clients</p></div></div></div><div class="w-layout-vflex service_card_back"><div class="back-top"><div class="qr-code_wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c25d8ab2fe2e2b2ce2e8b_Group%20105.svg" loading="lazy" alt="Qr Code" class="qr-image"/><div class="tech_text">NEU/PKG.03-E2</div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2667c97184fe81505288_Group%20107.png" loading="lazy" alt="Mark" class="corner-icon"/><div class="back_content_wrap"><div class="back_content"><div class="esn">ENT</div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c30085ab0f97f49850691_Group%20111%20(2).png" loading="lazy" alt="White letter E inside a white circular border on a black background." class="e-icon"/></div><div class="back_additionals-wrap"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="" class="arrows-icon"/><div class="tech_text right-sided">TEAR along line</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c27d4d0107831c69e0e82_Vector.png" loading="lazy" alt="" class="arrows-icon"/></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2b5f8a927fe43031fa7a_Divider%20(2).png" loading="lazy" alt="Dashed line" class="bottom_devider"/></div><div class="back-bottom"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2667c97184fe81505288_Group%20107.png" loading="lazy" alt="Mark" class="corner-icon left_bottom"/><div class="organic-label">Store in direct access of clients</div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/699c2b5f8a927fe43031fa7a_Divider%20(2).png" loading="lazy" alt="Dashed line" class="top_devider"/></div></div></div></div><p class="price-disclaimer"><span class="italic">Quality is non-negotiable.</span><br/>No matter the package, every project is responsive, performance-optimized, cross-browser tested, SEO-ready, accessible, and built with clean architecture.</p></div><div class="shape"><div class="top dark"></div><div class="top light"></div><div class="bottom"></div><div class="bottom light"></div></div><div class="bg-service-text"><span class="blur-text">We keep our <br/>focus on</span> <br/><span data-w-id="d1c30256-f320-90a1-4d12-6b535a50ea69" class="italic-text">important things</span></div></div></div><div class="zefir_wrapper"><div class="personal"><div class="zefir_grabb"><div class="dots_wrap"><div class="zefir_close"><div class="red_dot"></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b0308e4504c24e1e13cfe2_Polygon%2025.png" loading="lazy" alt="Gray geometric hexagon shape with two smaller hexagons overlapping on top, creating a layered polygon design." class="dot"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b030a51523ef0b389a277b_Polygon%2026.png" loading="lazy" alt="Gray diamond shape on a white background." class="dot"/></div><div class="faq_name">Zefir <span class="thin_text">- Office Manager</span></div></div><div class="inner_img_wrap"><div class="file-inner_img zefir"></div></div></div></div><div class="natalia_wrapper"><div class="personal"><div class="natalia_grabb"><div class="dots_wrap"><div class="natalia_close"><div class="red_dot"></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b0308e4504c24e1e13cfe2_Polygon%2025.png" loading="lazy" alt="Simple gray geometric shape resembling a downward pointing arrow with a trapezoid above it." class="dot"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b030a51523ef0b389a277b_Polygon%2026.png" loading="lazy" alt="Gray diamond shape on a white background." class="dot"/></div><div class="faq_name">Natalia<span class="surname">Matys </span> - <span class="thin_text">Webflow &amp; Motion</span></div></div><div class="inner_img_wrap"><div class="file-inner_img natalia"></div></div></div></div><div class="andrii_wrapper"><div class="personal"><div class="andrii_grabb"><div class="dots_wrap"><div class="andrii_close"><div class="red_dot"></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b0308e4504c24e1e13cfe2_Polygon%2025.png" loading="lazy" alt="Progress dot" class="dot"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b030a51523ef0b389a277b_Polygon%2026.png" loading="lazy" alt="Progress dot" class="dot"/></div><div class="faq_name">Andrii <span class="surname">Chernysh</span> <span class="thin_text">- Design &amp; Strategy</span></div></div><div class="inner_img_wrap"><div class="file-inner_img"></div></div></div></div><div class="faq_wrapper"><div class="faq_inner_wrap"><div class="faq_grabb"><div class="dots_wrap"><div class="faq_close"><div class="red_dot"></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b0308e4504c24e1e13cfe2_Polygon%2025.png" loading="lazy" alt="Progress dot" class="dot"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b030a51523ef0b389a277b_Polygon%2026.png" loading="lazy" alt="Progress dot" class="dot"/></div><div class="faq_name">FAQ.md</div></div><div class="window_body"><div class="code-embed w-embed"><style>
+.faq-code,
+pre.faq-code,
+pre.w-code-block.faq-code {
+  width: 100%;
+  max-height: 52rem;
+  box-sizing: border-box;
+  margin: 0 !important;
+
+  padding-top: 5px !important;
+  padding-right: 0px !important;
+  padding-bottom: 5px !important;
+  padding-left: 0 !important;
+  padding-inline-start: 0 !important;
+
+  overflow-x: auto;
+  overflow-y: auto;
+
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+
+  background-color: #f6f6f6 !important;
+  color: #d31531 !important;
+  color-scheme: light;
+
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+
+  scrollbar-color: #d31531 #f6f6f6;
+}
+
+/* Remove spacing from the inner code element */
+.faq-code > code,
+pre.w-code-block.faq-code > code {
+  display: block;
+  margin: 0 !important;
+  padding: 0 !important;
+  padding-left: 0 !important;
+  color: inherit !important;
+}
+
+/* Keep all highlighted text the same color */
+.faq-code code span,
+pre.w-code-block.faq-code code span {
+  color: inherit !important;
+}
+
+/* Line numbers */
+.faq-code .react-syntax-highlighter-line-number,
+pre.w-code-block.faq-code .react-syntax-highlighter-line-number {
+  display: inline-block !important;
+  min-width: 2.2em !important;
+
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 5 px !important;
+
+  color: rgba(211, 21, 49, 0.48) !important;
+  text-align: right !important;
+  user-select: none;
+
+  font-family: inherit !important;
+  font-size: 0.8em !important;
+  font-weight: 400 !important;
+}
+
+/* Scrollbar */
+.faq-code::-webkit-scrollbar,
+pre.w-code-block.faq-code::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+.faq-code::-webkit-scrollbar-track,
+pre.w-code-block.faq-code::-webkit-scrollbar-track {
+  background: #f6f6f6;
+}
+
+.faq-code::-webkit-scrollbar-thumb,
+pre.w-code-block.faq-code::-webkit-scrollbar-thumb {
+  background: #d31531;
+  border: 0px solid #f6f6f6;
+  border-radius: 999px;
+}
+</style></div><pre contenteditable="false" data-lenis-prevent="true" class="faq-code w-code-block" style="display:block;overflow-x:auto;background:#fefefe;color:#545454;padding:0.5em"><code class="language-htmlbars" style="white-space:pre-wrap"><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">1</span><span class="xml"># What areas do you specialize in?
+</span></span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">2</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">3</span>We specialize in web design,
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">4</span>Webflow development, mobile
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">5</span>app development, UX/UI
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">6</span>design, graphic design, and 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">7</span>branding.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">8</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">9</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">10</span>---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">11</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">12</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">13</span># Do you offer branding services?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">14</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">15</span>‍Yes — we provide different levels 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">16</span>of branding support depending on 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">17</span>your needs, from simple visual 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">18</span>direction to full brand identity 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">19</span>design.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">20</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">21</span>---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">22</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">23</span># What is Webflow, and why host 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">24</span>my website there?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">25</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">26</span>‍Webflow is a cloud-based platform 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">27</span>that combines a website builder, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">28</span>design tool, and CMS. It lets you 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">29</span>create responsive websites with a 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">30</span>drag-and-drop interface, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">31</span>streamlining the process compared 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">32</span>to traditional methods.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">33</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">34</span>It also empowers your marketing 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">35</span>team to manage and update the 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">36</span>website easily.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">37</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">38</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">39</span>‍---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">40</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">41</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">42</span># Do you work with platforms 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">43</span>other than Webflow?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">44</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">45</span>No, we specialize exclusively 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">46</span>in Webflow. It allows us to 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">47</span>deliver faster, cleaner, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">48</span>and more reliable websites.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">49</span>‍
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">50</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">51</span>---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">52</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">53</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">54</span>‍# Can you work with clients 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">55</span>outside of your timezone?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">56</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">57</span>Yes. We are based in Poland and 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">58</span>work in the CET/CEST timezone, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">59</span>which aligns well with clients 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">60</span>in Europe, the Middle East, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">61</span>and the US East Coast.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">62</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">63</span>We can also collaborate with clients 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">64</span>on the US West Coast or in the APAC 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">65</span>region, but these projects are 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">66</span>usually async-first. If you need 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">67</span>frequent live calls, we will be 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">68</span>upfront about whether the schedule 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">69</span>is a good fit.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">70</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">71</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">72</span>---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">73</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">74</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">75</span># What do you need from us before 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">76</span>we can start?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">77</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">78</span>The essentials: logo files and 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">79</span>brand assets, any existing brand 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">80</span>guidelines, content for each page, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">81</span>or confirmation that copywriting 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">82</span>is included in the project scope, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">83</span>access to your domain and hosting, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">84</span>examples of websites you like 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">85</span>and dislike.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">86</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">87</span>The dislike list is often more 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">88</span>useful than the inspiration board. 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">89</span>A rough brief, even just a few 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">90</span>paragraphs in a Google Doc, is a 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">91</span>perfectly good starting point.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">92</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">93</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">94</span>‍---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">95</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">96</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">97</span>‍# How does payment work?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">98</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">99</span>For website packages, we split the 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">100</span>payment into two parts: 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">101</span>50% upfront to secure the project 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">102</span>and 50% upon launch.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">103</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">104</span>For UI/UX support, billing is 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">105</span>monthly and based strictly on 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">106</span>the actual hours used.
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">107</span>‍
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">108</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">109</span>---
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">110</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">111</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">112</span># Who will be involved in my project?
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">113</span>
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">114</span>We keep things small and personal. 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">115</span>Every project is handled directly 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">116</span>by our core team: 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">117</span>Natalia, our Webflow specialist, 
+</span><span class="xml" style="display:flex"><span class="comment linenumber react-syntax-highlighter-line-number" style="display:inline-block;min-width:1.25em;padding-right:1em;text-align:right;user-select:none">118</span>and Andrii, our designer.</span></code></pre></div></div></div><div class="testimonial_wrapper"><div class="testimonial_inner_wrap"><div class="testimonial_grabb"><div class="dots_wrap"><div class="testimonial_close"><div class="red_dot"></div></div><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b0308e4504c24e1e13cfe2_Polygon%2025.png" loading="lazy" alt="Progress dot" class="dot"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b030a51523ef0b389a277b_Polygon%2026.png" loading="lazy" alt="Progress dot" class="dot"/></div><div class="faq_name">Testimonials</div></div><div class="tabs_wrap"><div data-current="Pomio" data-easing="ease" data-duration-in="300" data-duration-out="100" class="tabs w-tabs"><div class="tabs-menu w-tab-menu"><a data-w-tab="Pomio" data-w-id="4ce7f9b2-2edc-5039-89ba-04c60378b063" class="tab _01 w-inline-block w-tab-link w--current"><div class="tab_flll"></div><div class="client_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="client_wrap"><div class="client_name">Łukasz P</div><div class="client_info">Pomio.rx</div></div></div></a><a data-w-tab="Matematica" data-w-id="d3fbf143-ce98-71c2-dbe8-bb39c8749076" class="tab _02 w-inline-block w-tab-link"><div class="client_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="client_wrap"><div class="client_name">Aleksander Johanson</div><div class="client_info">Matematica</div></div></div></a><a data-w-tab="Codefunded" data-w-id="075f1472-7041-1db2-ac79-8920ec327139" class="tab _03 w-inline-block w-tab-link"><div class="client_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="client_wrap"><div class="client_name">Wojciech Bąk</div><div class="client_info">codefunded</div></div></div></a><a data-w-tab="Icompnet" data-w-id="4ce7f9b2-2edc-5039-89ba-04c60378b069" class="tab _04 w-inline-block w-tab-link"><div class="client_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="client_wrap"><div class="client_name">Pawel Lisiecki</div><div class="client_info">ICOMPNET</div></div></div></a><a data-w-tab="Cashify" data-w-id="8b564640-fe80-5ad2-8da4-70ef8d852970" class="tab _06 w-inline-block w-tab-link"><div class="client_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="client_wrap"><div class="client_name">Katarzyna Podgórska</div><div class="client_info">Cashify</div></div></div></a></div><div class="tabs-content w-tab-content"><div data-w-tab="Pomio" class="tab_pane w-tab-pane w--tab-active"><div class="message_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="message_wrap"><div class="from_who_text">Katarzyna Podgórska (Cashify)</div><div class="message"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b02e0c9de5276d07d9e19d_Subtract.svg" loading="lazy" alt=""/><div class="message_text_wrap"><p class="message_text">Thank you! It&#x27;s been fun working with you as well. Made this crazy project feel like a <em class="italic">real company!</em></p></div></div><div class="message_date">12 January 2026</div></div></div></div><div data-w-tab="Matematica" class="tab_pane w-tab-pane"><div class="message_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="message_wrap"><div class="from_who_text">Aleksander Johanson (Matematica)</div><div class="message"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b02e0c9de5276d07d9e19d_Subtract.svg" loading="lazy" alt="Subtract element"/><div class="message_text_wrap"><p class="message_text">It&#x27;s a pure pleasure working with You. You outdid yourselves with every chaotic idea I asked you to implement.</p></div></div><div class="message_date">20 December 2025</div></div></div></div><div data-w-tab="Codefunded" class="tab_pane w-tab-pane"><div class="message_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="message_wrap"><div class="from_who_text">Wojciech Bąk (codefunded)</div><div class="message"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b02e0c9de5276d07d9e19d_Subtract.svg" loading="lazy" alt="Subtract element"/><div class="message_text_wrap"><p class="message_text">I am 100% satisfied and can only hope that You maintain your current, very high standard of services</p></div></div><div class="message_date">5 June 2024</div></div></div></div><div data-w-tab="Icompnet" class="tab_pane w-tab-pane"><div class="message_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="message_wrap"><div class="from_who_text">Pawel Lisiecki (ICOMPNET)</div><div class="message"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b02e0c9de5276d07d9e19d_Subtract.svg" loading="lazy" alt="Subtract element"/><div class="message_text_wrap"><p class="message_text">Thank you! The work was done meticulously and within the deadlines.</p></div></div><div class="message_date">10 January 2024</div></div></div></div><div data-w-tab="Cashify" class="tab_pane w-tab-pane"><div class="message_wrapper"><div class="client_image_wrap"><div class="client_img w-embed"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 0C24.8366 0 32 7.16344 32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0ZM15.998 21.0049C11.9684 21.0051 8.31522 22.5418 5.64648 25.0332C8.20695 27.7136 11.8964 29.3963 15.998 29.3965C20.0998 29.3965 23.789 27.7136 26.3496 25.0332C23.6808 22.5419 20.0277 21.0049 15.998 21.0049ZM16 7.27148C12.9075 7.27163 10.3998 9.83349 10.3994 12.9932C10.3994 16.1531 12.9073 18.7157 16 18.7158C19.0926 18.7156 21.5996 16.1531 21.5996 12.9932C21.5993 9.83354 19.0924 7.27171 16 7.27148Z" fill="currentcolor"/>
+</svg></div></div><div class="message_wrap"><div class="from_who_text">Katarzyna Podgórska (Cashify)</div><div class="message"><img loading="lazy" src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b02e0c9de5276d07d9e19d_Subtract.svg" alt="Subtract element"/><div class="message_text_wrap"><p class="message_text">Your deep expertise in Webflow development and proactive approach to problem-solving stand out the most.</p></div></div><div class="message_date">28 May 2024</div></div></div></div></div></div></div></div></div><div class="files_wrap"><div class="zefir_icon"><div class="file_item"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a140385117bd9c5fd2cd554_IMG_6707%203%201%20(1).avif" loading="lazy" alt="Cute cat from Neutomni studio" class="file_img"/><div class="file_name">Zefir.png</div></div></div><div class="natalia_icon"><div data-w-id="4388e8b8-8220-81a6-1ca7-530634b48588" class="file_item"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a1400ff117bd9c5fd2bfc66_047682%203%201.webp" loading="lazy" alt="Natalia Matys - Webflow &amp; Motion" class="file_img"/><div class="file_name">Natalia.png</div></div></div><div class="andrii_icon"><div class="file_item"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6a14047bc62e80f0d134960a_FilmCam_K%20Funs_20260502_170223235%201.avif" loading="lazy" alt="Andrii Chernysh - Design &amp; Strategy" class="file_img"/><div class="file_name">Andrii.png</div></div></div><div class="testimonial_icon"><div class="file_item"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b00a6ddf111f169cf2c333_Group%20116%20(1).png" loading="lazy" alt="Blue folder icon with a tab on top, representing a file directory." class="file_img file"/><div class="file_name">Testimonials</div></div></div><div class="faq_icon"><div data-w-id="4df7d6d7-6ade-8592-5a17-82cc018cbfcb" class="file_item md"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69b00a9a3502cd46e577c39a_Group%20116%20(3).png" loading="lazy" alt="Icon representing a document file with the extension MD, showing a folded top-right corner." class="file_img text_file"/><div class="file_name">FAQ.md</div></div></div></div><div class="wallpaper"><div class="display_menu_bar"><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69cbebecfd098188c46ff154_Menu%20Bar%20Icons.png" loading="lazy" width="566" alt="" class="widget_icon"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69cbebec9141810a99c7c177_Menu%20Bar%20Icons-1.png" loading="lazy" width="566" alt="" class="widget_icon"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69cbebec73f7f410f99383c4_Menu%20Bar%20Icons-2.png" loading="lazy" width="566" alt="" class="widget_icon"/><img src="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/69cbebece277816bd2c9c7fd_Menu%20Bar%20Icons-3.png" loading="lazy" width="566" alt="" class="widget_icon"/><div class="timing"><div class="date">Mon Jum 22</div><div class="time">9:41 AM</div></div></div></div></div></div></div></div></section><section id="hover-section" class="section light hover"><div class="w-layout-blockcontainer container cta w-container"><div class="cta-content-wrap"><div class="title_wrap"><div class="title_text">Contact</div></div><h2 data-reveal="blur" class="h2 cta">Ready to get your<br/><span class="italic-text">business in shape?</span></h2><p data-reveal="blur" class="paragraph cta">Treat it like <span class="italic">a first date</span>. We’ll get to know each other better, with <span class="italic">no obligations</span>.  No worries, the check is on us</p></div><div class="track"><a id="morphLabel" href="https://calendar.app.google/xy7GT64TvAPQzpbw9" target="_blank" class="schedule_wrap desktop w-inline-block"><div class="shape_text desktop">[ Let&#x27;s talk ]</div></a><div id="morphLabelMobile" class="schedule_wrap mobile"><div class="shape_text mobile">&lt; DRAG ME &gt;</div></div><div class="svg_shapes w-embed"><style>
+  .track {
+    position: relative;
+    height: 220px;
+  }
+
+  #morphSvg,
+  #morphSvgMobile {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+
+  #morphSvgMobile { display: none; }
+
+  @media (hover: none) {
+    #morphSvg { display: none; }
+    #morphSvgMobile { display: block; }
+    .track { height: 120px; }
+  }
+</style>
+
+
+<svg id="morphSvg" width="220" height="220" viewBox="0 0 220 220" fill="currentcolor" xmlns="http://www.w3.org/2000/svg">
+        <path id="first" d="M110 217.293L2.70703 110L110 2.70703L217.293 110L110 217.293Z" fill="currentcolor"/>
+        <path id="second" d="M110 10L196.603 60V160L110 210L23.3975 160V60L110 10Z" fill="transparent"/>
+        <path id="third" d="M110.141 10.1367L180.851 39.426L210.141 110.137L180.851 180.847L110.141 210.137L39.4299 180.847L10.1406 110.137L39.4299 39.426L110.141 10.1367Z" fill="transparent"/>
+        <path id="fourth" d="M110 10L160 23.3975L196.603 60L210 110L196.603 160L160 196.603L110 210L60 196.603L23.3975 160L10 110L23.3975 60L60 23.3975L110 10Z" fill="transparent"/>
+        <path id="fifth" d="M110 10L148.268 17.612L180.711 39.2893L202.388 71.7317L210 110L202.388 148.268L180.711 180.711L148.268 202.388L110 210L71.7317 202.388L39.2893 180.711L17.612 148.268L10 110L17.612 71.7317L39.2893 39.2893L71.7317 17.612L110 10Z" fill="transparent"/>
+        <path id="sixth" d="M97.059 11.7037C105.649 10.5728 114.351 10.5728 122.941 11.7037V11.7037C131.531 12.8346 139.936 15.0867 147.941 18.4024V18.4024C155.946 21.7181 163.481 26.0689 170.355 31.3434V31.3434C177.229 36.6179 183.382 42.7708 188.657 49.6447V49.6447C193.931 56.5186 198.282 64.0542 201.598 72.059V72.059C204.913 80.0639 207.165 88.4688 208.296 97.0591V97.0591C209.427 105.649 209.427 114.351 208.296 122.941V122.941C207.165 131.531 204.913 139.936 201.598 147.941V147.941C198.282 155.946 193.931 163.481 188.657 170.355V170.355C183.382 177.229 177.229 183.382 170.355 188.657V188.657C163.481 193.931 155.946 198.282 147.941 201.598V201.598C139.936 204.913 131.531 207.165 122.941 208.296V208.296C114.351 209.427 105.649 209.427 97.0591 208.296V208.296C88.4688 207.165 80.0639 204.913 72.059 201.598V201.598C64.0542 198.282 56.5186 193.931 49.6447 188.657V188.657C42.7708 183.382 36.6179 177.229 31.3434 170.355V170.355C26.0689 163.481 21.7181 155.946 18.4024 147.941V147.941C15.0867 139.936 12.8346 131.531 11.7037 122.941V122.941C10.5728 114.351 10.5728 105.649 11.7037 97.059V97.059C12.8346 88.4688 15.0867 80.0639 18.4024 72.059V72.059C21.7181 64.0542 26.0689 56.5186 31.3434 49.6447V49.6447C36.6179 42.7708 42.7708 36.6179 49.6447 31.3434V31.3434C56.5186 26.0689 64.0542 21.7181 72.059 18.4024V18.4024C80.0639 15.0867 88.4688 12.8346 97.059 11.7037V11.7037Z" fill="transparent"/>
+      </svg>
+
+
+<svg id="morphSvgMobile" width="120" height="120" viewBox="0 0 120 120" fill="currentcolor" xmlns="http://www.w3.org/2000/svg">
+  <path id="first-mobile" d="M60 118.523L1.47656 60L60 1.47656L118.523 60L60 118.523Z" fill="currentcolor"/>
+  <path id="second-mobile" d="M60.0034 5.45312L107.241 32.7259V87.2713L60.0034 114.544L12.7656 87.2713V32.7259L60.0034 5.45312Z" fill="transparent"/>
+  <path id="third-mobile" d="M60.0769 5.53125L98.646 21.5072L114.622 60.0769L98.646 98.646L60.0769 114.622L21.5072 98.646L5.53125 60.0769L21.5072 21.5072L60.0769 5.53125Z" fill="transparent"/>
+  <path id="fourth-mobile" d="M52.9419 6.38452C57.6274 5.76766 62.374 5.76766 67.0594 6.38452C71.7449 7.00137 76.3294 8.22979 80.6958 10.0384C85.0621 11.8469 89.1721 14.2201 92.9216 17.0971C96.671 19.9741 100.027 23.3302 102.904 27.0796C105.781 30.829 108.154 34.9393 109.963 39.3056C111.771 43.6719 113 48.2564 113.617 52.942C114.234 57.6274 114.234 62.374 113.617 67.0594C113 71.7449 111.771 76.3294 109.963 80.6958C108.154 85.0621 105.781 89.1721 102.904 92.9216C100.027 96.671 96.671 100.027 92.9216 102.904C89.1721 105.781 85.0621 108.154 80.6958 109.963C76.3294 111.771 71.7449 113 67.0594 113.617C62.374 114.234 57.6274 114.234 52.942 113.617C48.2564 113 43.6719 111.771 39.3056 109.963C34.9393 108.154 30.829 105.781 27.0796 102.904C23.3302 100.027 19.9741 96.671 17.0971 92.9216C14.2201 89.1721 11.8469 85.0621 10.0384 80.6958C8.22979 76.3294 7.00137 71.7449 6.38452 67.0594C5.76766 62.374 5.76766 57.6274 6.38452 52.9419C7.00137 48.2564 8.22979 43.6719 10.0384 39.3056C11.8469 34.9393 14.2201 30.829 17.0971 27.0796C19.9741 23.3302 23.3302 19.9741 27.0796 17.0971C30.829 14.2201 34.9393 11.8469 39.3056 10.0384C43.6719 8.22979 48.2564 7.00137 52.9419 6.38452Z" fill="transparent"/>
+</svg></div><div class="dash_line_wrap"><div class="dash_line w-embed"><svg width="2300" height="2" viewBox="0 0 2300 2" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 0.75L2300 0.750201" stroke="#CF1830" stroke-opacity="0.5" stroke-width="1.5" stroke-dasharray="8 8"/>
+</svg></div></div></div><div class="reserve_wrap"><a href="https://calendar.app.google/xy7GT64TvAPQzpbw9" target="_blank" class="reserve_text">[ Reserve your spot ]</a></div></div><div data-w-id="c1fcd15f-bf62-76d3-985a-0c8e17f9f481" class="shadow_trigger"></div></section><div class="footer"><div class="footer_container"><div class="footer_navigation_wrap"><div id="w-node-_69ac12a6-5d98-44ba-cbd7-ca463c0e05bb-59c6eb04" class="contact-link-wrap"><a href="mailto:contact@neutomni.com?subject=Neutomni%20Website" class="footer_link mail">contact@neutomni.com</a></div><div id="timezone" class="timezone white w-node-_3d1274ad-6857-8e1f-3996-541f558b4498-59c6eb04">our local time</div><div id="w-node-_3a825453-bb6a-d860-fa48-aadc4a9bb351-59c6eb04" class="div-block"><div class="footer_navigation"><a href="https://www.instagram.com/neutomni_design/" target="_blank" class="footer_link">Instagram</a><a href="https://dribbble.com/Neutomni" target="_blank" class="footer_link">Dribbble</a><a href="https://www.behance.net/neutomni_design" target="_blank" class="footer_link">Behance</a><a href="https://www.linkedin.com/company/neutomni/" target="_blank" class="footer_link">LinkedIn</a><a href="https://clutch.co/profile/neutomni" target="_blank" class="footer_link">Clutch</a></div><div class="footer_navigation"><a href="#process" class="footer_link">Process</a><a href="#portfolio" class="footer_link desktop">Portfolio</a><a data-scroll-offset="0.2" href="#our_work" class="footer_link mobile">Portfolio</a><a href="#pricing" class="footer_link">Pricing</a><a href="https://cdn.prod.website-files.com/696f937263525fd559c6ea5f/6aa7bac827f3ee081d508f13_PrivacyPolicy.pdf" target="_blank" class="footer_link">Privacy Policy</a><a flowappz-cookie-consent-sticky-cookie-button="true" flowappz-cookie-command="manage-settings" flowappz-cookie-preferance-manage="true" href="#" class="footer_link w-inline-block flowappz-hide-popup"><div>Cookie Settings</div></a></div></div></div><div class="footer_logo_wrap"><div class="code-embed-2 w-embed"><svg id="logo-svg" width="100%" height="fill" viewBox="0 0 1400 214" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 204.665V0.000760983H74.4059L114.825 194.887H118.639V0.000760983H156.44V204.665H82.0343L41.6157 8.08989H37.8016V204.665H0Z" fill="white"/>
+<path d="M194.801 204.665V0.000760983H325.652V35.0861H233.184V83.9133H317.51V118.999H233.184V169.58H325.652V204.665H354.65V169.58H513.998V204.665H325.652H194.801Z" fill="white"/>
+<path d="M593.285 204.665V35.0861H533.965V0.000760983H689.644H883.081V35.0861H709.783V0.000760983H689.644V35.0861H631.668V204.665H593.285Z" fill="white"/>
+<path d="M910.395 204.665V0.000760983H981.636L1016.82 178.644V194.887H1022.06V178.644L1057.24 0.000760983H1128.48V204.665H1091.26V8.08989H1086.03V28.3939L1051.13 204.665H987.743L952.849 28.3939V8.08989H947.615V204.665H910.395Z" fill="white"/>
+<path d="M1361.62 204.665V0.000760983H1400V204.665H1361.62Z" fill="white"/>
+<path d="M1165.51 204.666V0.000991408H1238.49L1278.91 174.583V194.887H1284.15V0.000991408H1321.95V204.666H1248.96L1208.54 28.3941V8.08989H1203.31V204.666H1165.51Z" fill="white"/>
+<path d="M434.324 142.096C417.652 142.096 403.307 139.075 391.288 133.033C379.463 126.795 370.352 118.024 363.955 106.719C357.752 95.2185 354.65 81.6717 354.65 66.0782V0H393.033V67.2477C393.033 79.7225 396.522 89.5659 403.501 96.7779C410.674 103.99 420.948 107.596 434.324 107.596C447.7 107.596 457.877 103.99 464.856 96.7779C472.028 89.5659 475.615 79.7225 475.615 67.2477V0H513.998V66.0782C513.998 81.6717 510.799 95.2185 504.402 106.719C498.199 118.024 489.088 126.795 477.069 133.033C465.244 139.075 450.995 142.096 434.324 142.096Z" fill="white"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M794.878 61.3074C825.611 61.3074 877.081 74.9789 877.081 133.728C877.081 194.502 840.308 214 794.878 214C749.449 214 714.783 190.197 714.783 133.728C714.783 78.7798 761.782 61.3074 794.878 61.3074Z" fill="white"/>
+
+<path id="shape1" d="M796 78L856 138L796 198L736 138L796 78Z" fill="#cf1830"/>
+<path id="shape2" d="M795.961 77.9609L853.025 119.42L831.229 186.502H760.694L738.898 119.42L795.961 77.9609Z" fill="transparent"/>
+<path id="shape3" d="M796.039 77.9609L848 107.961V167.961L796.039 197.961L744.077 167.961V107.961L796.039 77.9609Z" fill="transparent"/>
+<path id="shape4" d="M796 78L842.91 100.591L854.496 151.351L822.033 192.058H769.967L737.504 151.351L749.09 100.591L796 78Z" fill="transparent"/>
+<path id="shape5" d="M796.039 77.9609L838.465 95.5345L856.039 137.961L838.465 180.387L796.039 197.961L753.612 180.387L736.039 137.961L753.612 95.5345L796.039 77.9609Z" fill="transparent"/>
+<path id="shape6" d="M796.039 78.0391L834.606 92.0764L855.127 127.62L848 168.039L816.56 194.421H775.517L744.077 168.039L736.95 127.62L757.471 92.0764L796.039 78.0391Z" fill="transparent"/>
+<path id="shape7" d="M796 78L831.267 89.459L853.063 119.459V156.541L831.267 186.541L796 198L760.733 186.541L738.937 156.541V119.459L760.733 89.459L796 78Z" fill="transparent"/>
+</svg></div></div></div><div style="opacity:1;display:block" class="footer_shadow"></div></div></main>
+
+<script src="https://cdn.prod.website-files.com/gsap/3.15.0/gsap.min.js"></script>
+<script src="https://cdn.prod.website-files.com/gsap/3.15.0/MorphSVGPlugin.min.js"></script>
+<script src="https://cdn.prod.website-files.com/gsap/3.15.0/ScrollTrigger.min.js"></script>
+<script src="https://cdn.prod.website-files.com/gsap/3.15.0/SplitText.min.js"></script>
+<script src="https://cdn.prod.website-files.com/gsap/3.15.0/ScrollToPlugin.min.js"></script>
+<script src="https://cdn.prod.website-files.com/gsap/3.15.0/Observer.min.js"></script>
+<script src="https://unpkg.com/lenis@1.3.21/dist/lenis.min.js"></script>
+<script src="https://unpkg.com/split-type"></script>
+<script src="https://cdn.jsdelivr.net/npm/circletype@2.3.0/dist/circletype.min.js"></script>
+<script src="assets/neu-app.js"></script>
+<script src="assets/neu-ix.js"></script>
+</body>
+</html>

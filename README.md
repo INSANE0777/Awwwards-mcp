@@ -353,6 +353,9 @@ toolset and re-served locally with the site's own DOM, stylesheet, and scripts
 rehost when the original vendor vanishes. Faithful because nothing was
 re-derived — geometry, motion, and copy come along exactly.
 
+The full build lives in the repo: [`showcase/neutomni/`](showcase/neutomni/) —
+open `index.html` directly, no server or build step needed.
+
 ![NEUTOMNI rehost — loader band with the giant wordmark](assets/neutomni-rehost-loader.png)
 
 ![NEUTOMNI rehost — nav, hero, and the pharmacy-type band](assets/neutomni-rehost-hero.png)
