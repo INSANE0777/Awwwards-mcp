@@ -9,7 +9,7 @@ structured, how the data flows, and how to work on it without breaking it.
 A free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/). No API key, no account: it politely
 scrapes public pages (1 request/second, robots.txt-compliant paths), caches
-them in local SQLite, and serves them through 21 MCP tools — screenshots,
+them in local SQLite, and serves them through 24 MCP tools — screenshots,
 design DNA, band maps and motion recordings included.
 
 ```
@@ -32,7 +32,7 @@ design DNA, band maps and motion recordings included.
         └───────────────────────────┬───────────────────────────┘
                                     │
         ┌───────────────────────────▼───────────────────────────┐
-        │ src/server.ts  21 MCP tools over createHandlers(deps) │
+        │ src/server.ts  24 MCP tools over createHandlers(deps) │
         └───────────────────────────┬───────────────────────────┘
                                     │
                     src/cli.ts ── stdio McpServer (awwwards-mcp)
