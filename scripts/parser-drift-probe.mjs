@@ -346,7 +346,14 @@ async function probeLive() {
   mkdirSync(dirname(STATUS_FILE), { recursive: true });
   writeFileSync(STATUS_FILE, JSON.stringify(status, null, 2));
   render(status, groups);
-  process.exit(verdict === "drift" ? 1 : verdict === "fetch-fail" ? 2 : 0);
+  // Network blocks (status 0 / challenge) are INCONCLUSIVE, not drift — from
+  // datacenter runners Cloudflare may refuse every fetch while parsers are
+  // fine (issue #20, Oct 2026). Real anchor drift still exits 1 → issue.
+  if (verdict === "fetch-fail") {
+    console.error("NETWORK BLOCKED - all failed probes were fetch-class (inconclusive); not a drift signal. Re-run from a residential IP when needed.");
+    process.exit(0);
+  }
+  process.exit(verdict === "drift" ? 1 : 0);
 }
 
 function render(status, groups) {

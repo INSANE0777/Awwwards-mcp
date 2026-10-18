@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-29T19:56:37.720Z",
+  "at": "2026-10-18T20:00:04.534Z",
   "mode": "live",
   "pages": [
     {
@@ -23,17 +23,17 @@
       "ok": true
     },
     {
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "status": 200,
       "ok": true
     },
     {
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "status": 200,
       "ok": true
     },
     {
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "status": 200,
       "ok": true
     }
@@ -65,7 +65,7 @@
       "parser": "parseListing (award labels)",
       "url": "https://www.awwwards.com/websites/",
       "drift": false,
-      "count": 58
+      "count": 62
     },
     {
       "name": "parseCategories[rollover links]",
@@ -266,7 +266,7 @@
     {
       "name": "parseDetail[tech section]",
       "parser": "parseDetail (tech stack)",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -274,14 +274,14 @@
     {
       "name": "parseElements[section start]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section end]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -289,7 +289,7 @@
     {
       "name": "parseDetail[description marker]",
       "parser": "parseDetail (description)",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -297,42 +297,42 @@
     {
       "name": "parseDetail[description h3]",
       "parser": "parseDetail (description text)",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:image]",
       "parser": "parseDetail (screenshot)",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:title]",
       "parser": "parseScore + parseElements",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section blobs]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "count": 5,
       "drift": false
     },
     {
       "name": "parseElements[media path scheme]",
       "parser": "parseElements",
-      "url": "https://www.awwwards.com/sites/atlas-webtech",
+      "url": "https://www.awwwards.com/sites/the-culture-index",
       "count": 5,
       "drift": false
     },
     {
       "name": "parseDetail[tech section]",
       "parser": "parseDetail (tech stack)",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -340,21 +340,22 @@
     {
       "name": "parseElements[section start]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section end]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
-      "count": 1
+      "count": 0,
+      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
     },
     {
       "name": "parseDetail[description marker]",
       "parser": "parseDetail (description)",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -362,42 +363,42 @@
     {
       "name": "parseDetail[description h3]",
       "parser": "parseDetail (description text)",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:image]",
       "parser": "parseDetail (screenshot)",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:title]",
       "parser": "parseScore + parseElements",
-      "url": "https://www.awwwards.com/sites/brand-libs",
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section blobs]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/brand-libs",
-      "count": 5,
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
+      "count": 2,
       "drift": false
     },
     {
       "name": "parseElements[media path scheme]",
       "parser": "parseElements",
-      "url": "https://www.awwwards.com/sites/brand-libs",
-      "count": 5,
+      "url": "https://www.awwwards.com/sites/totem-moto-tours",
+      "count": 2,
       "drift": false
     },
     {
       "name": "parseDetail[tech section]",
       "parser": "parseDetail (tech stack)",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -405,22 +406,21 @@
     {
       "name": "parseElements[section start]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section end]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
-      "count": 0,
-      "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
+      "count": 1
     },
     {
       "name": "parseDetail[description marker]",
       "parser": "parseDetail (description)",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
       "count": 0,
       "note": "anchor absent on sampled page (optional per-site — observed, not drift)"
@@ -428,36 +428,36 @@
     {
       "name": "parseDetail[description h3]",
       "parser": "parseDetail (description text)",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:image]",
       "parser": "parseDetail (screenshot)",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseDetail[og:title]",
       "parser": "parseScore + parseElements",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
+      "url": "https://www.awwwards.com/sites/vander-hotel",
       "drift": false,
       "count": 1
     },
     {
       "name": "parseElements[section blobs]",
       "parser": "parseDetail + parseElements",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
-      "count": 2,
+      "url": "https://www.awwwards.com/sites/vander-hotel",
+      "count": 9,
       "drift": false
     },
     {
       "name": "parseElements[media path scheme]",
       "parser": "parseElements",
-      "url": "https://www.awwwards.com/sites/club-charlestown",
-      "count": 2,
+      "url": "https://www.awwwards.com/sites/vander-hotel",
+      "count": 9,
       "drift": false
     }
   ],
