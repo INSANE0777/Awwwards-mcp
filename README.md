@@ -354,7 +354,19 @@ re-derived — geometry, motion, and copy come along exactly.
 
 ![NEUTOMNI rehost — loader band with the giant wordmark](assets/neutomni-rehost-loader.png)
 
+![NEUTOMNI rehost — nav, hero, and the pharmacy-type band](assets/neutomni-rehost-hero.png)
+
+![NEUTOMNI rehost — the statement section](assets/neutomni-rehost-statement.png)
+
+![NEUTOMNI rehost — the four red process panels](assets/neutomni-rehost-process.png)
+
+![NEUTOMNI rehost — Selected Work with the RSB tablet mockup](assets/neutomni-rehost-work.png)
+
 ![NEUTOMNI rehost — focus statement on the blue gradient](assets/neutomni-rehost-focus.png)
+
+![NEUTOMNI rehost — pricing cards, Essentials to Enterprise](assets/neutomni-rehost-pricing.png)
+
+![NEUTOMNI rehost — desktop with the Pricing.html window](assets/neutomni-rehost-desktop-pricing.png)
 
 ![NEUTOMNI rehost — Win-95 desktop with the pricing TV](assets/neutomni-rehost-desktop.png)
 
