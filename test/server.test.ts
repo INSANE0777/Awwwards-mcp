@@ -1465,6 +1465,50 @@ describe("get_motion_dna handler", () => {
   });
 });
 
+describe("analyze_stack handler", () => {
+  it("passes url/timeout through to the stack fn and returns JSON", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const seen: Array<{ url: string; opts?: { timeoutMs?: number } }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      stackFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return {
+          id: "stack-fingerprint-v1",
+          framework: "next",
+          frameworkMarkers: ["/_next/"],
+          frameworkConfidence: "high",
+          css: "custom",
+          cssMarkers: [],
+          cssConfidence: "low",
+          libs: [],
+        };
+      },
+    });
+    const res = await h.analyze_stack({ url: "https://example.com", timeoutMs: 3000 });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual([{ url: "https://example.com", opts: { timeoutMs: 3000 } }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.id).toBe("stack-fingerprint-v1");
+    expect(parsed.framework).toBe("next");
+  });
+
+  it("surfaces a stack-fn error as isError text", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({
+      client,
+      cache,
+      stackFn: async () => ({ error: "HTTP 404 fetching https://example.com" }),
+    });
+    const res = await h.analyze_stack({ url: "https://example.com" });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("HTTP 404");
+  });
+});
+
 describe("search_motion handler", () => {
   const dnaFixture = {
     url: "https://example.com/a",
