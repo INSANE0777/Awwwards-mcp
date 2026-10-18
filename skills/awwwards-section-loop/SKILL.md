@@ -29,6 +29,9 @@ FINALLY       whole-page verify_build             → coherence pass
 
 ### Step 0 — Plan from the band map
 
+`analyze_stack` first (one call): the site's framework, CSS framework, and
+marker libs. A Webflow or WordPress source means conventions you re-skin;
+a Next source means you can mirror component shapes. Then
 `analyze_page_structure` returns ordered bands with `top`, `height`,
 `bg`, and a text sniff. Treat the band list as the build order:
 
@@ -127,5 +130,8 @@ not by re-opening sections unless a band regressed.
   inventory → build → re-record).
 - `verify_build` — the per-band score gate (steps 3 and 5).
 - `capture_pose_3d` — camera path for shared-canvas units (step 0).
-- `analyze_scroll_map` / `analyze_hover_census` — per-section motion
+- `analyze_scroll_map` / `analyze_hover_census` - per-section motion
   census to build from.
+- `build_gsap_stub` - turns the captured censuses into a runnable
+  GSAP+ScrollTrigger stub (durations, easings, scrub/pin, camera from
+  `capture_pose_3d`, reduced-motion guard) — step 2's motion wiring, generated.
