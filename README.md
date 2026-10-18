@@ -6,7 +6,7 @@ sourced from the web's best award-winning websites.
 
 [![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-12ujax?v=2)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-12ujax?s=readme)
 
-<a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="480"></a>
+<a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif?v=2" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="480"></a>
 
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
 e-commerce"), sees **real screenshots inline**, and can pull the **design DNA**
