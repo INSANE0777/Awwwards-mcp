@@ -10,7 +10,10 @@ sourced from the web's best award-winning websites.
 
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
 e-commerce"), sees **real screenshots inline**, and can pull the **design DNA**
-of any site: color palette, tech stack, design elements, award history.
+of any site: color palette, tech stack, design elements, award history. Beyond
+inspiration it's a full evidence loop: band-map any page, census its scroll and
+hover motion, capture canvas/pose grids, and **verify your build against the
+reference** with band + motion scoring.
 Free-text queries run on a porter-stemmed, prefix-matching FTS5 index with BM25
 ranking — "magazines" now finds Magazine-tagged sites (68 on the live index),
 best matches first, where the old substring path returned zero. Multi-word
@@ -29,13 +32,18 @@ queries keep AND semantics: every token must hit the same site.
 | `list_categories` | Every filter the agent can search by (200+ tags, 27 colors). |
 | `capture_live_site` | Optional: fresh full-page screenshot of any live URL. Waits for `load` + a settle window with a bounded pre-scroll, so heavy sites work (`waitStrategy: "networkidle"` available). Pass `viewport: "mobile"` for the 390×844 iPhone-class render (`"desktop"` 1440×900 default). (needs [playwright](https://playwright.dev)). |
 | `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Compare a reference site's structure against your build. Same heavy-site-friendly wait (`waitStrategy: "networkidle"` available); `viewport: "mobile"` analyzes the phone-class layout (`"desktop"` default). (needs [playwright](https://playwright.dev)). |
-| `record_site_motion` | Optional: short motion-through video of a live URL — preloader, scroll-triggered and hover/cursor animations. Returns an inline filmstrip JPEG plus the saved .webm path. `viewport: "mobile"` records at phone size — the filmstrip renders at the selected viewport, no pillarboxing (`"desktop"` default). (needs [playwright](https://playwright.dev) + ffmpeg-static). |
-| `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (26 layout/typography/color props), fonts, colors and element animations — for pixel-informed rebuilds. Runs on any URL. (needs [playwright](https://playwright.dev)). |
+| `record_site_motion` | Optional: short motion-through video of a live URL — preloader, scroll-triggered and hover/cursor animations. Returns an inline filmstrip JPEG plus the saved .webm path. `viewport: "mobile"` records at phone size — the filmstrip renders at the selected viewport, no pillarboxing (`"desktop"` default). Every recording also produces a **Motion Evidence Sheet** (`sheet.html` + `motion-sheet.md`): census-directed keyframes, consecutive-frame diff masks, an onion-skin composite, a cursor-trail overlay and a phase timeline — motion video turned into a document a model can actually read. Degrades gracefully: recording never fails because the sheet does. (needs [playwright](https://playwright.dev) + ffmpeg-static). |
 | `search_elements` | Search the inspiration-elements gallery (footer, hero, pricing, 404…) by free text; ranks BM25 over title/author/category. |
 | `get_element` | One element record: title, category, author, built-with stack, related elements and its media URL (image or video) pointing at awwwards' CDN. |
 | `get_motion_dna` | Runtime motion fingerprint of a live URL: animation libraries, render engines, ScrollTrigger stats (trigger count, scrub ratio), tween easing/duration vocab and the scroll model. Fresh capture or cached capture with timestamp. |
+| `analyze_scroll_map` | Per-element scroll-motion census of any URL: selector path, trigger source (gsap-scrolltrigger / native css scroll & view timelines / data-attr / css-keyframe / SMIL), animated props, duration, easing, scrub/pin flags and SVG stroke draw-ins — the rebuild recipe an agent can wire straight into GSAP timelines. (needs [playwright](https://playwright.dev)). |
+| `analyze_hover_census` | Hover-interaction census: extracts `:hover` rules from stylesheets, then samples up to 20 interactive elements before/after hover — transform/color/filter diffs plus transition timing (ms + easing). The hover recipe for rebuilds, no video required. (needs [playwright](https://playwright.dev)). |
+| `verify_build` | Score a build against a reference site: band-map compare (Dice score) + motion-fingerprint diff (trigger mix, scrub/pin, easing vocabulary, native scroll timelines) → 0–100 score, pass/warn/fail verdict and evidence lines. The design-loop gate: build → verify that band's score → fix → re-verify. (needs [playwright](https://playwright.dev)). |
+| `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000), fonts, colors and element animations — for pixel-informed rebuilds. Runs on any URL. (needs [playwright](https://playwright.dev)). |
 | `capture_pose_3d` | Hero canvas reference frames → camera pose grid; runs on any URL. Samples the page's largest canvas at up to 10 scroll steps with per-step scroll ratios, a `pose-grid-v1` grid ready for 3D replay (`viewport: "mobile"` supported). (needs [playwright](https://playwright.dev)). |
 | `build_pose_stub` | Pose grid → offline three.js+GSAP replay skeleton. Renders a `pose-grid-v1` grid as a standalone scroll-scrubbed stub page: frames preloaded inline, camera path interpolated between snapshot scroll ratios, reduced-motion static fallback; optional `analyze_scroll_map` census adds st/pin/ease suggestions. Pure build — no page fetches. |
+
+
 | `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
 | `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds and dumps the listing; later calls report the delta. Each first-seen winner's Elements section is backfilled into the searchable element corpus, so new winners are element-searchable immediately. |
 | `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
@@ -54,7 +62,7 @@ captures, each stamped with the time it was taken.
 
 ## Setup
 
-**v1.0.0** — the first stable release. Any MCP-compatible coding agent can use awwwards-mcp — no API key, no account.
+**Stable, current, fully offline — no API key, no account.** Any MCP-compatible coding agent can use awwwards-mcp.
 Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
 
 **Updates**: the server checks the npm registry once a day and prints an
@@ -124,7 +132,7 @@ or `~/.gemini/settings.json`):
 
 **Anything else** — awwwards-mcp is a plain stdio MCP server: point your client
 at `npx -y awwwards-mcp` and it works. To pin a version, use
-`npx -y awwwards-mcp@1.0.0`.
+`npx -y awwwards-mcp@1.9.0`.
 
 **pi coding agent** has no built-in MCP by design — it uses skills and
 extensions instead. Two options:
@@ -138,8 +146,9 @@ extensions instead. Two options:
    awwwards.com, or use a shared skills directory (`~/.agents/skills/`) so the
    same skill file serves pi and every other agent.
 
-Optional full-page captures (needed by `capture_live_site`,
-`analyze_page_structure`, `record_site_motion`):
+Optional browser captures (needed by `capture_live_site`,
+`analyze_page_structure`, `record_site_motion`, the scroll/hover censuses,
+`verify_build`, `capture_component` and `capture_pose_3d`):
 
 ```bash
 npm install -g playwright && npx playwright install chromium
@@ -150,7 +159,7 @@ package automatically if present.
 
 ## Skills
 
-This package ships four agent skills. Any agent that follows the
+This package ships five agent skills. Any agent that follows the
 [Agent Skills standard](https://agentskills.io) can load them; copy them into
 your agent's skills directory:
 
