@@ -3,6 +3,7 @@ import {
   SCROLL_CENSUS_SNIPPET,
   SCRUB_PROBE_INTRO,
   SCRUB_PROBE_STEP,
+  SCRUB_SCROLL_TO,
   reduceScrollCensus,
   captureScrollCensus,
   sampleKeyframes,
@@ -486,13 +487,13 @@ describe("SCRUB_PROBE snippets (direct snippet runs + source locks)", () => {
     }
   }
 
-  it("intro picks the first ≤6 triggers with numeric start AND end bounds", () => {
+  it("intro picks the first ≤6 scrubbed triggers with numeric start AND end bounds", () => {
     const el = { nodeType: 1, tagName: "DIV" };
     const fakeST = {
       getAll: function () {
-        const rows: unknown[] = [{ trigger: el, start: "x", end: 100 }]; // non-numeric start → skipped
+        const rows: unknown[] = [{ trigger: el, start: "x", end: 100, vars: { scrub: true } }]; // non-numeric start → skipped
         for (let i = 0; i < 8; i++) {
-          rows.push({ trigger: el, start: i * 100, end: i * 100 + 500 });
+          rows.push({ trigger: el, start: i * 100, end: i * 100 + 500, vars: { scrub: true } });
         }
         return rows;
       },
@@ -502,6 +503,25 @@ describe("SCRUB_PROBE snippets (direct snippet runs + source locks)", () => {
     expect(out.triggers.length).toBe(6);
     expect(out.triggers[0]).toEqual({ selector: "div", startPx: 0, endPx: 500 });
     expect(out.triggers[1].startPx).toBe(100);
+  });
+
+  it("intro excludes numeric-bounds triggers without the scrub flag (scrubbed fill the cap)", () => {
+    const el = { nodeType: 1, tagName: "DIV" };
+    const fakeST = {
+      getAll: function () {
+        const rows: unknown[] = [
+          { trigger: el, start: 2000, end: 3000, vars: {} }, // numeric bounds, no scrub flag → skipped
+        ];
+        for (let i = 0; i < 6; i++) {
+          rows.push({ trigger: el, start: i * 100, end: i * 100 + 500, vars: { scrub: true } });
+        }
+        return rows;
+      },
+    };
+    const out = withEnv({ ScrollTrigger: fakeST, document: undefined }, SCRUB_PROBE_INTRO);
+    expect(out.triggers.length).toBe(6);
+    expect(out.triggers[0]).toEqual({ selector: "div", startPx: 0, endPx: 500 });
+    expect(out.triggers.every((t) => t.startPx !== 2000)).toBe(true);
   });
 
   it("step re-finds saved selectors and samples live progress (nulls on miss)", () => {
@@ -534,10 +554,16 @@ describe("SCRUB_PROBE snippets (direct snippet runs + source locks)", () => {
     }
   });
 
+  it("SCRUB_SCROLL_TO is a serializable plain function (no-arrow lock)", () => {
+    expect(typeof SCRUB_SCROLL_TO).toBe("function");
+    expect(String(SCRUB_SCROLL_TO)).not.toContain("=>");
+  });
+
   it("probe bounds are locked in source (≤6 triggers, ≤60-char transform)", () => {
     const intro = String(SCRUB_PROBE_INTRO);
     expect(intro).toContain("triggers.length >= 6");
     expect(intro).toContain("maxScroll");
+    expect(intro).toContain("vars?.scrub");
     const step = String(SCRUB_PROBE_STEP);
     expect(step).toContain("selectors.slice(0, 6)");
     expect(step).toContain(".slice(0, 60)");

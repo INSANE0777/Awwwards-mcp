@@ -360,8 +360,9 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
 
 // Phase-0 of the L3 scrub probe. Runs IN THE PAGE once, AFTER the census
 // evaluate (page still open): re-reads the same stGlobal atlas the census
-// used, picks the first ≤6 triggers with BOTH bounds compiled (numeric
-// startPx AND endPx) and maps them to selector paths. The per-step snippet
+// used, picks the first ≤6 scrubbed triggers (Boolean(st.vars?.scrub),
+// mirroring the census — the probe only samples scrubbed curves) with BOTH
+// bounds compiled (numeric startPx AND endPx) and maps them to selector paths. The per-step snippet
 // then re-finds these SAME triggers by selector path, so atlas order drift
 // across steps cannot swap which trigger a curve belongs to. Plain function
 // expression (no arrow — page.evaluate re-serializes the source), zero outer
@@ -414,14 +415,16 @@ export const SCRUB_PROBE_INTRO = function (): {
       return parts.join(">");
     }
 
-    // First ≤6 registry triggers with both bounds compiled; selector-path
-    // keyed so later steps can re-locate the same instance.
+    // First ≤6 scrubbed registry triggers (Boolean(st.vars?.scrub), mirroring
+    // the census — binding = scrubbed curves only) with both bounds compiled;
+    // selector-path keyed so later steps can re-locate the same instance.
     try {
       const stGlobal = win.ScrollTrigger || win.gsap?.plugins?.ScrollTrigger || null;
       const list = stGlobal && stGlobal.getAll ? stGlobal.getAll().slice(0, 120) : [];
       for (const st of list) {
         if (out.triggers.length >= 6) break;
         try {
+          if (!Boolean(st.vars?.scrub)) continue;
           if (typeof st.start !== "number" || typeof st.end !== "number") continue;
           const trig = st.trigger ?? st.getTrigger?.() ?? null;
           if (!trig || trig.nodeType !== 1) continue;
@@ -492,7 +495,7 @@ export const SCRUB_PROBE_STEP = function (selectors: string[]): {
 // Runs IN THE PAGE via page.evaluate(SCRUB_SCROLL_TO, y): one plain scroll
 // command, same shape as pose3d.ts's SCROLL_TO (kept local — census must not
 // import from pose3d).
-const SCRUB_SCROLL_TO = function (y: number): void {
+export const SCRUB_SCROLL_TO = function (y: number): void {
   try {
     globalThis.scrollTo(0, Math.max(0, Math.round(y)));
   } catch {}
