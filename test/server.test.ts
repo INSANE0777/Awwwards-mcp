@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import type { ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
+import type { UnifiedMotionDna } from "../src/motion-dna.js";
 import type { ComponentPack } from "../src/component.js";
 import { utcDayStart } from "../src/feed.js";
 import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
@@ -1464,6 +1465,23 @@ describe("get_motion_dna handler", () => {
     const miss = await h.get_motion_dna({ url: "https://unreachable.example" });
     expect(miss.isError).toBe(true);
     expect((miss.content[0] as any).text).toContain("boom");
+  });
+
+  // F3 (dogfood): the injected unified capture's slimmed censusSummary (counts
+  // only) must reach the response verbatim — no scrubRatio/pinCount doppelgänger
+  // beside dna.scroll, which is the single runtime truth for scrub/pin.
+  it("live-capture passthrough: censusSummary reaches the response as counts only", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const unified: UnifiedMotionDna = {
+      ...dnaFixture,
+      censusSummary: { counts: { "gsap-scrolltrigger": 3 } },
+    };
+    const h = createHandlers({ client, cache, motionDnaFn: async () => unified });
+    const res = await h.get_motion_dna({ url: dnaFixture.url });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.censusSummary).toEqual({ counts: { "gsap-scrolltrigger": 3 } });
+    expect(Object.keys(parsed.censusSummary).sort()).toEqual(["counts"]);
   });
 });
 

@@ -10,11 +10,9 @@ export type { MotionDna };
 /** captureMotionDnaUnified's return: MotionDna + additive scroll-census summary. */
 export interface UnifiedMotionDna extends MotionDna {
   censusSummary?: {
-    /** Census counts object verbatim (reduceScrollCensus's per-source tallies). */
+    /** Census counts object verbatim (reduceScrollCensus's per-source tallies).
+     *  Runtime scrub/pin truth lives in dna.scroll; censusSummary.counts is census-time. */
     counts: Record<string, number>;
-    /** Flagged rows over per-element rows — same convention as MotionDna.scroll. */
-    scrubRatio: number;
-    pinCount: number;
   };
 }
 
@@ -305,15 +303,8 @@ export async function captureMotionDnaUnified(
     const censusScan = (await page.evaluate(SCROLL_CENSUS_SNIPPET)) as ScrollScan;
     const dna = reduceScan(url, scan, Date.now());
     const census = reduceScrollCensus(url, censusScan, Date.now(), !!opts.reducedMotion);
-    const scrubCount = census.anims.filter((a) => a.scrub).length;
-    return {
-      ...dna,
-      censusSummary: {
-        counts: census.counts,
-        scrubRatio: census.anims.length > 0 ? scrubCount / census.anims.length : 0,
-        pinCount: census.anims.filter((a) => a.pin).length,
-      },
-    };
+    // Runtime scrub/pin truth lives in dna.scroll; censusSummary.counts is census-time.
+    return { ...dna, censusSummary: { counts: census.counts } };
   } finally {
     try {
       await browser.close();

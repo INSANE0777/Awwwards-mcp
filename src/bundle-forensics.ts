@@ -27,8 +27,9 @@ const INLINE_CHUNK_CAP = 20;
 const UNPACK_CHUNK_CAP = 10;
 const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
 
-// Deep-walk bounds: ≤20 walk-discovered chunks per run is a hard cap on top
-// of maxChunks/maxTotalBytes. Ref pattern (plan-verbatim): a quoted 4..200
+// Deep-walk bounds: ≤20 walk-discovered chunks per run is the walk's OWN cap,
+// independent of maxChunks (the shared maxTotalBytes still applies). Ref
+// pattern (plan-verbatim): a quoted 4..200
 // char body followed by ".js" — its lazy quantifier needs ≥4 non-quote chars
 // BEFORE the terminal ".js", so quoted bodies shorter than 7 chars ("/a.js")
 // never match. Longer real-world chunk names are the walk's normal diet.
@@ -79,7 +80,8 @@ export interface BundleForensicsOpts {
   outDir?: string;
   // Opt-in deep walk (default false → ZERO extra fetches): after the first
   // pass, follow quoted same-origin .js refs found inside fetched chunk
-  // sources and fetch up to 20 newly discovered chunks under the same budgets.
+  // sources and fetch up to 20 newly discovered chunks — the walk's own cap,
+  // independent of maxChunks, within the shared byte budget.
   walkChunks?: boolean;
 }
 
@@ -129,10 +131,10 @@ export async function captureBundleForensics(
     // advertise lazy chunks). Remote candidates share one dedupe set, so a
     // URL advertised both ways becomes a single chunk.
     const seen = new Set<string>();
-    const absolutize = (raw: string): string | null => {
+    const absolutize = (raw: string, base: string = pageUrl): string | null => {
       let abs: URL;
       try {
-        abs = new URL(raw, pageUrl);
+        abs = new URL(raw, base);
       } catch {
         return null; // malformed ref — not a fetchable script
       }
@@ -283,24 +285,31 @@ export async function captureBundleForensics(
     // Opt-in deep chunk walk (walkChunks): quoted same-origin .js refs inside
     // fetched chunk sources point at lazy-loaded chunks the page HTML never
     // advertised. Discovered chunks join `chunks` (keyword-search + unpack-
-    // eligible) through the same limiter and budgets; the shared `seen` set
-    // makes cycles impossible, and ≤20 walk chunks is a hard cap per run.
+    // eligible) through the same limiter and byte budget; the shared `seen`
+    // set makes cycles impossible, and ≤20 walk chunks (the walk's own cap,
+    // independent of maxChunks) is the hard limit per run.
     let walkCount = 0;
     if (opts.walkChunks === true) {
       const queue: string[] = [];
-      const scanForRefs = (text: string): void => {
+      const scanForRefs = (text: string, refBase: string): void => {
         for (const m of text.matchAll(new RegExp(WALK_REF_SRC, "g"))) {
-          const abs = absolutize(m[1]);
+          // Resolve against the ref-bearing CHUNK's own URL — Next/Turbopack
+          // ship chunk-relative paths ("./456-hash.js") that 404 when
+          // absolutized against the page URL.
+          const abs = absolutize(m[1], refBase);
           // same origin as the page only; absolutize already deduped via `seen`
           if (abs && new URL(abs).host === host) queue.push(abs);
         }
       };
-      for (const c of chunks) scanForRefs(readFileSync(c.path, "utf8"));
+      // Inline scripts' ref base is the page itself; remote chunks use their
+      // own URL (their `url` field is the absolute chunk URL).
+      for (const c of chunks) {
+        scanForRefs(readFileSync(c.path, "utf8"), c.url.startsWith("inline:") ? pageUrl : c.url);
+      }
       while (queue.length > 0 && walkCount < WALK_CHUNK_CAP) {
-        if (chunks.length >= maxChunks) {
-          warnings.push(`walk stopped: maxChunks budget (${maxChunks}) reached`);
-          break;
-        }
+        // Byte budget is the walk's only shared financial constraint — the
+        // 20-chunk walk cap is independent of maxChunks, so the walk still
+        // runs even when the base pass consumed the whole chunk budget.
         if (maxTotalBytes - totalBytes <= 0) {
           warnings.push(`walk stopped: byte budget (${maxTotalBytes} bytes) reached`);
           break;
@@ -315,7 +324,7 @@ export async function captureBundleForensics(
         }
         if (saveChunk(text, walkUrl, remoteBase(walkUrl)) === "saved") {
           walkCount++;
-          scanForRefs(text); // refs discovered mid-walk join the queue (seen dedupes)
+          scanForRefs(text, walkUrl); // refs discovered mid-walk join the queue (seen dedupes)
         }
       }
       if (walkCount >= WALK_CHUNK_CAP && queue.length > 0) {

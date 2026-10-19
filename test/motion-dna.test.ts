@@ -123,7 +123,7 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
     expect(dna.censusSummary).toBeDefined();
   });
 
-  it("censusSummary: counts verbatim from the census, scrubRatio/pinCount per anim flags", async () => {
+  it("censusSummary: counts verbatim from the census; scrubRatio/pinCount live only in dna.scroll", async () => {
     const fake = fakeLoader((fn) => {
       if (fn === MOTION_SNIPPET) return scan;
       if (fn === SCROLL_CENSUS_SNIPPET) return scrollScan;
@@ -141,9 +141,9 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
     expect(s.counts["css-keyframe"]).toBe(1);
     expect(s.counts.smil).toBe(1);
     expect(s.counts.unknown).toBe(1);
-    // 1 scrubbed of 3 anim rows; 1 pinned.
-    expect(s.scrubRatio).toBeCloseTo(1 / 3);
-    expect(s.pinCount).toBe(1);
+    // Slimmed (v1.12 dev reshape): the summary carries counts ONLY — runtime
+    // scrub/pin truth stays in dna.scroll, one source per response.
+    expect(Object.keys(s).sort()).toEqual(["counts"]);
   });
 
   it("supports the census opts contract: reducedMotion reaches the page context", async () => {

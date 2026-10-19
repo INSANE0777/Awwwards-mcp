@@ -436,6 +436,83 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(rep.chunkCount).toBe(1);
     expect(rep.warnings.join("\n")).toContain("/b.js: would exceed maxTotalBytes");
   });
+
+  // F1 (dogfood): the base pass eating maxChunks must not starve the walk —
+  // discovered chunks are the FEATURE and live under their own 20 cap.
+  it("walk runs on its own 20-chunk cap: maxChunks exhaustion doesn't stop discovered chunks", async () => {
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: `var next="../b.js";`,
+      [B2_JS]: "var b=1;",
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      maxChunks: 1,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(2); // a.js (maxChunks budget) + walk-discovered b.js (own cap)
+    expect(calls).toEqual([PAGE, A_JS, B2_JS]);
+    expect(rep.warnings).toEqual([]); // no "walk stopped: maxChunks" starvation warning
+  });
+
+  // F1 (dogfood): byte budget exhausted by the base pass → walk stops with the
+  // existing walk-sourced warning and fetches nothing.
+  it("byte budget exhausted by the base pass → walk stops with the walk-sourced byte warning", async () => {
+    const REF = 'var next="../b.js";';
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: "y".repeat(5000 - REF.length) + REF, // exactly maxTotalBytes
+      [B2_JS]: "z".repeat(10),
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      maxTotalBytes: 5000,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(1);
+    expect(calls).toEqual([PAGE, A_JS]); // b.js never fetched
+    expect(rep.warnings.join("\n")).toContain("walk stopped: byte budget (5000 bytes) reached");
+  });
+
+  // F2 (dogfood): Turbopack/Next chunk sources carry chunk-relative paths —
+  // they must resolve against the CHUNK's own URL, not the page URL.
+  // (Ref bodies stay ≥7 chars — the pinned walk regex can't see "./b.js".)
+  it("walk resolves chunk-internal refs against the chunk's own URL; cross-origin skipped", async () => {
+    const NEXT_A = `${pageOrigin}/_next/static/chunks/a.js`;
+    const NEXT_B = `${pageOrigin}/_next/static/chunks/chunk-b.js`;
+    const NEXT_C = `${pageOrigin}/_next/static/shared/mod-c.js`;
+    const X_JS = "https://cdn.x.com/remote.js";
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/_next/static/chunks/a.js"></script></html>`,
+      [NEXT_A]: `var b="./chunk-b.js"; var c="../shared/mod-c.js"; var x="${X_JS}";`,
+      [NEXT_B]: "var b2=1;",
+      [NEXT_C]: "var c2=1;",
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // ./ and ../ refs land under /_next/static/... (chunk URL base), fetched
+    // exactly once each; the cross-origin ref never fetches.
+    expect(calls).toEqual([PAGE, NEXT_A, NEXT_B, NEXT_C]);
+    expect(rep.chunks.map((c) => c.url)).toEqual([NEXT_A, NEXT_B, NEXT_C]);
+    expect(rep.warnings).toEqual([]);
+  });
 });
 
 describe("analyze_bundle handler", () => {
