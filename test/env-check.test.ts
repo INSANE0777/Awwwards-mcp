@@ -63,4 +63,13 @@ describe("checkEnvironment", () => {
     expect(Number.isFinite(state.checkedAt)).toBe(true);
     expect(state.checkedAt).toBeLessThanOrEqual(Date.now());
   });
+
+  it("hints webcrack as optional without gating environment health on it", async () => {
+    const src = readFileSync(join(__dirname, "../src/env-check.ts"), "utf8");
+    expect(src).toContain('webcrack:\n    "awwwards-mcp: optional');
+    expect(src).toContain('import("webcrack")');
+    // Missing webcrack must not mark the environment unhealthy - the health
+    // return stays exactly playwright + ffmpeg.
+    expect(src).toContain("return pw.code === 0 && ff.code === 0;");
+  });
 });

@@ -55,9 +55,11 @@ function writeState(): void {
 
 export const ENV_FIX_HINTS = {
   playwright:
-    "awwwards-mcp: live capture/analyze/motion tools need Playwright — run:  npm install -g playwright && npx playwright install chromium  (restart your agent afterward)\n",
+    "awwwards-mcp: live capture/analyze/motion tools need Playwright - run:  npm install -g playwright && npx playwright install chromium  (restart your agent afterward)\n",
   ffmpeg:
-    "awwwards-mcp: motion recording needs ffmpeg-static — run:  npm install -g ffmpeg-static  (restart your agent afterward)\n",
+    "awwwards-mcp: motion recording needs ffmpeg-static - run:  npm install -g ffmpeg-static  (restart your agent afterward)\n",
+  webcrack:
+    "awwwards-mcp: optional - analyze_bundle de-obfuscation/unpack mode needs webcrack - run:  npm install -g webcrack  (restart your agent afterward; bundle fetch/grep works without it)\n",
 } as const;
 
 function run(
@@ -91,6 +93,8 @@ const LAUNCH_SCRIPT =
   '.catch(e=>{console.error(e.message);process.exit(1)})';
 const FFMPEG_SCRIPT =
   'import("ffmpeg-static").then(m=>console.log(m.default??m)).catch(()=>process.exit(1))';
+const WEBCRACK_SCRIPT =
+  'import("webcrack").then(()=>console.log("ok")).catch(()=>process.exit(1))';
 
 async function defaultProbe(): Promise<boolean> {
   const pw = await run(process.execPath, ["-e", LAUNCH_SCRIPT], 30_000);
@@ -100,8 +104,13 @@ async function defaultProbe(): Promise<boolean> {
   const ff = await run(process.execPath, ["-e", FFMPEG_SCRIPT], 10_000);
   if (ff.code !== 0) console.error(ENV_FIX_HINTS.ffmpeg);
 
+  // webcrack is a pure bonus (bundle de-obfuscation): absence is announced
+  // but never counts as an unhealthy environment.
+  const wc = await run(process.execPath, ["-e", WEBCRACK_SCRIPT], 10_000);
+  if (wc.code !== 0) console.error(ENV_FIX_HINTS.webcrack);
+
   // A flaky chromium launch (first-run policy, AV scan) must not crash the
-  // probe — it just counts as a failure, so tomorrow still re-checks.
+  // probe - it just counts as a failure, so tomorrow still re-checks.
   return pw.code === 0 && ff.code === 0;
 }
 

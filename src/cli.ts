@@ -421,8 +421,9 @@ if (shouldAutoIndex(cache)) {
 checkForUpdate(pkgJson.version);
 
 // Environment notice: once a day, verify playwright/ffmpeg are usable from
-// the server's own install (a real chromium launch, not just an import);
-// stderr-only, never blocks serving.
+// the server's own install (a real chromium launch, not just an import) and
+// hint at the optional webcrack bundle-de-obfuscation dep; stderr-only,
+// never blocks serving.
 checkEnvironment();
 
 await server.connect(new StdioServerTransport());
