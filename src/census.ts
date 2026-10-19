@@ -49,7 +49,7 @@ export interface ScrollScan {
   anims: RawAnim[];
   smilSelectors: string[];
   nativeTimelines: { selector: string; kind: "scroll" | "view" }[];
-  /** GSAP ScrollTrigger registry rows — always emitted, [] when no GSAP. */
+  /** GSAP ScrollTrigger registry rows — always emitted by the snippet ([] when no GSAP); required so the serialized JSON always carries the key (kit readers see [], never undefined). */
   gsapTriggers: GsapTriggerRow[];
 }
 
@@ -60,7 +60,7 @@ export interface ScrollCensus {
   anims: RawAnim[];
   svgStrokes: string[];
   nativeScrollTimelines: number;
-  /** GSAP deep capture rows, passthrough from the scan (order preserved). */
+  /** GSAP deep capture rows — always present ([] when empty; required so the serialized JSON always carries the key); passthrough from the scan, order preserved. */
   gsapTriggers: GsapTriggerRow[];
   reducedMotion: boolean;
 }

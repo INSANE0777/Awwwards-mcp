@@ -64,12 +64,17 @@ export async function captureBundleForensics(
     const pageUrl = new URL(url).href;
     const host = new URL(url).host;
 
+    // One shared limiter for the page fetch + all chunk fetches; created up
+    // front so the page fetch is rate-limited too.
+    const limiter = new RateLimiter(1000);
+
     // Page is the hard precondition: without its HTML there is no capture,
     // so unlike chunk failures this propagates to the { error } contract.
     // Same 15s AbortController timeout as chunks — undici's ~300s default
     // would let one hung page stall the whole capture.
     const pageAc = new AbortController();
     const pageTimer = setTimeout(() => pageAc.abort(), CHUNK_TIMEOUT_MS);
+    await limiter.acquire();
     const pageRes = await fetched(pageUrl, { signal: pageAc.signal, headers: { "User-Agent": BUNDLE_UA } })
       .finally(() => clearTimeout(pageTimer));
     if (!pageRes.ok) return { error: `HTTP ${pageRes.status} for ${pageUrl}` };
@@ -97,7 +102,6 @@ export async function captureBundleForensics(
     const keywords = opts.keywords ?? [];
     const outDir = opts.outDir ?? mkdtempSync(join(tmpdir(), "awwwards-chunks-"));
 
-    const limiter = new RateLimiter(1000);
     const chunks: BundleReport["chunks"] = [];
     const matches: BundleReport["matches"] = [];
     const warnings: string[] = [];
@@ -190,7 +194,12 @@ export async function captureBundleForensics(
           c.path = pretty;
           c.deobfuscated = true;
           unpackedCount++;
-          unpackedDir ??= join(outDir, "unpacked");
+          if (!unpackedDir) {
+            unpackedDir = join(outDir, "unpacked");
+            // Eager mkdir: a chunk with pretty code but no bundle modules
+            // (continue below) must still leave unpackedDir readable on disk.
+            mkdirSync(unpackedDir, { recursive: true });
+          }
           const mods: unknown = res.bundle?.modules;
           const entries: [unknown, any][] =
             mods instanceof Map

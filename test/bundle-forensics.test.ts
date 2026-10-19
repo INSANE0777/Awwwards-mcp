@@ -40,7 +40,7 @@ describe("captureBundleForensics", () => {
       [A_JS]: "function attachLetterSwap(i,l){}",
       [B_JS]: "var bundle={" + "x".repeat(99) + "};",
     });
-    const rep = await captureBundleForensics(PAGE, { fetchFn, keywords: ["attachLetterSwap"] });
+    const rep = await captureBundleForensics(PAGE, { fetchFn, keywords: ["attachLetterSwap"], unpackLoader: async () => null });
     expect("error" in rep).toBe(false);
     if ("error" in rep) return;
     cleanup.push(rep.outDir);
@@ -119,6 +119,9 @@ describe("captureBundleForensics", () => {
     expect(rep.unpacked).toBe(true); // pretty code still saved despite no bundle
     expect(rep.chunks[0].deobfuscated).toBe(true);
     expect(rep.warnings.join("\n")).toContain("modules"); // skipped-modules warning
+    // Even with zero modules, unpackedDir is eagerly created and readable.
+    expect(rep.unpackedDir).toBeTruthy();
+    expect(existsSync(rep.unpackedDir!)).toBe(true);
   });
 
   it("caps chunks and records a warning beyond maxChunks", async () => {
@@ -127,7 +130,7 @@ describe("captureBundleForensics", () => {
       [PAGE]: `<html>${srcs.map((s) => `<script src="${s}"></script>`).join("")}</html>`,
     };
     for (const s of srcs) map[s] = "var x=1;";
-    const rep = await captureBundleForensics(PAGE, { fetchFn: fakeFetchMap(map), maxChunks: 1 });
+    const rep = await captureBundleForensics(PAGE, { fetchFn: fakeFetchMap(map), maxChunks: 1, unpackLoader: async () => null });
     expect("error" in rep).toBe(false);
     if ("error" in rep) return;
     cleanup.push(rep.outDir);
