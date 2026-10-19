@@ -12,6 +12,7 @@ import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
 import type { HoverCensusFn } from "./hover-census.js";
+import type { BundleReport } from "./bundle-forensics.js";
 import type { VerifyBuildFn } from "./verify-build.js";
 import type { ComponentPack } from "./component.js";
 import type { PoseGrid } from "./pose3d.js";
@@ -115,6 +116,12 @@ export type StackFn = (
   url: string,
   opts?: { timeoutMs?: number; fetchFn?: typeof fetch },
 ) => Promise<StackFingerprint | { error: string }>;
+
+// analyze_bundle: fetches a page + its script chunks (bounded), greps keywords.
+export type BundleFn = (
+  url: string,
+  opts?: { keywords?: string[]; maxChunks?: number },
+) => Promise<BundleReport | { error: string }>;
 
 // build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
 export type { GsapStubFn };
@@ -253,6 +260,11 @@ export interface Handlers {
     viewport?: ViewportName;
     reducedMotion?: boolean;
   }): Promise<ToolResponse>;
+  analyze_bundle(args: {
+    url: string;
+    keywords?: string[];
+    maxChunks?: number;
+  }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
@@ -300,6 +312,7 @@ export function createHandlers(deps: {
   motionDnaFn?: MotionDnaFn;
   scrollMapFn?: ScrollMapFn;
   hoverCensusFn?: HoverCensusFn;
+  bundleFn?: BundleFn;
   verifyBuildFn?: VerifyBuildFn;
   captureComponentFn?: CaptureComponentFn;
   pose3dFn?: Pose3dFn;
@@ -1129,6 +1142,27 @@ export function createHandlers(deps: {
     }
   }
 
+  async function analyze_bundle(args: {
+    url: string;
+    keywords?: string[];
+    maxChunks?: number;
+  }): Promise<ToolResponse> {
+    try {
+      // Lazy default: bundle-forensics is only touched when the tool actually runs.
+      const capture =
+        deps.bundleFn ??
+        ((url: string, opts?: { keywords?: string[]; maxChunks?: number }) =>
+          import("./bundle-forensics.js").then((m) =>
+            m.captureBundleForensics(url, { keywords: opts?.keywords, maxChunks: opts?.maxChunks }),
+          ));
+      const result = await capture(args.url, { keywords: args.keywords, maxChunks: args.maxChunks });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function verify_build(args: {
     buildUrl: string;
     referenceUrl: string;
@@ -1485,6 +1519,7 @@ export function createHandlers(deps: {
     analyze_page_structure,
     analyze_scroll_map,
     analyze_hover_census,
+    analyze_bundle,
     verify_build,
     capture_component,
     capture_pose_3d,

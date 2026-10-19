@@ -276,6 +276,18 @@ server.tool(
 );
 
 server.tool(
+  "analyze_bundle",
+  "Bundle forensics for a live page: fetch it once, download its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks, 10MB, 1 request/second), save them locally, optionally de-obfuscate with webcrack if installed, and grep keywords across the code. Returns chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Runs on URLs you are authorized to analyze — does not fetch awwwards.com.",
+  {
+    url: z.string().url(),
+    keywords: z.array(z.string().min(1)).max(20).optional().describe("grep these strings across chunks (e.g. class names, effect names)"),
+    maxChunks: z.number().int().min(1).max(100).optional().describe("default 40"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.analyze_bundle(args))
+);
+
+server.tool(
   "verify_build",
   "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify.",
   {

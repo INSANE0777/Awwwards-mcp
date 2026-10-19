@@ -1,12 +1,31 @@
 import { installSnippetShims } from "./structure.js";
 import { resolveViewport, type ViewportName } from "./viewport.js";
 
+/** One running CSS animation captured mid-hover (bounded at 6 per sample). */
+export interface ActiveAnim {
+  sel: string;
+  name: string;
+  durationMs: number | null;
+  easing: string | null;
+}
+
+/** ACTIVE_ANIMS_SNIPPET's return: live geometry, inline transform, running anims. */
+export interface ActiveAnimsResult {
+  rect: { x: number; y: number; width: number; height: number } | null;
+  transform: string | null;
+  anims: ActiveAnim[];
+}
+
 /** One element's measured :hover response. */
 export interface HoverSample {
   selector: string;
   changedProps: string[];
   transitionMs: number | null;
   easing: string | null;
+  /** Running CSS animations while hovered (L5). Pushed only when non-empty. */
+  activeAnims?: ActiveAnim[];
+  /** Inline transform samples across the micro-move sweep (L5, ≤4 entries). */
+  styleTrail?: string[];
 }
 
 /** What captureHoverCensus returns. */
@@ -181,6 +200,60 @@ export const HOVER_SNAPSHOT_SNIPPET = function (idx: number): HoverStyleRow | nu
   }
 };
 
+// Runs IN THE PAGE via page.evaluate(ACTIVE_ANIMS_SNIPPET, idx). L5 precision:
+// while the pointer is on the element, returns its live geometry, the inline
+// transform (mid-flight translate/scale, sliced to 60 chars) and up to 6
+// running animations with timing (name sliced to 40, browser-default "ease"
+// easing dropped). The orchestrator calls it before and after a micro-move
+// sweep and folds the results into HoverSample.activeAnims/styleTrail.
+// Plain `function` expression, no arrows, browser globals via globalThis,
+// every probe try/caught so a hostile page degrades to nulls, not a crash.
+export const ACTIVE_ANIMS_SNIPPET = function (idx: number): ActiveAnimsResult {
+  const g = globalThis as any;
+  const doc = g.document;
+  const el = doc.querySelector("[data-__hidx='" + idx + "']");
+  const r = el ? el.getBoundingClientRect() : null;
+  let transform: string | null = null;
+  try {
+    transform =
+      el && (el as any).style && (el as any).style.transform
+        ? String((el as any).style.transform).slice(0, 60)
+        : null;
+  } catch {}
+  const anims: any[] = [];
+  try {
+    const list: any[] = doc.getAnimations ? doc.getAnimations() : [];
+    for (const an of list) {
+      if (anims.length >= 6) break;
+      try {
+        const t: string = String(
+          (an.effect?.target && an.effect.target.nodeType === 1)
+            ? (an.effect.target.tagName || "").toLowerCase()
+            : "",
+        );
+        const timing = an.effect?.getTiming ? an.effect.getTiming() : null;
+        anims.push({
+          sel: t,
+          name: String(
+            an.animationName || (an.effect?.target === el ? "hover-target" : "anim"),
+          ).slice(0, 40),
+          durationMs:
+            timing && typeof timing.duration === "number" ? timing.duration : null,
+          easing:
+            timing && typeof timing.easing === "string" && timing.easing !== "ease"
+              ? String(timing.easing).slice(0, 40)
+              : null,
+        });
+      } catch {}
+    }
+  } catch {}
+  return {
+    rect: r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null,
+    transform: transform,
+    anims: anims,
+  };
+};
+
 // PURE. Resting-vs-hovered snapshot diff: changedProps are HOVER_PROPS whose
 // string values differ; transitionMs is the max of the comma-separated
 // transition-duration list (s × 1000, ms as-is), null when all entries are 0;
@@ -264,7 +337,36 @@ export async function captureHoverCensus(
         } catch {
           hovered = false;
         }
+        // L5 precision: probe the element WHILE hovered — live anims + inline
+        // transform before and after a bounded sweep across it (≤3 moves, adds
+        // ~0.5s per probed candidate; the hover timeout above bounds failures).
+        let anims: ActiveAnim[] = [];
+        let trail: string[] = [];
         if (hovered) {
+          let active0: ActiveAnimsResult | null = null;
+          try {
+            active0 = (await page.evaluate(ACTIVE_ANIMS_SNIPPET, i)) as ActiveAnimsResult | null;
+          } catch {}
+          if (active0?.transform) trail.push(active0.transform);
+          try {
+            const rect = active0?.rect;
+            if (rect && rect.width > 0 && rect.height > 0) {
+              // Sweep left-half → right-half → center to wake pointermove-path
+              // effects, then resample.
+              await page.mouse.move(rect.x + rect.width * 0.35, rect.y + rect.height * 0.5);
+              await page.waitForTimeout(80);
+              await page.mouse.move(rect.x + rect.width * 0.7, rect.y + rect.height * 0.5);
+              await page.waitForTimeout(80);
+              await page.mouse.move(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
+              await page.waitForTimeout(80);
+            }
+          } catch {}
+          let active1: ActiveAnimsResult | null = null;
+          try {
+            active1 = (await page.evaluate(ACTIVE_ANIMS_SNIPPET, i)) as ActiveAnimsResult | null;
+          } catch {}
+          if (active1?.transform && trail.length < 4) trail.push(active1.transform);
+          anims = active1 && active1.anims.length > 0 ? active1.anims : active0?.anims ?? [];
           await page.waitForTimeout(450);
         }
         let after: HoverStyleRow | null = before;
@@ -277,7 +379,11 @@ export async function captureHoverCensus(
         } catch {}
         const d = diffHoverStyles(before, after);
         if (d.changedProps.length > 0) {
-          samples.push({ selector: "hover-candidate-" + i, ...d });
+          const sample: HoverSample = { selector: "hover-candidate-" + i, ...d };
+          // Lean packs: enrich only pushed samples, only with non-empty data.
+          if (anims.length > 0) sample.activeAnims = anims;
+          if (trail.length > 0) sample.styleTrail = trail;
+          samples.push(sample);
         }
       }
       return {
