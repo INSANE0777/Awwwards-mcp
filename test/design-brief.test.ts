@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDesignBrief, renderDesignBrief, type DesignBriefSource } from "../src/design-brief.js";
+import type { Choreography, ChoreographyHint } from "../src/choreography.js";
 import type { SiteDetails, MotionDna } from "../src/types.js";
 
 const detail = (over: Partial<SiteDetails> = {}): SiteDetails => ({ slug: "x", title: "X", description: null, palette: ["#ffffff", "#000000", "#ffffff"], technologies: [" GSAP ", "WebGL"], elements: ["Cards", "cards"], awards: [], nominee: false, score: null, ogImage: null, liveUrl: null, ...over });
@@ -7,6 +8,46 @@ const motion: MotionDna = { url: "u", stack: { libs: ["GSAP"], render: ["WebGL"]
 const source = (slug: string, d: SiteDetails | null = detail(), m: MotionDna | null = null, structureStatus: DesignBriefSource["structureStatus"] = "not_requested"): DesignBriefSource => ({ slug, title: slug.toUpperCase(), detail: d, detailStatus: d ? "cached" : "unavailable", motion: m, structure: null, structureStatus });
 
 const make = (sources: DesignBriefSource[], extra: Partial<Parameters<typeof createDesignBrief>[0]> = {}) => createDesignBrief({ slugs: sources.map((s) => s.slug), goal: "build a portfolio", ...extra }, sources);
+
+describe("choreography stagger hints (createDesignBrief briefEvidence)", () => {
+  const hint = (over: Partial<ChoreographyHint>): ChoreographyHint => ({ selector: ".x", value: 1, source: "tween-var", ...over });
+  const withChoreography = (hints: ChoreographyHint[]) =>
+    createDesignBrief({ slugs: ["a", "b"], goal: "g" }, [source("a"), source("b")], { choreography: { hints, groups: hints.length } satisfies Choreography });
+
+  it("renders choreography hints as source=value @ selector strings", () => {
+    const brief = withChoreography([
+      hint({ selector: ".card", value: 0.08, source: "tween-var" }),
+      hint({ selector: ".item (+4 siblings)", value: 150, source: "delay-delta" }),
+    ]);
+    expect(brief.direction.interactionPlan.staggerHints).toEqual([
+      "tween-var=0.08 @ .card",
+      "delay-delta=150 @ .item (+4 siblings)",
+    ]);
+    expect(renderDesignBrief(brief)).toContain("- Stagger: tween-var=0.08 @ .card; delay-delta=150 @ .item (+4 siblings)");
+  });
+
+  it("dedupes, keeps first-seen order, and caps at 8", () => {
+    const hints = [
+      hint({ selector: ".card", value: 0.08 }),
+      hint({ selector: ".item (+4 siblings)", value: 150, source: "delay-delta" }),
+      hint({ selector: ".card", value: 0.08 }), // exact duplicate: dropped
+    ];
+    for (let i = 0; i < 8; i++) hints.push(hint({ selector: `.row-${i}`, value: i * 10 + 0.01 }));
+    const brief = withChoreography(hints);
+    const staggerHints = brief.direction.interactionPlan.staggerHints;
+    expect(staggerHints).toHaveLength(8);
+    expect(staggerHints![0]).toBe("tween-var=0.08 @ .card");
+    expect(staggerHints![1]).toBe("delay-delta=150 @ .item (+4 siblings)");
+    expect(staggerHints![2]).toBe("tween-var=0.01 @ .row-0");
+    expect(staggerHints![7]).toBe("tween-var=50.01 @ .row-5");
+  });
+
+  it("omits staggerHints without choreography evidence (additive field)", () => {
+    const brief = make([source("a"), source("b")]);
+    expect("staggerHints" in brief.direction.interactionPlan).toBe(false);
+    expect(renderDesignBrief(brief)).not.toContain("Stagger:");
+  });
+});
 
 describe("createDesignBrief", () => {
   it("applies two-source shared threshold and outliers", () => {

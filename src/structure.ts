@@ -32,6 +32,8 @@ export interface ScanResult {
   title: string;
   totalHeight: number;
   candidates: RawBand[];
+  /** Landmark y-tops (headings + distinct-bg children ≥400px). Omitted when collection threw. */
+  landmarks?: number[];
 }
 
 // Runs IN THE PAGE via page.evaluate. Collects full-width, tall, opaque
@@ -40,15 +42,17 @@ export interface ScanResult {
 // fall through to the nearest opaque ancestor (usually body).
 //
 // page.evaluate serializes plain data only, so this is a single
-// self-contained function returning { title, totalHeight, candidates }
-// (no closures over module scope). The Node tsconfig has no DOM lib, so
-// browser globals are reached through globalThis.
+// self-contained function returning { title, totalHeight, candidates,
+// landmarks? } (no closures over module scope; every helper below is a
+// function declaration — page.evaluate re-serializes the source, so no
+// arrows). The Node tsconfig has no DOM lib, so browser globals are
+// reached through globalThis.
 //
 // The backgroundColor alpha parsing in the visit loop (including the
 // modern-color-function fallback) is mirrored in test/structure.test.ts
 // ("SCAN_SNIPPET alpha parsing handles space syntax and percentage alphas")
 // and must stay in sync.
-export const SCAN_SNIPPET = (): ScanResult => {
+export const SCAN_SNIPPET = function (): ScanResult {
   const g = globalThis as any;
   const doc = g.document;
   const totalHeight = Math.round(doc.documentElement.scrollHeight);
@@ -65,7 +69,7 @@ export const SCAN_SNIPPET = (): ScanResult => {
     },
   ];
   const seen = new Set<unknown>();
-  const visit = (el: any, depth: number): void => {
+  function visit(el: any, depth: number): void {
     if (depth > 6 || candidates.length >= 300 || seen.has(el)) return;
     seen.add(el);
     const r = el.getBoundingClientRect();
@@ -99,9 +103,44 @@ export const SCAN_SNIPPET = (): ScanResult => {
       }
     }
     for (const child of el.children) visit(child, depth + 1);
-  };
+  }
   visit(doc.body, 0);
-  return { title: doc.title, totalHeight, candidates };
+  // Landmark tops for band-split v2 (splitCollapsedBands filters per band at
+  // match time, so the page ships ONE full-page list): heading tops plus the
+  // tops of distinct-background children (computed background-color differs
+  // from their parent's) at least 400px tall. Exact-deduped, sorted asc,
+  // capped at 200; the walk is bounded like the candidate walk (depth ≤6,
+  // ≤600 elements). try/caught: a page that throws here must still return
+  // candidates with no landmarks.
+  let landmarks: number[] | undefined;
+  try {
+    const tops: number[] = [];
+    for (const h of doc.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
+      tops.push(Math.round(h.getBoundingClientRect().top + g.scrollY));
+    }
+    let walked = 0;
+    function walkLandmarks(el: any, depth: number): void {
+      if (depth > 6 || walked >= 600) return;
+      walked++;
+      if (el !== doc.body && el.parentElement) {
+        const r = el.getBoundingClientRect();
+        const bg = g.getComputedStyle(el).backgroundColor;
+        if (r.height >= 400 && bg !== g.getComputedStyle(el.parentElement).backgroundColor) {
+          tops.push(Math.round(r.top + g.scrollY));
+        }
+      }
+      for (const child of el.children) walkLandmarks(child, depth + 1);
+    }
+    walkLandmarks(doc.body, 0);
+    const unique = [...new Set(tops)];
+    unique.sort(function (a: number, b: number): number { return a - b; });
+    landmarks = unique.slice(0, 200);
+  } catch {
+    // landmarks stays undefined — the scan degrades to candidates only
+  }
+  const out: ScanResult = { title: doc.title, totalHeight, candidates };
+  if (landmarks) out.landmarks = landmarks;
+  return out;
 };
 
 // PURE: reduces raw candidates to the page's visible horizontal band map.
@@ -172,6 +211,60 @@ export function collapseBands(cands: RawBand[], totalHeight: number, maxBands = 
     height: Math.round(r.height),
     textStart: r.cand.textStart,
   }));
+}
+
+// PURE: band-split v2 — subdivides collapsed giant bands at landmark tops so
+// a 20,000px background run stops reading as one band. A band only splits
+// when it is a real giant (height ≥ 3000px) with ≥ 2 landmarks inside its
+// range; landmarks within 200px of either edge are skipped so no sub-band is
+// born under the 200px floor the merge rule enforces anyway. Sub-band
+// heights are the deltas between cuts, and a delta < 200px merges into the
+// previous sub-band (that landmark sits too close to its neighbor to stand
+// alone); the last sub takes the remainder, so sub heights always sum to the
+// parent height. Sub 0 keeps the parent's tag/label/bg/textStart; later subs
+// keep tag/bg but take empty label/textStart — the parent's label and text
+// describe the giant's top, not where those subs begin. The maxBands guard
+// SKIPS the whole split instead of truncating: dropping sub-bands mid-split
+// would fabricate coverage the landmarks disprove.
+export function splitCollapsedBands(bands: PageBand[], landmarks: number[], maxBands = 60): PageBand[] {
+  const marks = [...new Set(landmarks.filter(Number.isFinite))].sort((a, b) => a - b);
+  if (!marks.length) return bands; // no landmarks: byte-identical passthrough
+  const out: PageBand[] = [];
+  for (const band of bands) {
+    const top = band.offsetTop;
+    const bottom = top + band.height;
+    const inRange = marks.filter((lm) => lm > top && lm < bottom);
+    const validCuts = inRange.filter((lm) => lm - top >= 200 && bottom - lm >= 200);
+    const heights: number[] = [];
+    if (band.height >= 3000 && inRange.length >= 2 && validCuts.length) {
+      let prev = top;
+      for (const cut of [...validCuts, bottom]) {
+        const delta = cut - prev;
+        if (heights.length && delta < 200) heights[heights.length - 1] += delta;
+        else heights.push(delta);
+        prev = cut;
+      }
+    }
+    // Running maxBands guard: a split either fits entirely or not at all.
+    if (!heights.length || out.length + heights.length > maxBands) {
+      out.push(band);
+      continue;
+    }
+    let offset = top;
+    for (let i = 0; i < heights.length; i++) {
+      out.push({
+        index: 0, // renumbered below
+        tag: band.tag,
+        label: i === 0 ? band.label : "",
+        background: band.background,
+        offsetTop: offset,
+        height: heights[i],
+        textStart: i === 0 ? band.textStart : "",
+      });
+      offset += heights[i];
+    }
+  }
+  return out.map((b, i) => ({ ...b, index: i }));
 }
 
 /** Wait strategy for page.goto: "load" (default, plus a fixed settle) or "networkidle". */
@@ -248,7 +341,7 @@ export async function analyzePageStructure(
       url,
       title: raw.title,
       totalHeight: raw.totalHeight,
-      bands: collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40),
+      bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
     };
   } finally {
     try {

@@ -107,7 +107,7 @@ server.tool(
 
 server.tool(
   "compare_sites",
-  "Compare the design DNA of 2–3 Awwwards sites: titles, live URLs, palettes, technologies, elements, awards and jury scores. Text only; missing details are fetched and cached.",
+  "Compare the design DNA of 2–3 Awwwards sites: titles, live URLs, palettes, technologies, elements, awards and jury scores. Text only; missing details are fetched and cached. For your own build vs a reference, use verify_build instead.",
   {
     slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(3)
       .refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "Site slugs must be distinct")
@@ -291,7 +291,7 @@ server.tool(
 
 server.tool(
   "verify_build",
-  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify.",
+  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
   {
     buildUrl: z.string().url().describe("URL of the build to verify"),
     referenceUrl: z.string().url().describe("URL of the reference site to match"),
