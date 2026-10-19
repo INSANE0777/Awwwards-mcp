@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   motionFingerprint,
   motionDiffScore,
   compareBands,
   verdictFrom,
   verifyBuild,
+  compactScrollCensus,
+  compactHoverCensus,
 } from "../src/verify-build.js";
 import type { BandRow, MotionCensusInput } from "../src/verify-build.js";
 import type { PageStructure } from "../src/structure.js";
@@ -399,5 +403,126 @@ describe("verifyBuild orchestrator", () => {
     expect("error" in report).toBe(true);
     expect(perfCalls).toBe(0);
     expect(rulesCalls).toBe(0);
+  });
+
+  it("bounds the fps probe to a fixed 6s window (C1: perfFn receives seconds: 6)", async () => {
+    const seen: Array<{ seconds?: number } | undefined> = [];
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => scrollCensus(),
+      hoverFn: async () => hoverCensus(),
+      perfFn: async (_url, opts) => {
+        seen.push(opts);
+        return perfMeasurement();
+      },
+      rulesFn: () => [],
+      fetchFn: okFetch(""),
+    });
+    expect("error" in report).toBe(false);
+    if ("error" in report) return;
+    expect(seen).toEqual([{ seconds: 6 }]);
+    expect(report.evidence[4]).toContain("fps=58");
+  });
+
+  it("records the #15997 idle-tail pitfall beside the perf window (C1 audit, no-op branch)", () => {
+    // Audit conclusion (plan Task C1): the perf-live collector is registered
+    // pre-navigation via Page.addScriptToEvaluateOnNewDocument, so the rAF
+    // window always covers the busy load/init work — the comfyui #15997
+    // failure mode (sampling AFTER the workload → the idle tail dominates)
+    // cannot occur; source-locked here so a future refactor that replaces
+    // the pre-navigation injection re-opens the audit consciously.
+    const src = readFileSync(join(__dirname, "..", "src", "verify-build.ts"), "utf8");
+    expect(src).toContain("15997");
+    expect(src).toContain("addScriptToEvaluateOnNewDocument");
+  });
+});
+
+describe("compact census helpers (C3)", () => {
+  const census = (): ScrollCensus => ({
+    url: "https://x.test",
+    capturedAt: 1700000000000,
+    counts: {
+      "gsap-scrolltrigger": 1,
+      "css-scroll-timeline": 0,
+      "css-view-timeline": 0,
+      "data-attr": 0,
+      "css-keyframe": 1,
+      smil: 1,
+      unknown: 0,
+    },
+    anims: [
+      {
+        selector: "a", tag: "a", props: ["transform", "opacity"], durationMs: 400,
+        delayMs: null, easing: "power2.out", trigger: "gsap-scrolltrigger",
+        scrub: true, pin: false, svgStroke: false,
+        keyframes: [{ offset: 0, props: { transform: "none" } }],
+      },
+      {
+        selector: "b", tag: "b", props: ["opacity"], durationMs: null,
+        delayMs: null, easing: null, trigger: "css-keyframe",
+        scrub: false, pin: true, svgStroke: false,
+      },
+    ],
+    svgStrokes: ["#pulse"],
+    nativeScrollTimelines: 2,
+    gsapTriggers: [
+      { selector: "a", scrub: true, pin: false, startPx: 0, endPx: 800, progress: 0.25, vars: { stagger: "0.09" } },
+    ],
+    scrubCurves: [{ selector: "a", startPx: 0, endPx: 800, steps: [{ scrollY: 0, progress: 0, transform: null }] }],
+    reducedMotion: false,
+  });
+
+  it("scroll diet: numerics/counts/svg strokes/trigger numerics stay, detail drops", () => {
+    const c = compactScrollCensus(census());
+    expect(c.counts["gsap-scrolltrigger"]).toBe(1);
+    expect(c.nativeScrollTimelines).toBe(2);
+    expect(c.svgStrokes).toEqual(["#pulse"]);
+    expect(c.gsapTriggers).toEqual([
+      { selector: "a", scrub: true, pin: false, startPx: 0, endPx: 800, progress: 0.25 },
+    ]);
+    expect(c.animCount).toBe(2);
+    expect(c.scrubCount).toBe(1);
+    expect(c.pinCount).toBe(1);
+    expect(c.scrubCurveCount).toBe(1);
+    expect(c.reducedMotion).toBe(false);
+    // Purity + no heavy payloads leak through.
+    expect(c as unknown as Record<string, unknown>).not.toHaveProperty("anims");
+    expect(c as unknown as Record<string, unknown>).not.toHaveProperty("scrubCurves");
+    expect(c.gsapTriggers[0]).not.toHaveProperty("vars");
+    expect(compactScrollCensus(census())).toEqual(c);
+  });
+
+  it("scroll diet is total: drops keyframes, scrubCurves, per-anim props", () => {
+    const c = compactScrollCensus(census()) as unknown as Record<string, unknown>;
+    expect(JSON.stringify(c)).not.toContain("keyframes");
+    expect(JSON.stringify(c)).not.toContain('"steps"');
+    expect(JSON.stringify(c)).not.toContain("power2.out");
+  });
+
+  it("hover diet: counts + selectors stay, sample bodies drop, note passes through", () => {
+    const hover = (): HoverCensus => ({
+      url: "https://x.test",
+      capturedAt: 0,
+      hoverRuleCount: 7,
+      candidates: 3,
+      samples: [
+        { selector: "a.cta", changedProps: ["transform"], transitionMs: 150, easing: "cubic-bezier(0, 0, 0.2, 1)" },
+        { selector: "nav li", changedProps: ["color"], transitionMs: 200, easing: "linear" },
+      ],
+      note: "touch-only context — hover interactions skipped",
+      reducedMotion: false,
+    });
+    const c = compactHoverCensus(hover());
+    expect(c.hoverRuleCount).toBe(7);
+    expect(c.candidates).toBe(3);
+    expect(c.sampleCount).toBe(2);
+    expect(c.sampleSelectors).toEqual(["a.cta", "nav li"]);
+    expect(c.note).toBe("touch-only context — hover interactions skipped");
+    expect(c as unknown as Record<string, unknown>).not.toHaveProperty("samples");
+    expect(compactHoverCensus(hover())).toEqual(c);
+    // Purity: the input census is not mutated.
+    expect(hover().samples).toHaveLength(2);
   });
 });

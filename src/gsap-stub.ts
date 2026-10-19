@@ -108,6 +108,27 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
   const host = escHtml(typeof pg?.url === "string" ? pg.url : typeof sc?.url === "string" ? sc.url : "unknown");
   const censusHonorsReduced = sc?.reducedMotion === true;
 
+  // L3 scrub probe curves (ScrubCurve in census.ts): measured keyframes for
+  // scrubbed triggers. Lenient over runtime JSON; a null-transform step
+  // contributes nothing, consecutive identical transforms collapse into one key.
+  const curves = Array.isArray(sc?.scrubCurves) ? sc.scrubCurves : [];
+  const measured = curves
+    .filter((c) => c && typeof c.selector === "string" && c.selector.trim() && Array.isArray(c.steps))
+    .map((c) => {
+      const tos: string[] = [];
+      for (const s of c.steps) {
+        if (typeof s?.transform !== "string") continue;
+        if (tos[tos.length - 1] !== s.transform) tos.push(s.transform);
+      }
+      return {
+        selector: c.selector,
+        startPx: num(c.startPx, 0),
+        endPx: num(c.endPx, 0),
+        tos,
+      };
+    });
+  const measuredSels = new Set(measured.filter((m) => m.tos.length > 0).map((m) => m.selector));
+
   // Camera keys: synthesized from pose-grid scroll ratios (not raw captured
   // camera coords — PoseSnapshot has no x/y/z): a gentle dolly-in mapped over
   // scroll progress. Optional s.x/s.y/s.z snapshot overrides win when present.
@@ -129,6 +150,9 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
   // One timeline per usable census anim; duration from durationMs (fallback 0.6s), ease normalized.
   const timelines = anims
     .filter((a) => a && typeof a.selector === "string" && a.selector.trim())
+    // a scrub anim with measured keyframes is superseded by its curve below —
+    // the guessed tween would fight the measured one on the same trigger
+    .filter((a) => !(a.scrub === true && measuredSels.has(a.selector as string)))
     .map((a) => {
       const ms = num(a.durationMs, 0);
       return {
@@ -157,6 +181,23 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
     ? timelineLines.join("\n\n")
     : "  // no usable scroll-census anims captured -- nothing to stub";
 
+  // Measured scrub timelines (B1): one scrub-timeline per usable curve carrying
+  // the probe's transform chain; a curve with no measured transforms falls back
+  // to the census pattern, and one whose selector already has a census timeline
+  // is skipped so nothing is emitted twice.
+  const emitSels = new Set(timelines.map((t) => t.selector));
+  const measuredLines = measured
+    .filter((m) => m.tos.length > 0 || !emitSels.has(m.selector))
+    .map((m) => {
+      const note = `// measured scrub curve: ${m.selector.replace(/</g, "\\u003c")} ${m.startPx}->${m.endPx}`;
+      const body = m.tos.length
+        ? m.tos.map((tf) => `.to(${jsStr(m.selector)}, { transform: ${jsStr(tf)} })`).join("\n    ") + ";"
+        : `.from(${jsStr(m.selector)}, { opacity: 0, y: 40 });`;
+      const tl = `gsap.timeline({ scrollTrigger: { trigger: ${jsStr(m.selector)}, start: "top 80%", scrub: true } })`;
+      return `${note}\n  ${tl}\n    ${body}`;
+    });
+  const measuredBlock = measuredLines.length ? "\n\n" + measuredLines.join("\n\n") : "";
+
   const nativeNote = num(sc?.nativeScrollTimelines, 0) > 0
     ? `\n// census also found ${num(sc?.nativeScrollTimelines)} native scroll timelines (not recreated by this stub)\n`
     : "";
@@ -165,7 +206,7 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
 
 const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 if (!REDUCED) {
-  ${animBlock}${nativeNote}
+  ${animBlock}${measuredBlock}${nativeNote}
   ScrollTrigger.refresh();
 } else {
   // static first frame: no tweens created, content renders in its final state

@@ -347,6 +347,174 @@ describe("universal extraction: inline scripts + preload hints", () => {
   });
 });
 
+describe("walkChunks (B3: opt-in deep chunk walk)", () => {
+  const B2_JS = `${pageOrigin}/b.js`;
+  const C_JS = `${pageOrigin}/c.js`;
+  // a.js references itself (already-fetched → no refetch) and two more chunks;
+  // b.js points back at a.js (cycle → seen-set) and on to c.js. Ref bodies
+  // stay ≥7 chars — the plan-pinned lazy regex can't see shorter ones.
+  const walkMap: Record<string, string> = {
+    [PAGE]: `<html><script src="/a.js"></script></html>`,
+    [A_JS]: `var self = "${A_JS}"; var next = "../b.js";`,
+    [B2_JS]: `var back = "${A_JS}"; var deeper = "../c.js";`,
+    [C_JS]: `terminal-marker(1);`,
+  };
+  const countingFetch = (map: Record<string, string>, calls: string[]) =>
+    async (url: string) => {
+      calls.push(url);
+      return fakeFetchMap(map)(url);
+    };
+
+  it("walks quoted same-origin refs once; self-refs and cycles stay safe; walk chunks are keyword-searched", async () => {
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(walkMap, calls),
+      keywords: ["terminal-marker"],
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // page + first pass, then exactly one extra fetch per discovered chunk
+    expect(calls).toEqual([PAGE, A_JS, B2_JS, C_JS]);
+    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, B2_JS, C_JS]);
+    // walk bytes are keyword-searched like the rest
+    expect(rep.matches.some((m) => m.url === C_JS && m.keyword === "terminal-marker")).toBe(true);
+    expect(rep.warnings).toEqual([]);
+  });
+
+  it("walkChunks absent → zero extra fetches (pin)", async () => {
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(walkMap, calls),
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(calls).toEqual([PAGE, A_JS]); // page + html-advertised chunks only
+    expect(rep.chunkCount).toBe(1);
+  });
+
+  it("walk cap is 20 discovered chunks per run", async () => {
+    // 2-digit padding keeps every ref body ≥7 chars (regex minimum above)
+    const wUrls = Array.from({ length: 25 }, (_, i) => `${pageOrigin}/w${String(i).padStart(2, "0")}.js`);
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: Array.from({ length: 25 }, (_, i) => `var p${i}="/w${String(i).padStart(2, "0")}.js";`).join(""),
+    };
+    for (const u of wUrls) map[u] = "z".repeat(60);
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(map),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(21); // 1 first-pass + hard cap 20
+    expect(rep.warnings.join("\n")).toContain("walk cap (20)");
+    expect(rep.warnings.join("\n")).toContain("5 discovered chunk(s) left unfetched");
+  });
+
+  it("walk fetches stay under maxTotalBytes (oversized discoveries skip with a walk-marked warning)", async () => {
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: "y".repeat(5000) + `var next="../b.js";`,
+      [B2_JS]: "z".repeat(5000),
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(map),
+      maxTotalBytes: 6000,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(1);
+    expect(rep.warnings.join("\n")).toContain("/b.js: would exceed maxTotalBytes");
+  });
+
+  // F1 (dogfood): the base pass eating maxChunks must not starve the walk —
+  // discovered chunks are the FEATURE and live under their own 20 cap.
+  it("walk runs on its own 20-chunk cap: maxChunks exhaustion doesn't stop discovered chunks", async () => {
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: `var next="../b.js";`,
+      [B2_JS]: "var b=1;",
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      maxChunks: 1,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(2); // a.js (maxChunks budget) + walk-discovered b.js (own cap)
+    expect(calls).toEqual([PAGE, A_JS, B2_JS]);
+    expect(rep.warnings).toEqual([]); // no "walk stopped: maxChunks" starvation warning
+  });
+
+  // F1 (dogfood): byte budget exhausted by the base pass → walk stops with the
+  // existing walk-sourced warning and fetches nothing.
+  it("byte budget exhausted by the base pass → walk stops with the walk-sourced byte warning", async () => {
+    const REF = 'var next="../b.js";';
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: "y".repeat(5000 - REF.length) + REF, // exactly maxTotalBytes
+      [B2_JS]: "z".repeat(10),
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      maxTotalBytes: 5000,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(1);
+    expect(calls).toEqual([PAGE, A_JS]); // b.js never fetched
+    expect(rep.warnings.join("\n")).toContain("walk stopped: byte budget (5000 bytes) reached");
+  });
+
+  // F2 (dogfood): Turbopack/Next chunk sources carry chunk-relative paths —
+  // they must resolve against the CHUNK's own URL, not the page URL.
+  // (Ref bodies stay ≥7 chars — the pinned walk regex can't see "./b.js".)
+  it("walk resolves chunk-internal refs against the chunk's own URL; cross-origin skipped", async () => {
+    const NEXT_A = `${pageOrigin}/_next/static/chunks/a.js`;
+    const NEXT_B = `${pageOrigin}/_next/static/chunks/chunk-b.js`;
+    const NEXT_C = `${pageOrigin}/_next/static/shared/mod-c.js`;
+    const X_JS = "https://cdn.x.com/remote.js";
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/_next/static/chunks/a.js"></script></html>`,
+      [NEXT_A]: `var b="./chunk-b.js"; var c="../shared/mod-c.js"; var x="${X_JS}";`,
+      [NEXT_B]: "var b2=1;",
+      [NEXT_C]: "var c2=1;",
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // ./ and ../ refs land under /_next/static/... (chunk URL base), fetched
+    // exactly once each; the cross-origin ref never fetches.
+    expect(calls).toEqual([PAGE, NEXT_A, NEXT_B, NEXT_C]);
+    expect(rep.chunks.map((c) => c.url)).toEqual([NEXT_A, NEXT_B, NEXT_C]);
+    expect(rep.warnings).toEqual([]);
+  });
+});
+
 describe("analyze_bundle handler", () => {
   it("DI happy path: fake bundleFn report → JSON text with matches + outDir, args passed through", async () => {
     const seen: Array<{ url: string; opts?: { keywords?: string[]; maxChunks?: number } }> = [];
@@ -388,5 +556,19 @@ describe("analyze_bundle handler", () => {
     const res = await h.analyze_bundle({ url: PAGE });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("HTTP 404");
+  });
+
+  it("passes walkChunks through to bundleFn opts", async () => {
+    let seenOpts: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean } | undefined;
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(cacheDir()),
+      bundleFn: async (_url, opts) => {
+        seenOpts = opts;
+        return { error: "short-circuit" };
+      },
+    });
+    await h.analyze_bundle({ url: PAGE, walkChunks: true, maxChunks: 3 });
+    expect(seenOpts).toEqual({ maxChunks: 3, walkChunks: true });
   });
 });

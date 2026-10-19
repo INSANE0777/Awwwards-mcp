@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import type { ScrollCensus } from "../src/census.js";
+import type { HoverCensus } from "../src/hover-census.js";
+import type { UnifiedMotionDna } from "../src/motion-dna.js";
+import type { ComponentPack } from "../src/component.js";
 import { utcDayStart } from "../src/feed.js";
 import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
@@ -1463,6 +1466,23 @@ describe("get_motion_dna handler", () => {
     expect(miss.isError).toBe(true);
     expect((miss.content[0] as any).text).toContain("boom");
   });
+
+  // F3 (dogfood): the injected unified capture's slimmed censusSummary (counts
+  // only) must reach the response verbatim — no scrubRatio/pinCount doppelgänger
+  // beside dna.scroll, which is the single runtime truth for scrub/pin.
+  it("live-capture passthrough: censusSummary reaches the response as counts only", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const unified: UnifiedMotionDna = {
+      ...dnaFixture,
+      censusSummary: { counts: { "gsap-scrolltrigger": 3 } },
+    };
+    const h = createHandlers({ client, cache, motionDnaFn: async () => unified });
+    const res = await h.get_motion_dna({ url: dnaFixture.url });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.censusSummary).toEqual({ counts: { "gsap-scrolltrigger": 3 } });
+    expect(Object.keys(parsed.censusSummary).sort()).toEqual(["counts"]);
+  });
 });
 
 describe("analyze_stack handler", () => {
@@ -1733,5 +1753,168 @@ describe("analyze_scroll_map handler", () => {
     const res = await h.analyze_scroll_map({ url: "https://unreachable.example" });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toBe("boom");
+  });
+});
+
+describe("C3 compact response modes", () => {
+  const richCensus = (): ScrollCensus => ({
+    url: "https://example.com/page",
+    capturedAt: 1700000000000,
+    counts: {
+      "gsap-scrolltrigger": 1,
+      "css-scroll-timeline": 0,
+      "css-view-timeline": 0,
+      "data-attr": 0,
+      "css-keyframe": 0,
+      smil: 0,
+      unknown: 0,
+    },
+    anims: [
+      {
+        selector: "main>h1", tag: "h1", props: ["transform"], durationMs: 500,
+        delayMs: null, easing: "power2.out", trigger: "gsap-scrolltrigger",
+        scrub: true, pin: false, svgStroke: false,
+        keyframes: [{ offset: 0, props: { transform: "translateY(0)" } }],
+      },
+    ],
+    svgStrokes: [],
+    nativeScrollTimelines: 0,
+    gsapTriggers: [
+      { selector: "main>h1", scrub: false, pin: false, startPx: 0, endPx: 800, progress: 0, vars: { stagger: "0.09" } },
+    ],
+    reducedMotion: false,
+  });
+
+  it("analyze_scroll_map compact: detail → counts, choreography stays; default keeps everything", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache, scrollMapFn: async () => richCensus() });
+    const compact = await h.analyze_scroll_map({ url: "https://example.com/page", compact: true });
+    const body = JSON.parse((compact.content[0] as any).text);
+    expect(body.anims).toBeUndefined();
+    expect(body.animCount).toBe(1);
+    expect(body.scrubCount).toBe(1);
+    expect(body.pinCount).toBe(0);
+    expect(body.scrubCurves).toBeUndefined();
+    expect(body.scrubCurveCount).toBe(0);
+    expect(body.counts["gsap-scrolltrigger"]).toBe(1);
+    expect(body.gsapTriggers[0]).toEqual({ selector: "main>h1", scrub: false, pin: false, startPx: 0, endPx: 800, progress: 0 });
+    // The handler-composed trigger hints survive the diet.
+    expect(body.choreography).toEqual({ hints: [{ selector: "main>h1", value: 0.09, source: "tween-var" }], groups: 1 });
+    expect(JSON.stringify(body)).not.toContain("keyframes");
+
+    // Pin: default (compact absent) response keeps every heavy field.
+    const full = await h.analyze_scroll_map({ url: "https://example.com/page" });
+    const fullBody = JSON.parse((full.content[0] as any).text);
+    expect(fullBody.anims[0].keyframes).toEqual([{ offset: 0, props: { transform: "translateY(0)" } }]);
+    expect(fullBody.anims[0].props).toEqual(["transform"]);
+    expect(fullBody.gsapTriggers[0].vars).toEqual({ stagger: "0.09" });
+  });
+
+  it("analyze_hover_census compact: sample bodies → selectors + count", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const hover = (): HoverCensus => ({
+      url: "https://example.com/page",
+      capturedAt: 0,
+      hoverRuleCount: 4,
+      candidates: 2,
+      samples: [
+        { selector: "a.cta", changedProps: ["transform"], transitionMs: 150, easing: "cubic-bezier(0, 0, 0.2, 1)" },
+        { selector: "nav li", changedProps: ["color"], transitionMs: 200, easing: "linear" },
+      ],
+      note: "touch-only context — hover interactions skipped",
+      reducedMotion: false,
+    });
+    const h = createHandlers({ client, cache, hoverCensusFn: async () => hover() });
+    const compact = await h.analyze_hover_census({ url: "https://example.com/page", compact: true });
+    const body = JSON.parse((compact.content[0] as any).text);
+    expect(body.samples).toBeUndefined();
+    expect(body.sampleCount).toBe(2);
+    expect(body.sampleSelectors).toEqual(["a.cta", "nav li"]);
+    expect(body.note).toBe("touch-only context — hover interactions skipped");
+
+    const full = await h.analyze_hover_census({ url: "https://example.com/page" });
+    const fullBody = JSON.parse((full.content[0] as any).text);
+    expect(fullBody.samples).toHaveLength(2);
+    expect(fullBody.samples[0].changedProps).toEqual(["transform"]);
+  });
+
+  it("capture_component compact: {tag, classes, rect} skeleton + fonts/colors", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const pack = (): ComponentPack => ({
+      id: "component-pack-v1",
+      url: "https://example.com/page",
+      selector: "header",
+      capturedAt: 0,
+      viewport: { width: 1440, height: 900 },
+      nodeCount: 2,
+      root: {
+        tag: "header",
+        classes: ["hero"],
+        rect: { x: 0, y: 0, w: 1440, h: 200 },
+        styles: { color: "rgb(0, 0, 0)" },
+        anims: [{ props: ["opacity"], durationMs: 300, easing: "linear" }],
+        children: [
+          {
+            tag: "h1",
+            classes: ["title"],
+            rect: { x: 0, y: 24, w: 640, h: 60 },
+            styles: { color: "rgb(255, 255, 255)" },
+            text: "Hi",
+            children: [],
+          },
+        ],
+      },
+      fonts: ["Inter"],
+      colors: ["#000000"],
+    });
+    const h = createHandlers({ client, cache, captureComponentFn: async () => pack() });
+    const compact = await h.capture_component({ url: "https://example.com/page", compact: true });
+    const body = JSON.parse((compact.content[0] as any).text);
+    expect(body.id).toBe("component-pack-v1");
+    expect(body.nodeCount).toBe(2);
+    expect(body.root).toEqual({
+      tag: "header",
+      classes: ["hero"],
+      rect: { x: 0, y: 0, w: 1440, h: 200 },
+      children: [
+        { tag: "h1", classes: ["title"], rect: { x: 0, y: 24, w: 640, h: 60 }, children: [] },
+      ],
+    });
+    expect(body.fonts).toEqual(["Inter"]);
+    expect(body.colors).toEqual(["#000000"]);
+    expect(JSON.stringify(body)).not.toContain("rgb(0, 0, 0)");
+
+    const full = await h.capture_component({ url: "https://example.com/page" });
+    const fullBody = JSON.parse((full.content[0] as any).text);
+    expect(fullBody.root.styles).toEqual({ color: "rgb(0, 0, 0)" });
+    expect(fullBody.root.children[0].text).toBe("Hi");
+  });
+
+  it("get_site_details compact: one JSON text block, lists → counts; default pin untouched", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const compact = await h.get_site_details({ slug: "l-i-s-a", compact: true });
+    expect(compact.content).toHaveLength(1);
+    expect(compact.content[0].type).toBe("text");
+    const body = JSON.parse((compact.content[0] as any).text);
+    expect(body.slug).toBe("l-i-s-a");
+    expect(body.palette).toBeUndefined();
+    expect(body.technologies).toBeUndefined();
+    expect(body.elements).toBeUndefined();
+    expect(typeof body.paletteCount).toBe("number");
+    expect(typeof body.technologiesCount).toBe("number");
+    expect(typeof body.elementsCount).toBe("number");
+    expect(Array.isArray(body.awards)).toBe(true);
+    expect(typeof body.score).toBe("number");
+
+    // Default stays the pre-existing markdown shape (existing tests pin its
+    // text): first block is the markdown text, never the compact JSON.
+    const full = await h.get_site_details({ slug: "l-i-s-a" });
+    expect(full.content[0].type).toBe("text");
+    expect((full.content[0] as any).text).toContain("Live site:");
   });
 });

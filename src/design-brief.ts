@@ -1,5 +1,6 @@
 import type { MotionDna, SiteDetails } from "./types.js";
 import type { PageStructure } from "./structure.js";
+import type { Choreography } from "./choreography.js";
 
 export type EvidenceStatus = "cached" | "fetched" | "unavailable";
 export type StructureEvidenceStatus = "captured" | "unavailable" | "not_requested";
@@ -14,6 +15,8 @@ export interface InteractionPlan {
   easings: BriefSignal[];
   durationRange: { p25: number; median: number; p75: number; sourceSlugs: string[] } | null;
   accessibility: string;
+  /** Rendered choreography stagger hints (source=value @ selector), deduped, first-seen order, cap 8. */
+  staggerHints?: string[];
 }
 export interface DesignBrief {
   version: 1; goal: string; audience?: string; constraints: string[];
@@ -47,7 +50,11 @@ function luminance(color: string): number {
   return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
 }
 
-export function createDesignBrief(input: DesignBriefInput, sources: DesignBriefSource[]): DesignBrief {
+export function createDesignBrief(
+  input: DesignBriefInput,
+  sources: DesignBriefSource[],
+  briefEvidence?: { choreography?: Choreography },
+): DesignBrief {
   const usable = sources.filter((s) => s.detail !== null);
   const capturedStructures = sources.filter(isCapturedStructure);
   const threshold = usable.length === 2 ? 2 : usable.length >= 3 ? Math.ceil(usable.length / 2) : Infinity;
@@ -86,6 +93,23 @@ export function createDesignBrief(input: DesignBriefInput, sources: DesignBriefS
     ...(m.scroll.pinCount > 0 ? ["pinned-sections"] : []),
     ...(m.scroll.scrubCount > 0 ? ["scrubbed-scroll"] : []),
   ]);
+  // Stagger hints from captured choreography (the exact choreographyFromCensus
+  // output shape, injected as DI evidence): each hint renders as
+  // "source=value @ selector", deduped, first-seen order, capped at 8.
+  // Absent evidence = absent field, so existing briefs are byte-identical.
+  let staggerHints: string[] | null = null;
+  if (briefEvidence?.choreography) {
+    const seen = new Set<string>();
+    staggerHints = [];
+    for (const h of briefEvidence.choreography.hints) {
+      const line = `${h.source}=${h.value} @ ${h.selector}`;
+      if (seen.has(line)) continue;
+      seen.add(line);
+      if (staggerHints.length >= 8) break;
+      staggerHints.push(line);
+    }
+    if (!staggerHints.length) staggerHints = null;
+  }
   const interactionPlan: InteractionPlan = {
     cursorHover,
     scroll,
@@ -93,6 +117,7 @@ export function createDesignBrief(input: DesignBriefInput, sources: DesignBriefS
     easings: motionSignals((m) => m.easingVocab.map((e) => e.token)),
     durationRange,
     accessibility: "Respect prefers-reduced-motion; disable or simplify non-essential motion and preserve content and keyboard access.",
+    ...(staggerHints ? { staggerHints } : {}),
   };
   const buildConstraints = constraints.length ? constraints.map((c) => `Honor constraint: ${c}`) : ["Keep the implementation grounded in the observed evidence; do not copy a single source."];
   if (constraints.some((c) => /webgl/i.test(c)) && renderers.some((s) => s.value === "webgl")) buildConstraints.push("Avoid observed WebGL rendering where the stated constraint requires it; retain WebGL in the evidence above.");
@@ -128,7 +153,7 @@ export function renderDesignBrief(brief: DesignBrief): string {
     `## Deliberate outliers\n${lines(d.outliers, brief.sources.length)}`,
     `## Palette and technology signals\n${lines([...d.palette, ...d.technologySignals, ...d.elementSignals], brief.sources.length)}`,
     `## Motion model\n${lines([...d.motion.libraries, ...d.motion.renderers, ...d.motion.scrollModels, ...d.motion.interactionSignals, ...d.motion.easings], brief.sources.length)}${d.motion.durationRange ? `\n- Duration p25/median/p75: ${d.motion.durationRange.p25}/${d.motion.durationRange.median}/${d.motion.durationRange.p75} (${d.motion.durationRange.sourceSlugs.map((slug) => `\`${slug}\``).join(", ")})` : ""}`,
-    `## Interaction plan\n### Cursor and hover\n${lines(d.interactionPlan.cursorHover, brief.sources.length)}\n### Scroll\n${lines(d.interactionPlan.scroll, brief.sources.length)}\n### Entrance and reveal\n${lines(d.interactionPlan.entranceReveal, brief.sources.length)}\n### Timing guidance\n${lines(d.interactionPlan.easings, brief.sources.length)}${d.interactionPlan.durationRange ? `\n- Timing p25/median/p75: ${d.interactionPlan.durationRange.p25}/${d.interactionPlan.durationRange.median}/${d.interactionPlan.durationRange.p75} (${d.interactionPlan.durationRange.sourceSlugs.map((slug) => `\`${slug}\``).join(", ")})` : "\n- No cached timing evidence; do not invent durations or easing."}\n- Accessibility: ${d.interactionPlan.accessibility}`,
+    `## Interaction plan\n### Cursor and hover\n${lines(d.interactionPlan.cursorHover, brief.sources.length)}\n### Scroll\n${lines(d.interactionPlan.scroll, brief.sources.length)}\n### Entrance and reveal\n${lines(d.interactionPlan.entranceReveal, brief.sources.length)}\n### Timing guidance\n${lines(d.interactionPlan.easings, brief.sources.length)}${d.interactionPlan.durationRange ? `\n- Timing p25/median/p75: ${d.interactionPlan.durationRange.p25}/${d.interactionPlan.durationRange.median}/${d.interactionPlan.durationRange.p75} (${d.interactionPlan.durationRange.sourceSlugs.map((slug) => `\`${slug}\``).join(", ")})` : "\n- No cached timing evidence; do not invent durations or easing."}\n- Accessibility: ${d.interactionPlan.accessibility}${d.interactionPlan.staggerHints ? `\n- Stagger: ${d.interactionPlan.staggerHints.join("; ")}` : ""}`,
     ...(d.structure ? [`## Optional structure findings\n${lines(d.structure.repeatedTags, brief.sources.length)}\n${d.structure.bandCounts.map((b) => `- \`${b.slug}\`: ${b.count} bands`).join("\n")}`] : []),
     `## Build constraints\n${d.buildConstraints.map((c) => `- ${c}`).join("\n")}`,
     `## Evidence and limitations\n${brief.sources.map((s) => `- \`${s.slug}\`: detail ${s.evidence.detail}, motion ${s.evidence.motion}, elements ${s.evidence.elements}, structure ${s.evidence.structure}`).join("\n")}${d.limitations.length ? `\n${d.limitations.map((l) => `- ${l}`).join("\n")}` : ""}`,

@@ -94,12 +94,14 @@ server.tool(
 
 server.tool(
   "get_site_details",
-  "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot.",
+  "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot. compact=true returns a token-diet summary.",
   {
     slug: z
       .string()
       .regex(/^[\w-]+$/)
       .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
+    compact: z.boolean().optional()
+      .describe("token-diet summary: palette/technologies/elements become counts; awards and jury numerics stay"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.get_site_details(args)),
@@ -107,7 +109,7 @@ server.tool(
 
 server.tool(
   "compare_sites",
-  "Compare the design DNA of 2–3 Awwwards sites: titles, live URLs, palettes, technologies, elements, awards and jury scores. Text only; missing details are fetched and cached.",
+  "Compare the design DNA of 2–3 Awwwards sites: titles, live URLs, palettes, technologies, elements, awards and jury scores. Text only; missing details are fetched and cached. For your own build vs a reference, use verify_build instead.",
   {
     slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(3)
       .refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "Site slugs must be distinct")
@@ -236,7 +238,7 @@ server.tool(
 
 server.tool(
   "get_motion_dna",
-  "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Serves the corpus first; live-captures unseen URLs (headless browser required).",
+  "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Live captures append a `censusSummary` block (per-source scroll-census counts) from the same single launch. Serves the corpus first; live-captures unseen URLs (headless browser required).",
   {
     url: z.string().url().describe("Absolute site URL"),
     recapture: z.boolean().default(false).describe("Force a fresh live capture even if a recent record exists"),
@@ -247,7 +249,7 @@ server.tool(
 
 server.tool(
   "analyze_scroll_map",
-  "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation. Optional scrubProbe drives the page and returns real progress curves per scrubbed trigger. Every payload also carries a `choreography` block: stagger hints (hint selector/value/source, groups) distilled from GSAP tween vars and stepped delays across sibling animations.",
+  "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation. Optional scrubProbe drives the page and returns real progress curves per scrubbed trigger. compact=true returns a token-diet summary. Every payload also carries a `choreography` block: stagger hints (hint selector/value/source, groups) distilled from GSAP tween vars and stepped delays across sibling animations.",
   {
     url: z.string().url().describe("Absolute page URL to census"),
     waitStrategy: z.enum(["load", "networkidle"]).optional(),
@@ -256,6 +258,8 @@ server.tool(
       .describe("Emulate prefers-reduced-motion: reduce for this capture"),
     scrubProbe: z.boolean().optional()
       .describe("drive the page through up to 8 scroll steps and sample each scrubbed trigger's progress curve (adds seconds)"),
+    compact: z.boolean().optional()
+      .describe("token-diet summary: keyframes/props/durations and scrubCurves replaced by counts; all numerics and triggers stay"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_scroll_map(args)),
@@ -263,7 +267,7 @@ server.tool(
 
 server.tool(
   "analyze_hover_census",
-  ":hover interaction census of a live page: counts hover rules, samples up to 20 interactive elements, and reports which CSS properties change on hover with transition duration and easing. Use it to reproduce micro-interactions and verify interaction-state coverage. Runs on any URL — does not fetch awwwards.com.",
+  ":hover interaction census of a live page: counts hover rules, samples up to 20 interactive elements, and reports which CSS properties change on hover with transition duration and easing. Use it to reproduce micro-interactions and verify interaction-state coverage. On mobile the hover loop is skipped and a note is returned. compact=true returns a token-diet summary. Runs on any URL — does not fetch awwwards.com.",
   {
     url: z.string().url().describe("Absolute page URL to census"),
     // Inline optional enum, not waitStrategySchema: that schema's .default("load")
@@ -272,6 +276,8 @@ server.tool(
     viewport: viewportSchema,
     reducedMotion: z.boolean().default(false)
       .describe("Emulate prefers-reduced-motion: reduce for this capture"),
+    compact: z.boolean().optional()
+      .describe("token-diet summary: sample style bodies become a selector list + count"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_hover_census(args)),
@@ -284,6 +290,8 @@ server.tool(
     url: z.string().url(),
     keywords: z.array(z.string().min(1)).max(20).optional().describe("grep these strings across chunks (e.g. class names, effect names)"),
     maxChunks: z.number().int().min(1).max(100).optional().describe("default 40"),
+    walkChunks: z.boolean().optional()
+      .describe("after the first pass, follow quoted same-origin .js refs inside fetched chunks and fetch up to 20 newly discovered ones (same budgets; adds seconds)"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_bundle(args))
@@ -291,7 +299,7 @@ server.tool(
 
 server.tool(
   "verify_build",
-  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify.",
+  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
   {
     buildUrl: z.string().url().describe("URL of the build to verify"),
     referenceUrl: z.string().url().describe("URL of the reference site to match"),
@@ -306,7 +314,7 @@ server.tool(
 
 server.tool(
   "capture_component",
-  "Serialize a page component (structure, computed-style tokens, animations) into a portable pack for rebuild tooling. Runs on any URL — does not fetch awwwards.com.",
+  "Serialize a page component (structure, computed-style tokens, animations) into a portable pack for rebuild tooling. compact=true returns a token-diet summary. Runs on any URL — does not fetch awwwards.com.",
   {
     url: z.string().url().describe("Absolute page URL whose component to serialize"),
     selector: z
@@ -317,6 +325,8 @@ server.tool(
     maxNodes: z.number().int().min(50).max(2000).optional()
       .describe("Max DOM nodes to serialize (default 400, clamp 50-2000)"),
     viewport: viewportSchema,
+    compact: z.boolean().optional()
+      .describe("token-diet summary: node styles/text/svg/anims dropped; the {tag, classes, rect} tree, fonts and colors stay"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.capture_component(args)),

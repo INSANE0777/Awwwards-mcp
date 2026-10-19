@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { reduceScan, MOTION_SNIPPET } from "../src/motion-dna.js";
+import { captureMotionDnaUnified, MOTION_SNIPPET, reduceScan } from "../src/motion-dna.js";
+import { SCROLL_CENSUS_SNIPPET } from "../src/census.js";
 import type { MotionScan } from "../src/motion-dna.js";
 
 const scan: MotionScan = {
@@ -54,5 +55,125 @@ describe("MOTION_SNIPPET", () => {
     // page re-serializes the source, and no outer closure refs may leak in.
     expect(String(MOTION_SNIPPET)).not.toContain("=>");
     expect(typeof MOTION_SNIPPET).toBe("function");
+  });
+});
+
+describe("captureMotionDnaUnified (C2, offline DI)", () => {
+  // Fake playwright module: records launches/evaluates, dispatches evaluate
+  // results by snippet identity. preScroll's page.evaluate gets the async
+  // scroll helper first, then MOTION_SNIPPET, then SCROLL_CENSUS_SNIPPET.
+  const scrollScan = {
+    anims: [
+      { selector: "a", tag: "a", props: ["transform"], durationMs: null, delayMs: null, easing: null, trigger: "gsap-scrolltrigger", scrub: true, pin: false, svgStroke: false },
+      { selector: "b", tag: "b", props: ["opacity"], durationMs: null, delayMs: null, easing: null, trigger: "css-keyframe", scrub: false, pin: true, svgStroke: false },
+      { selector: "c", tag: "c", props: [], durationMs: null, delayMs: null, easing: null, trigger: "unknown", scrub: false, pin: false, svgStroke: false },
+    ],
+    smilSelectors: ["#pulse"],
+    nativeTimelines: [],
+    gsapTriggers: [],
+  };
+
+  function fakeLoader(dispatch: (fn: unknown) => unknown) {
+    const evaluates: unknown[] = [];
+    const newPageArgs: unknown[] = [];
+    let launches = 0;
+    let newPages = 0;
+    let closes = 0;
+    const loader = async () => ({
+      chromium: {
+        launch: async () => {
+          launches++;
+          return {
+            newPage: async (pageOpts: unknown) => {
+              newPages++;
+              newPageArgs.push(pageOpts);
+              return {
+                goto: async () => {},
+                waitForTimeout: async () => {},
+                evaluate: async (fn: unknown) => {
+                  evaluates.push(fn);
+                  return dispatch(fn);
+                },
+              };
+            },
+            close: async () => {
+              closes++;
+            },
+          };
+        },
+      },
+    });
+    return { loader, evaluates, newPageArgs, counts: () => ({ launches, newPages, closes }) };
+  }
+
+  it("one launch, two snippet evaluates (motion first, census second), one close", async () => {
+    const fake = fakeLoader((fn) => {
+      if (fn === MOTION_SNIPPET) return scan; // reuse the reduceScan fixture
+      if (fn === SCROLL_CENSUS_SNIPPET) return scrollScan;
+      return undefined; // preScroll's scroll helper evaluate
+    });
+    const dna = await captureMotionDnaUnified("https://example.com", { loader: fake.loader });
+    expect(fake.counts()).toEqual({ launches: 1, newPages: 1, closes: 1 });
+    expect(fake.evaluates).toHaveLength(3);
+    expect(fake.evaluates[1]).toBe(MOTION_SNIPPET);
+    expect(fake.evaluates[2]).toBe(SCROLL_CENSUS_SNIPPET);
+    // Existing MotionDna shape survives + summary appended.
+    expect(dna.stack.libs).toEqual(["gsap", "scrolltrigger", "lenis"]);
+    expect(dna.scroll.triggerCount).toBe(5);
+    expect(dna.censusSummary).toBeDefined();
+  });
+
+  it("censusSummary: counts verbatim from the census; scrubRatio/pinCount live only in dna.scroll", async () => {
+    const fake = fakeLoader((fn) => {
+      if (fn === MOTION_SNIPPET) return scan;
+      if (fn === SCROLL_CENSUS_SNIPPET) return scrollScan;
+      return undefined;
+    });
+    const dna = await captureMotionDnaUnified("https://example.com", { loader: fake.loader });
+    const s = dna.censusSummary!;
+    // All 7 trigger sources, tallied per reduceScrollCensus (smil counts
+    // selectors even when no anim row carries the trigger).
+    expect(Object.keys(s.counts).sort()).toEqual([
+      "css-keyframe", "css-scroll-timeline", "css-view-timeline",
+      "data-attr", "gsap-scrolltrigger", "smil", "unknown",
+    ]);
+    expect(s.counts["gsap-scrolltrigger"]).toBe(1);
+    expect(s.counts["css-keyframe"]).toBe(1);
+    expect(s.counts.smil).toBe(1);
+    expect(s.counts.unknown).toBe(1);
+    // Slimmed (v1.12 dev reshape): the summary carries counts ONLY — runtime
+    // scrub/pin truth stays in dna.scroll, one source per response.
+    expect(Object.keys(s).sort()).toEqual(["counts"]);
+  });
+
+  it("supports the census opts contract: reducedMotion reaches the page context", async () => {
+    const fake = fakeLoader((fn) => {
+      if (fn === MOTION_SNIPPET) return scan;
+      if (fn === SCROLL_CENSUS_SNIPPET) return scrollScan;
+      return undefined;
+    });
+    await captureMotionDnaUnified("https://example.com", {
+      loader: fake.loader,
+      reducedMotion: true,
+      viewport: "mobile",
+      waitStrategy: "networkidle",
+    });
+    const pageOpts = fake.newPageArgs[0] as {
+      viewport: { width: number; height: number };
+      reducedMotion?: string;
+      deviceScaleFactor?: number;
+    };
+    expect(pageOpts.reducedMotion).toBe("reduce");
+    expect(pageOpts.viewport).toEqual({ width: 390, height: 844 });
+    expect(pageOpts.deviceScaleFactor).toBe(3);
+  });
+
+  it("error contract: rejects like captureMotionDna and still closes the browser", async () => {
+    const fake = fakeLoader((fn) => {
+      if (fn === MOTION_SNIPPET) throw new Error("boom");
+      return undefined;
+    });
+    await expect(captureMotionDnaUnified("https://example.com", { loader: fake.loader })).rejects.toThrow("boom");
+    expect(fake.counts().closes).toBe(1);
   });
 });
