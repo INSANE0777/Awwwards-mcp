@@ -211,15 +211,26 @@ at. Run them BEFORE recording - then record only what they can't express:
   offender in the evidence. Use it as the "is my build heavy" instrument
   before polishing, not only at the end.
 - `analyze_scroll_map` - per-element scroll census: which elements animate,
-  their triggers (scroll/pin/scrub), durations, easings. This is the motion
+  their triggers (scroll/pin/scrub), durations, easings — now with real
+  VALUES: per-anim keyframe matrices (from→to like `translateY(56px) → 0`)
+  and a `gsapTriggers` array per site (compiled pixel `startPx`/`endPx`,
+  live `progress`, tween vars such as `stagger: 0.09`). This is the motion
   inventory video would take 10 minutes of scrubbing to approximate.
 - `analyze_hover_census` - hover rules + computed-style diffs with transition
-  timing, no recording needed.
+  timing, no recording needed. Each sample also records animations DURING
+  hover (`activeAnims` + in-flight transform trail), catching event-driven
+  tweens that don't exist at rest.
 - `get_motion_dna` - the site's motion vocabulary in one call: libraries,
   easing tokens, duration quartiles. Feeds a rebuild's type scale directly.
 - `capture_pose_3d` - WebGL/canvas heroes, which screen recording captures
   worst (flat pixels of a 3D scene). Pose grids + `build_pose_stub` give the
   camera path instead.
+- `analyze_bundle` - bundle forensics when the evidence can't name a
+  mechanism: fetches the site's script chunks (≤40, 1 req/s, saved locally),
+  greps your keywords, optionally de-obfuscates with webcrack if installed.
+  When the census says WHAT animates but not HOW (e.g. an on-hover
+  letter-swap driven by imperative tweens), this reads the mechanism from
+  the site's own bundle.
 
 Video keeps what data cannot express: feel, choreography, sequencing, where
 the eye goes. The study order is: censuses first, recording second, then

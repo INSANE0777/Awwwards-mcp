@@ -140,7 +140,15 @@ not by re-opening sections unless a band regressed.
   ~2 min per call.
 - `capture_pose_3d` — camera path for shared-canvas units (step 0).
 - `analyze_scroll_map` / `analyze_hover_census` - per-section motion
-  census to build from.
+  census to build from. `analyze_scroll_map` rows now carry keyframe
+  value-pairs and a site-level `gsapTriggers` list (numeric pixel
+  start/end, live progress, tween vars) — build from measured values,
+  not invented ones. Hover samples include animations captured DURING
+  the hover (`activeAnims`), which is how event-driven tweens get seen.
 - `build_gsap_stub` - turns the captured censuses into a runnable
   GSAP+ScrollTrigger stub (durations, easings, scrub/pin, camera from
   `capture_pose_3d`, reduced-motion guard) — step 2's motion wiring, generated.
+- `analyze_bundle` - mechanism recovery (step 2 escape hatch): when a
+  section's effect can't be explained from the census evidence, grep the
+  section site's script bundle for mechanism keywords; the censuses say
+  WHAT animates, the bundle says HOW.

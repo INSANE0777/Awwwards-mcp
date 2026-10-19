@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-10-18",
+  "updated": "2026-10-19",
   "description": "Techniques the awwwards skill loop can use to understand websites — per domain. Grown by the skill-memory flywheel: a finding that proposes a better technique gets promoted here by a human PR. Each entry: id, domain, when (when to use it), how (concrete steps/commands), source (where it came from).",
   "domains": {
     "video-understanding": {
@@ -103,6 +103,16 @@
             "Read the perf evidence line (e.g. 'perf: fps=30 dropped=176 longTasks=0 thrash=0') and the anti-patterns line ('worst: blur-heavy') - fix the named property, not the score"
           ],
           "source": "aegon.dev composition port; E2E-verified on neutomni.com 2026-10 (ours)"
+        },
+        {
+          "id": "evidence-to-bundle-fallback",
+          "when": "When the censuses answer WHAT animates but not HOW an effect works - e.g. on-hover letter swaps or imperative GSAP tweens created per pointer-move, which do not exist at rest for getAnimations to see.",
+          "how": [
+            "analyze_bundle (MCP): fetches the page once, downloads its script chunks (bounded: 40 chunks, 10MB, 1 req/s) - script srcs, inline scripts, and modulepreload/preload hints - saves them locally and greps your keywords (class names from the live DOM, effect-name guesses, mouseenter/pointermove)",
+            "Read the matched chunk previews to recover the mechanism (e.g. attachLetterSwap: elementFromPoint + direction from clientX delta + a 3-step timeline), then reimplement against your own DOM - rebuild the pattern, never ship their code",
+            "Optional: npm i -g webcrack de-obfuscates and unpacks chunks into per-module files (worktree: lazy optional dep, tool degrades to raw chunks + hint without it)"
+          ],
+          "source": "Harness live site letter-swap recovery + analyze_bundle E2E on the same site (awwwards E2E 2026-10, ours)"
         }
       ]
     },

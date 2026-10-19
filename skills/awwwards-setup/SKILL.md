@@ -69,6 +69,9 @@ defaults" is a valid answer:
    If yes, run that install now (it is one-time, safe to re-run). If no,
    skip and note that the capture tools will error until installed. Store
    as `"capturesEnabled": true | false`.
+   Optional extra for bundle forensics: `npm install -g webcrack`
+   enables `analyze_bundle`'s de-obfuscation/unpack mode; without it the
+   tool still fetches, saves, and keyword-greps raw chunks.
 
 4. **Local index** — `search_sites` works immediately, but builds depth by
    polite live scraping (~31 sites per page). The local index (~4 minutes,
