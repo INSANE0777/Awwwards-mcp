@@ -91,6 +91,12 @@ Iterate on section N until its band passes (typically score ≥ the
 target you set up front — B+ per the audit doctrine, or "band beat
 last iteration"). Then stop touching it.
 
+The evidence lines carry the port's instrumented checks: `perf: fps=…
+dropped=… longTasks=…` (measured in a real browser) and `anti-patterns: N
+(worst: …)`. If perf shows dropped frames, the section's animation weight is
+the usual cause — transitioning `filter: blur`, infinite loops, or animating
+layout properties. Fix the prop, not the score.
+
 **Why the score gate matters:** section-by-section without a verify
 gate is just chunked guessing. The band score is the loop's contract —
 it converts "looks close" into a number that either passes or names
@@ -128,7 +134,10 @@ not by re-opening sections unless a band regressed.
 
 - `awwwards-motion-study` — the per-section motion recipe (record →
   inventory → build → re-record).
-- `verify_build` — the per-band score gate (steps 3 and 5).
+- `verify_build` — the per-band score gate (steps 3 and 5); evidence now
+  includes measured perf (fps, dropped frames, long tasks) and anti-pattern
+  counts from instrumented live probes. Runs a real browser — expect
+  ~2 min per call.
 - `capture_pose_3d` — camera path for shared-canvas units (step 0).
 - `analyze_scroll_map` / `analyze_hover_census` - per-section motion
   census to build from.

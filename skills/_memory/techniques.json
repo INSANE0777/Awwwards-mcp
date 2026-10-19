@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-19",
+  "updated": "2026-10-18",
   "description": "Techniques the awwwards skill loop can use to understand websites — per domain. Grown by the skill-memory flywheel: a finding that proposes a better technique gets promoted here by a human PR. Each entry: id, domain, when (when to use it), how (concrete steps/commands), source (where it came from).",
   "domains": {
     "video-understanding": {
@@ -94,6 +94,15 @@
             "This distinguishes ScrollTrigger scrub:true from scrub-timeline + toggleActions — the #1 rebuild mistake"
           ],
           "source": "GSAP ScrollTrigger docs pattern (ours, gsap-scrolltrigger skill)"
+        },
+        {
+          "id": "instrumented-build-verify",
+          "when": "When a build passes visually but feels heavy, or before shipping any animated section.",
+          "how": [
+            "verify_build (MCP) now instruments the BUILD side: a real-browser probe measures fps, dropped frames, long tasks and layout thrash, and an anti-pattern scan flags transitioning blur, infinite loops, animated layout properties and transition:all",
+            "Read the perf evidence line (e.g. 'perf: fps=30 dropped=176 longTasks=0 thrash=0') and the anti-patterns line ('worst: blur-heavy') - fix the named property, not the score"
+          ],
+          "source": "aegon.dev composition port; E2E-verified on neutomni.com 2026-10 (ours)"
         }
       ]
     },

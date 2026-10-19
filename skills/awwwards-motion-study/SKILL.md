@@ -204,6 +204,12 @@ at. Run them BEFORE recording - then record only what they can't express:
   browser. Knowing "this is Webflow + Tailwind" up front tells you which
   parts of the rebuild are conventions you can copy-minded vs. runtime magic
   to re-instrument.
+- `verify_build` (instrumented) - beyond band/motion scoring it now runs a
+  real-browser perf probe on the BUILD (fps, dropped frames, long tasks,
+  layout thrash) plus an anti-pattern scan (transitioning blur, infinite
+  loops, animated layout properties, transition:all) and names the worst
+  offender in the evidence. Use it as the "is my build heavy" instrument
+  before polishing, not only at the end.
 - `analyze_scroll_map` - per-element scroll census: which elements animate,
   their triggers (scroll/pin/scrub), durations, easings. This is the motion
   inventory video would take 10 minutes of scrubbing to approximate.
@@ -219,7 +225,10 @@ Video keeps what data cannot express: feel, choreography, sequencing, where
 the eye goes. The study order is: censuses first, recording second, then
 reconcile - anything the video shows that the census missed is a finding, not
 a redundancy. When the study feeds a rebuild, close the loop with
-`verify_build` (motion fingerprint + band compare) instead of eyeballing —
+`verify_build` (motion fingerprint + band compare + measured perf and
+anti-pattern evidence — expect ~2 min; the evidence line names dropped-frame
+counts and the worst anti-pattern, e.g. `anti-patterns: 23 (worst: blur-heavy)`)
+instead of eyeballing —
 and turn the motion inventory into starting code with `build_gsap_stub`
 (feed it the scroll census + optional pose grid; it emits a runnable
 GSAP+ScrollTrigger stub with the captured durations, easings, scrub/pin, a
