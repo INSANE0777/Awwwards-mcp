@@ -1,12 +1,21 @@
 // Pure verify-build layer: motion fingerprinting, band comparison, verdict.
-// Zero runtime imports (mirrors easings.ts) so tests and later server.ts
+// No static runtime imports (mirrors easings.ts) so tests and later server.ts
 // wiring can pull this in without Playwright or node deps. The fingerprint
 // string is the ONLY interchange format: motionDiffScore re-parses it, so
 // caller and verifier don't need to share an object type.
+//
+// Aegon port (aegon-mcp MIT — A:\Motion; plan 2026-10-19 Task 3): a
+// best-effort build-side EVIDENCE pass appends two trailing evidence lines —
+// measured runtime perf (perf-live.ts) + static anti-patterns
+// (audit-rules.ts) — evidence only: any failure degrades to one line and the
+// score/verdict math above is untouched. Defaults lazy-import like the
+// structure/scroll/hover defaults; offline tests inject fakes.
 import type { PageBand, PageStructure, WaitStrategy } from "./structure.js";
 import type { ScrollCensus } from "./census.js";
 import type { HoverCensus } from "./hover-census.js";
 import type { ViewportName } from "./viewport.js";
+import type { PerfMeasurement } from "./perf-live.js";
+import type { AntiPatternFinding } from "./audit-rules.js";
 
 export interface MotionCensusInput {
   counts: Record<string, number>;
@@ -178,6 +187,87 @@ type VerifyStructureFn = (
 type VerifyScrollFn = (url: string) => Promise<ScrollCensus | { error: string }>;
 type VerifyHoverFn = (url: string) => Promise<HoverCensus | { error: string }>;
 
+// Aegon-port evidence knobs (plan Task 3). Both produce evidence lines only —
+// never score/verdict inputs — and every failure degrades to a one-line note.
+type VerifyPerfFn = (
+  url: string,
+  opts?: { seconds?: number },
+) => Promise<PerfMeasurement | { error: string }>;
+type VerifyRulesFn = (
+  inputs: { html: string },
+) => AntiPatternFinding[] | Promise<AntiPatternFinding[]>;
+
+const num = (v: unknown): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : 0;
+
+// PerfMeasurement (perf-live.ts renamed aegon's collector fields) → evidence
+// line. Field mapping: fps→fps, droppedFrames→dropped, longTaskCount→
+// longTasks, layoutThrashCount→thrash.
+async function perfEvidenceLine(
+  perfFn: VerifyPerfFn,
+  buildUrl: string,
+): Promise<string> {
+  try {
+    // Plan default: small measured window, ≤10s.
+    const meas = await perfFn(buildUrl, { seconds: 6 });
+    if ("error" in meas) return `perf: not measured (${meas.error})`;
+    return `perf: fps=${num(meas.fps)} dropped=${num(meas.droppedFrames)} longTasks=${num(meas.longTaskCount)} thrash=${num(meas.layoutThrashCount)} (measured)`;
+  } catch (err) {
+    return `perf: not measured (${err instanceof Error ? err.message : String(err)})`;
+  }
+}
+
+// One polite fetch of the build page's raw HTML — stack.ts's pattern: neutral
+// UA, AbortController timer, {error} instead of throwing.
+function fetchBuildHtml(
+  fetchFn: typeof fetch,
+  url: string,
+): Promise<string | { error: string }> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 15_000);
+  return (async () => {
+    try {
+      const res = await fetchFn(url, {
+        headers: { "user-agent": "verify-build/1.0 (research tooling)" },
+        signal: ac.signal,
+      });
+      if (!res.ok) return { error: `HTTP ${res.status} fetching ${url}` };
+      return await res.text();
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+}
+
+// Static scan of the fetched build HTML: finding count + worst rule by
+// SEVERITY_WEIGHTS (findings without a severity — tier rows — weigh as INFO;
+// first finding wins ties). Every failure degrades to a note.
+async function rulesEvidenceLine(
+  fetchFn: typeof fetch,
+  rulesFn: VerifyRulesFn,
+  buildUrl: string,
+): Promise<string> {
+  try {
+    const html = await fetchBuildHtml(fetchFn, buildUrl);
+    if (typeof html !== "string")
+      return `anti-patterns: not scanned (${html.error})`;
+    const findings = await rulesFn({ html });
+    if (!Array.isArray(findings)) throw new Error("rulesFn returned a non-array");
+    if (findings.length === 0) return "anti-patterns: 0";
+    const { SEVERITY_WEIGHTS } = await import("./audit-rules.js");
+    let worst = findings[0];
+    for (const f of findings.slice(1)) {
+      if (SEVERITY_WEIGHTS[f.severity ?? "INFO"] > SEVERITY_WEIGHTS[worst.severity ?? "INFO"])
+        worst = f;
+    }
+    return `anti-patterns: ${findings.length} (worst: ${worst.ruleId})`;
+  } catch (err) {
+    return `anti-patterns: not scanned (${err instanceof Error ? err.message : String(err)})`;
+  }
+}
+
 export async function verifyBuild(
   args: {
     buildUrl: string;
@@ -188,6 +278,10 @@ export async function verifyBuild(
     structureFn?: VerifyStructureFn;
     scrollFn?: VerifyScrollFn;
     hoverFn?: VerifyHoverFn;
+    // Aegon-port evidence knobs (evidence-only; offline tests inject fakes).
+    perfFn?: VerifyPerfFn;
+    rulesFn?: VerifyRulesFn;
+    fetchFn?: typeof fetch;
   },
 ): Promise<VerifyReport | { error: string }> {
   // One shared wait/viewport profile for every capture of a verification run.
@@ -205,6 +299,15 @@ export async function verifyBuild(
     args.hoverFn ??
     ((url: string) =>
       import("./hover-census.js").then((m) => m.captureHoverCensus(url, opts)));
+  const perfFn =
+    args.perfFn ??
+    ((url: string, perfOpts?: { seconds?: number }) =>
+      import("./perf-live.js").then((m) => m.measureRuntime(url, perfOpts)));
+  const rulesFn =
+    args.rulesFn ??
+    ((inputs: { html: string }) =>
+      import("./audit-rules.js").then((m) => m.scanAntiPatterns(inputs)));
+  const fetchFn = args.fetchFn ?? fetch;
   try {
     // Structure scan first: bands gate everything downstream, so a page that
     // won't load is reported before any motion capture spends time on it.
@@ -254,6 +357,14 @@ export async function verifyBuild(
     const motionScore = motionDiffScore(refFp, buildFp);
     const { overall, verdict, evidence } = verdictFrom(bands.score, motionScore);
 
+    // Aegon-port evidence pass, AFTER the score-derived lines. Evidence only:
+    // never touches bands/motion/overall/verdict; every failure degrades to a
+    // one-line note. Runs only on this happy path — the early {error} returns
+    // above (structure/scroll) never reach it, so measurement is never
+    // started for a run that already failed.
+    const rulesLine = await rulesEvidenceLine(fetchFn, rulesFn, args.buildUrl);
+    const perfLine = await perfEvidenceLine(perfFn, args.buildUrl);
+
     return {
       buildUrl: args.buildUrl,
       referenceUrl: args.referenceUrl,
@@ -261,7 +372,15 @@ export async function verifyBuild(
       motion: { score: motionScore, refFingerprint: refFp, buildFingerprint: buildFp },
       overall,
       verdict,
-      evidence: [evidence[0], evidence[1], evidence[2], hoverEvidence],
+      // Display order per the plan: perf line first, then anti-patterns.
+      evidence: [
+        evidence[0],
+        evidence[1],
+        evidence[2],
+        hoverEvidence,
+        perfLine,
+        rulesLine,
+      ],
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
