@@ -11,6 +11,12 @@ export type ScrollTriggerSource =
   | "smil"
   | "unknown";
 
+/** One sampled keyframe: numeric-ish offset plus a few clamped props. */
+export interface KeyframeSample {
+  offset: number | null;
+  props: Record<string, string>;
+}
+
 /** One per-element animation row, as serialized from the page. */
 export interface RawAnim {
   selector: string;
@@ -23,6 +29,8 @@ export interface RawAnim {
   scrub: boolean;
   pin: boolean;
   svgStroke: boolean;
+  /** Bounded keyframe matrix — populated for the first ≤60 anim rows only. */
+  keyframes?: KeyframeSample[];
 }
 
 /** What page.evaluate(SCROLL_CENSUS_SNIPPET) serializes back from the page. */
@@ -51,6 +59,30 @@ const TRIGGER_SOURCES: ScrollTriggerSource[] = [
   "smil",
   "unknown",
 ];
+
+// PURE mirror of the sampleKeyframes helper inside SCROLL_CENSUS_SNIPPET (the
+// snippet must stay self-contained for page.evaluate serialization, so it
+// keeps an inline copy — keep the two in sync). Exported for unit tests.
+export function sampleKeyframes(kfs: any[]): KeyframeSample[] {
+  const KP = ["transform", "opacity", "filter", "clip-path", "color", "background-color", "width", "height"];
+  const picks = kfs.length <= 4 ? kfs : [kfs[0], kfs[Math.floor(kfs.length / 2)], kfs[kfs.length - 1]];
+  const out: KeyframeSample[] = [];
+  for (const kf of picks.slice(0, 4)) {
+    const props: Record<string, string> = {};
+    let n = 0;
+    for (const k of KP) {
+      if (n >= 4) break;
+      try {
+        if (kf[k] != null) {
+          props[k] = String(kf[k]).slice(0, 40);
+          n++;
+        }
+      } catch {}
+    }
+    out.push({ offset: typeof kf.offset === "number" ? kf.offset : null, props });
+  }
+  return out;
+}
 
 // Runs IN THE PAGE via page.evaluate. One row per element animation in
 // doc.getAnimations(), plus native CSS scroll/view timelines and SMIL
@@ -150,10 +182,34 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
     return { trigger: "css-keyframe", scrub: false, pin: false };
   }
 
+  // Keyframe matrix sampling: first/mid/last ≤4 frames, ≤4 priority props
+  // each, values clamped to 40 chars — keeps the serialized scan bounded.
+  function sampleKeyframes(kfs: any[]): KeyframeSample[] {
+    const KP = ["transform", "opacity", "filter", "clip-path", "color", "background-color", "width", "height"];
+    const picks = kfs.length <= 4 ? kfs : [kfs[0], kfs[Math.floor(kfs.length / 2)], kfs[kfs.length - 1]];
+    const out: KeyframeSample[] = [];
+    for (const kf of picks.slice(0, 4)) {
+      const props: Record<string, string> = {};
+      let n = 0;
+      for (const k of KP) {
+        if (n >= 4) break;
+        try {
+          if (kf[k] != null) {
+            props[k] = String(kf[k]).slice(0, 40);
+            n++;
+          }
+        } catch {}
+      }
+      out.push({ offset: typeof kf.offset === "number" ? kf.offset : null, props });
+    }
+    return out;
+  }
+
   // Pass 1: element animations from doc.getAnimations().
   try {
     const list = doc.getAnimations ? doc.getAnimations() : [];
     const seen = new Set<unknown>();
+    let kfCount = 0; // rows that got a matrix — harvest cap: 60
     for (const a of list.slice(0, 200)) {
       try {
         const effect = a?.effect;
@@ -176,6 +232,15 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
         const delayMs = typeof timing?.delay === "number" ? timing.delay : null;
         const easing = timing?.easing && timing.easing !== "ease" ? String(timing.easing) : null;
         const cls = classify(a, target);
+        // Keyframe matrix on the first 60 rows only — reuses the already
+        // fetched `keyframes` from the props pass (no second getKeyframes).
+        let matrix: KeyframeSample[] | undefined;
+        if (kfCount < 60 && keyframes.length > 0) {
+          try {
+            matrix = sampleKeyframes(keyframes);
+            kfCount++;
+          } catch {}
+        }
         anims.push({
           selector: selPath(target),
           tag: String(target.tagName || "*").toLowerCase(),
@@ -189,6 +254,7 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
           svgStroke: props.some(function (p: string) {
             return p.startsWith("stroke-dash");
           }),
+          ...(matrix ? { keyframes: matrix } : {}),
         });
       } catch {}
     }
