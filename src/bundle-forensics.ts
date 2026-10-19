@@ -66,7 +66,12 @@ export async function captureBundleForensics(
 
     // Page is the hard precondition: without its HTML there is no capture,
     // so unlike chunk failures this propagates to the { error } contract.
-    const pageRes = await fetched(pageUrl, { headers: { "User-Agent": BUNDLE_UA } });
+    // Same 15s AbortController timeout as chunks — undici's ~300s default
+    // would let one hung page stall the whole capture.
+    const pageAc = new AbortController();
+    const pageTimer = setTimeout(() => pageAc.abort(), CHUNK_TIMEOUT_MS);
+    const pageRes = await fetched(pageUrl, { signal: pageAc.signal, headers: { "User-Agent": BUNDLE_UA } })
+      .finally(() => clearTimeout(pageTimer));
     if (!pageRes.ok) return { error: `HTTP ${pageRes.status} for ${pageUrl}` };
     const pageText = await pageRes.text();
 

@@ -1,7 +1,11 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { captureBundleForensics } from "../src/bundle-forensics.js";
+import { createHandlers } from "../src/server.js";
+import { AwwwardsClient } from "../src/awwwards.js";
+import { Cache } from "../src/cache.js";
 
 const PAGE = "https://site.test/index.html";
 const pageOrigin = "https://site.test";
@@ -20,6 +24,11 @@ const fakeFetchMap = (map: Record<string, string>) => async (url: string) => {
 // Default outDirs are throwaway mkdtemp dirs — remove the ones a report
 // actually handed back.
 const cleanup: string[] = [];
+const cacheDir = () => {
+  const d = mkdtempSync(join(tmpdir(), "awwwards-bf-"));
+  cleanup.push(d);
+  return d;
+};
 afterEach(() => {
   for (const d of cleanup.splice(0)) rmSync(d, { recursive: true, force: true });
 });
@@ -139,6 +148,21 @@ describe("captureBundleForensics", () => {
     expect(rep.error).toContain("network down");
   });
 
+  // Page-fetch hardening: the page fetch must carry the same 15s signal as
+  // chunk fetches (offline proof = signal is wired; timing is undici's job).
+  it("passes an AbortSignal to the page fetch", async () => {
+    let sawSignal = false;
+    const fetchFn = async (_url: string, init?: RequestInit) => {
+      sawSignal = init?.signal instanceof AbortSignal;
+      return new Response("<html></html>", { status: 200 });
+    };
+    const rep = await captureBundleForensics(PAGE, { fetchFn });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(sawSignal).toBe(true);
+  });
+
   it("stops and warns when a chunk would exceed maxTotalBytes", async () => {
     const B2 = `${pageOrigin}/b.js`;
     const map: Record<string, string> = {
@@ -157,5 +181,49 @@ describe("captureBundleForensics", () => {
     expect(rep.chunkCount).toBe(1);
     expect(rep.totalBytes).toBe(5000);
     expect(rep.warnings.join("\n")).toContain("maxTotalBytes");
+  });
+});
+
+describe("analyze_bundle handler", () => {
+  it("DI happy path: fake bundleFn report → JSON text with matches + outDir, args passed through", async () => {
+    const seen: Array<{ url: string; opts?: { keywords?: string[]; maxChunks?: number } }> = [];
+    const report = {
+      url: PAGE,
+      host: "site.test",
+      outDir: join("tmp", "chunks-xyz"),
+      chunkCount: 1,
+      totalBytes: 10,
+      chunks: [{ index: 0, url: A_JS, bytes: 10, sha1: "a".repeat(40), path: join("tmp", "0-a.js") }],
+      matches: [
+        { chunk: 0, url: A_JS, line: 3, preview: "...attachLetterSwap(i, l)...", keyword: "attachLetterSwap" },
+      ],
+      warnings: [],
+      unpacked: false,
+    };
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(cacheDir()),
+      bundleFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return report;
+      },
+    });
+    const res = await h.analyze_bundle({ url: PAGE, keywords: ["attachLetterSwap"], maxChunks: 5 });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual([{ url: PAGE, opts: { keywords: ["attachLetterSwap"], maxChunks: 5 } }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.matches).toEqual(report.matches);
+    expect(parsed.outDir).toBe(report.outDir);
+  });
+
+  it("surfaces a bundleFn { error } as isError text", async () => {
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(cacheDir()),
+      bundleFn: async () => ({ error: "HTTP 404 for https://site.test/index.html" }),
+    });
+    const res = await h.analyze_bundle({ url: PAGE });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("HTTP 404");
   });
 });
