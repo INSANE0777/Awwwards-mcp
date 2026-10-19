@@ -185,6 +185,35 @@ describe("verifyBuild orchestrator", () => {
     reducedMotion: false,
   });
 
+  // The aegon evidence-pass defaults would fetch the build URL and launch
+  // Chrome, so every verifyBuild call here opts into offline fakes.
+  const okFetch =
+    (body: string): typeof fetch =>
+    (async () => ({ ok: true, status: 200, text: async () => body })) as unknown as typeof fetch;
+  const offlineEvidence = {
+    perfFn: async () => ({ error: "skipped in fixture" }),
+    rulesFn: () => [],
+    fetchFn: okFetch(""),
+  };
+  const perfMeasurement = () => ({
+    seconds: 6,
+    frames: 360,
+    fps: 58,
+    droppedFrames: 4,
+    worstFrameMs: 41,
+    longTaskCount: 2,
+    longTaskMaxMs: 64,
+    longAnimationFrameCount: 1,
+    longAnimationFrameMaxBlockingMs: 33,
+    layoutThrashCount: 3,
+    measureBeforeCompositeCount: 5,
+    layoutReads: 40,
+    styleWrites: 12,
+    scrollListeners: [] as Array<{ type: string; passive: boolean }>,
+    animationsAtEnd: 0,
+    chromePath: "fake-chrome",
+  });
+
   it("scores an identical build: bands matched, verdict in pass/warn/fail, evidence, fingerprints", async () => {
     let hoverCalls = 0;
     const report = await verifyBuild({
@@ -196,6 +225,7 @@ describe("verifyBuild orchestrator", () => {
         hoverCalls++;
         return hoverCensus();
       },
+      ...offlineEvidence,
     });
     expect("error" in report).toBe(false);
     if ("error" in report) return;
@@ -220,6 +250,7 @@ describe("verifyBuild orchestrator", () => {
       structureFn: async () => ({ error: "nope" }),
       scrollFn,
       hoverFn,
+      ...offlineEvidence,
     });
     expect("error" in report).toBe(true);
     if (!("error" in report)) return;
@@ -234,6 +265,7 @@ describe("verifyBuild orchestrator", () => {
       structureFn: async () => refStruct(),
       scrollFn: async () => ({ error: "playwright missing" }),
       hoverFn: async () => hoverCensus(),
+      ...offlineEvidence,
     });
     expect("error" in report).toBe(true);
     if (!("error" in report)) return;
@@ -247,11 +279,125 @@ describe("verifyBuild orchestrator", () => {
       structureFn: async () => refStruct(),
       scrollFn: async () => scrollCensus(),
       hoverFn: async () => hoverCensus(),
+      ...offlineEvidence,
     });
     expect("error" in report).toBe(false);
     if ("error" in report) return;
     // hero matched by label; footer matched too; nothing lost in refOnly.
     expect(report.bands.matched).toEqual(["hero", "footer"]);
     expect(report.bands.refOnly).toEqual([]);
+  });
+
+  it("appends measured perf + anti-pattern evidence after the score-derived lines", async () => {
+    const rulesFn = () => [
+      { ruleId: "blur-heavy", severity: "HIGH" as const, message: "Heavy blur", why: "w", improvements: "i", source: "css" as const },
+      { ruleId: "transition-all", severity: "MEDIUM" as const, message: "all", why: "w", improvements: "i", source: "html" as const },
+    ];
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => scrollCensus(),
+      hoverFn: async () => hoverCensus(),
+      perfFn: async () => perfMeasurement(),
+      rulesFn,
+      fetchFn: okFetch("<html><body>build</body></html>"),
+    });
+    expect("error" in report).toBe(false);
+    if ("error" in report) return;
+    expect(report.evidence).toHaveLength(6);
+    expect(report.evidence.slice(0, 4)).toEqual([
+      "Bands: 100/100 similarity",
+      "Motion: 100/100 fingerprint similarity",
+      "Overall: 100/100 → PASS",
+      "Hover: reference 0 samples, build 0 samples (presence only)",
+    ]);
+    // Field mapping (perf-live renames): fps→fps, droppedFrames→dropped,
+    // longTaskCount→longTasks, layoutThrashCount→thrash.
+    expect(report.evidence[4]).toBe("perf: fps=58 dropped=4 longTasks=2 thrash=3 (measured)");
+    // HIGH (12) outranks MEDIUM (5) → worst rule id wins.
+    expect(report.evidence[5]).toBe("anti-patterns: 2 (worst: blur-heavy)");
+  });
+
+  it("evidence failures degrade to notes; score/verdict/prior evidence byte-identical", async () => {
+    const common = {
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => scrollCensus(),
+      hoverFn: async () => hoverCensus(),
+    };
+    const control = await verifyBuild({ ...common, ...offlineEvidence });
+    const degraded = await verifyBuild({
+      ...common,
+      perfFn: async () => ({ error: "no chrome" }),
+      rulesFn: () => {
+        throw new Error("rules blew up");
+      },
+      fetchFn: okFetch("<html></html>"),
+    });
+    expect("error" in control).toBe(false);
+    expect("error" in degraded).toBe(false);
+    if ("error" in control || "error" in degraded) return;
+    // Control equality: the pre-existing score/verdict/evidence is untouched.
+    expect(degraded.overall).toBe(control.overall);
+    expect(degraded.verdict).toBe(control.verdict);
+    expect(degraded.evidence.slice(0, 4)).toEqual(control.evidence.slice(0, 4));
+    // Hard-pinned literal = the pre-change values for this fixture.
+    expect(degraded.evidence.slice(0, 4)).toEqual([
+      "Bands: 100/100 similarity",
+      "Motion: 100/100 fingerprint similarity",
+      "Overall: 100/100 → PASS",
+      "Hover: reference 0 samples, build 0 samples (presence only)",
+    ]);
+    // Both degrade lines replace the success lines, in the same slots.
+    expect(degraded.evidence[4]).toBe("perf: not measured (no chrome)");
+    expect(degraded.evidence[5]).toBe("anti-patterns: not scanned (rules blew up)");
+  });
+
+  it("a failed build-page fetch degrades only the anti-patterns line", async () => {
+    const statusFetch =
+      (status: number): typeof fetch =>
+      (async () => ({ ok: status < 400, status, text: async () => "" })) as unknown as typeof fetch;
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => refStruct(),
+      scrollFn: async () => scrollCensus(),
+      hoverFn: async () => hoverCensus(),
+      perfFn: async () => perfMeasurement(),
+      rulesFn: () => {
+        throw new Error("rulesFn must not be called — fetch failed first");
+      },
+      fetchFn: statusFetch(503),
+    });
+    expect("error" in report).toBe(false);
+    if ("error" in report) return;
+    expect(report.evidence[4]).toBe("perf: fps=58 dropped=4 longTasks=2 thrash=3 (measured)");
+    expect(report.evidence[5]).toBe("anti-patterns: not scanned (HTTP 503 fetching https://build.test)");
+  });
+
+  it("early structural error short-circuits before the evidence pass runs", async () => {
+    let perfCalls = 0;
+    let rulesCalls = 0;
+    const report = await verifyBuild({
+      buildUrl: "https://build.test",
+      referenceUrl: "https://ref.test",
+      structureFn: async () => ({ error: "nope" }),
+      scrollFn: async () => scrollCensus(),
+      hoverFn: async () => hoverCensus(),
+      perfFn: async () => {
+        perfCalls++;
+        return { error: "must not run" };
+      },
+      rulesFn: () => {
+        rulesCalls++;
+        return [];
+      },
+      fetchFn: okFetch(""),
+    });
+    expect("error" in report).toBe(true);
+    expect(perfCalls).toBe(0);
+    expect(rulesCalls).toBe(0);
   });
 });
