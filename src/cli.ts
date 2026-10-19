@@ -238,7 +238,7 @@ server.tool(
 
 server.tool(
   "get_motion_dna",
-  "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Live captures append a `censusSummary` block (per-source scroll-census counts, scrub ratio, pin count) from the same single launch. Serves the corpus first; live-captures unseen URLs (headless browser required).",
+  "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Live captures append a `censusSummary` block (per-source scroll-census counts) from the same single launch. Serves the corpus first; live-captures unseen URLs (headless browser required).",
   {
     url: z.string().url().describe("Absolute site URL"),
     recapture: z.boolean().default(false).describe("Force a fresh live capture even if a recent record exists"),

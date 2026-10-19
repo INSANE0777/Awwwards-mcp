@@ -129,7 +129,7 @@ describe("splitCollapsedBands", () => {
     expect(res).toHaveLength(2);
     // Small band: 2 in-range landmarks but height < 3000 → no split.
     expect(res[0].height).toBe(2999);
-    // Giant band: < 2 in-range landmarks → no split.
+    // Giant band: 2 valid in-range landmarks, but 2000px height fails the ≥3000px gate → no split.
     expect(res[1]).toEqual({ ...bands[1], index: 1 });
     expect(res.map((b) => b.offsetTop + b.height)).toEqual([2999, 4999]);
   });
