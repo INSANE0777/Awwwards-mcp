@@ -263,7 +263,7 @@ server.tool(
 
 server.tool(
   "analyze_hover_census",
-  ":hover interaction census of a live page: counts hover rules, samples up to 20 interactive elements, and reports which CSS properties change on hover with transition duration and easing. Use it to reproduce micro-interactions and verify interaction-state coverage. Runs on any URL — does not fetch awwwards.com.",
+  ":hover interaction census of a live page: counts hover rules, samples up to 20 interactive elements, and reports which CSS properties change on hover with transition duration and easing. Use it to reproduce micro-interactions and verify interaction-state coverage. On mobile the hover loop is skipped and a note is returned. Runs on any URL — does not fetch awwwards.com.",
   {
     url: z.string().url().describe("Absolute page URL to census"),
     // Inline optional enum, not waitStrategySchema: that schema's .default("load")
@@ -284,6 +284,8 @@ server.tool(
     url: z.string().url(),
     keywords: z.array(z.string().min(1)).max(20).optional().describe("grep these strings across chunks (e.g. class names, effect names)"),
     maxChunks: z.number().int().min(1).max(100).optional().describe("default 40"),
+    walkChunks: z.boolean().optional()
+      .describe("after the first pass, follow quoted same-origin .js refs inside fetched chunks and fetch up to 20 newly discovered ones (same budgets; adds seconds)"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_bundle(args))

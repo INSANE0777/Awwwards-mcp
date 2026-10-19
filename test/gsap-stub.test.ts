@@ -131,4 +131,62 @@ describe("buildGsapStub", () => {
     );
     expect(html.includes("eval(")).toBe(false);
   });
+
+  // B1: measured scrub curves (ScrubCurve in census.ts, field names copied verbatim).
+  describe("measured scrub curves", () => {
+    const curve = (over: Record<string, unknown> = {}) => ({
+      selector: ".hero",
+      startPx: 120,
+      endPx: 1500,
+      steps: [
+        { scrollY: 120, progress: 0, transform: "translateY(0px)" },
+        { scrollY: 800, progress: 0.5, transform: "translateY(60px)" },
+        // consecutive duplicate → collapsed into one .to()
+        { scrollY: 1500, progress: 1, transform: "translateY(60px)" },
+      ],
+      ...over,
+    });
+
+    it("emits a scrub timeline per curve with per-step measured .to() transforms", () => {
+      const html = buildGsapStub(
+        null,
+        census([anim({ selector: ".hero", scrub: true })], { scrubCurves: [curve()] }),
+      );
+      expect(html).toContain("// measured scrub curve: .hero 120->1500");
+      expect(html).toContain('scrub: true');
+      expect(html).toContain('.to(".hero", { transform: "translateY(0px)" })');
+      expect(html).toContain('.to(".hero", { transform: "translateY(60px)" })');
+      expect((html.match(/\.to\("\.hero"/g) ?? []).length).toBe(2);
+    });
+
+    it("supersedes the guessed census timeline when measured transforms exist", () => {
+      const html = buildGsapStub(
+        null,
+        census(
+          [anim({ selector: ".hero", scrub: true }), anim({ selector: ".strip" })],
+          { scrubCurves: [curve()] },
+        ),
+      );
+      // measured .hero + census .strip; the guessed scrub timeline is gone
+      expect((html.match(/gsap\.timeline/g) ?? []).length).toBe(2);
+      expect(html).toContain(".from(\".strip\"");
+      expect(html).not.toContain(".from(\".hero\"");
+    });
+
+    it("falls back to the census pattern when a curve has no measured transforms", () => {
+      const html = buildGsapStub(
+        null,
+        census([], { scrubCurves: [curve({ steps: [{ scrollY: 0, progress: 0, transform: null }] })] }),
+      );
+      expect(html).toContain("// measured scrub curve: .hero 120->1500");
+      expect(html).toContain('.from(".hero", { opacity: 0, y: 40 });');
+      expect(html).not.toContain('.to(".hero"');
+    });
+
+    it("is byte-identical when scrubCurves is absent or empty", () => {
+      const pack = census([anim()]);
+      expect(buildGsapStub(null, pack)).not.toContain("measured scrub curve");
+      expect(buildGsapStub(null, pack)).toBe(buildGsapStub(null, { ...pack, scrubCurves: [] }));
+    });
+  });
 });

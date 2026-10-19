@@ -27,6 +27,20 @@ const INLINE_CHUNK_CAP = 20;
 const UNPACK_CHUNK_CAP = 10;
 const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
 
+// Deep-walk bounds: ≤20 walk-discovered chunks per run is a hard cap on top
+// of maxChunks/maxTotalBytes. Ref pattern (plan-verbatim): a quoted 4..200
+// char body followed by ".js" — its lazy quantifier needs ≥4 non-quote chars
+// BEFORE the terminal ".js", so quoted bodies shorter than 7 chars ("/a.js")
+// never match. Longer real-world chunk names are the walk's normal diet.
+const WALK_CHUNK_CAP = 20;
+const WALK_REF_SRC = `["']([^"']{4,200}?\\.js)["']`;
+
+// Basename sanitized to the portable set; empty → "chunk". A trailing script
+// extension is stripped so the ".js" below isn't doubled ("/a.js" → "0-a.js",
+// not "0-a.js.js").
+const remoteBase = (u: string): string =>
+  basename(new URL(u).pathname).replace(/[^a-zA-Z0-9._-]/g, "").replace(/\.(js|mjs|cjs)$/i, "") || "chunk";
+
 export const UNPACK_HINT =
   "npm install -g webcrack — optional; de-obfuscates and unpacks script chunks into per-module files";
 
@@ -63,6 +77,10 @@ export interface BundleForensicsOpts {
   // is lazily imported at call time (optional dep — no hard dependency).
   unpackLoader?: () => Promise<any>;
   outDir?: string;
+  // Opt-in deep walk (default false → ZERO extra fetches): after the first
+  // pass, follow quoted same-origin .js refs found inside fetched chunk
+  // sources and fetch up to 20 newly discovered chunks under the same budgets.
+  walkChunks?: boolean;
 }
 
 export async function captureBundleForensics(
@@ -89,6 +107,21 @@ export async function captureBundleForensics(
       .finally(() => clearTimeout(pageTimer));
     if (!pageRes.ok) return { error: `HTTP ${pageRes.status} for ${pageUrl}` };
     const pageText = await pageRes.text();
+
+    // Remote-chunk fetch shared by the first pass and the walk: RateLimiter-
+    // gated, 15s AbortController timeout. Errors are handled per call site.
+    const fetchChunkText = async (chunkUrl: string): Promise<string> => {
+      await limiter.acquire();
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), CHUNK_TIMEOUT_MS);
+      try {
+        const res = await fetched(chunkUrl, { signal: ac.signal, headers: { "User-Agent": BUNDLE_UA } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.text();
+      } finally {
+        clearTimeout(timer);
+      }
+    };
 
     // One pass over <script>/<link> open tags keeps HTML appearance order
     // across the three sources: script srcs, inline scripts, and
@@ -170,6 +203,30 @@ export async function captureBundleForensics(
       }
     };
 
+    // Shared save+hash+grep for every chunk text source (first pass + walk).
+    // "over" means the byte budget would be exceeded (warning pushed); callers
+    // decide break-vs-continue.
+    const saveChunk = (text: string, label: string, base: string): "saved" | "over" | "failed" => {
+      try {
+        const bytes = Buffer.byteLength(text, "utf8");
+        if (bytes > maxTotalBytes - totalBytes) {
+          warnings.push(`skipped ${label}: would exceed maxTotalBytes (${maxTotalBytes})`);
+          return "over";
+        }
+        const ci = chunks.length;
+        const sha1 = createHash("sha1").update(text).digest("hex");
+        const path = join(outDir, `${ci}-${base}.js`);
+        writeFileSync(path, text, "utf8");
+        chunks.push({ index: ci, url: label, bytes, sha1, path });
+        totalBytes += bytes;
+        pushMatches(text, ci, label, "raw");
+        return "saved";
+      } catch (err) {
+        warnings.push(`skipped ${label}: ${msg(err)}`);
+        return "failed";
+      }
+    };
+
     let inlineNext = 0;
     let inlineCapWarned = false;
     for (const cand of targets) {
@@ -208,42 +265,61 @@ export async function captureBundleForensics(
         label = `inline:${inlineNext++}`;
         base = "inline";
       } else {
-        await limiter.acquire();
-        const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), CHUNK_TIMEOUT_MS);
         try {
-          const res = await fetched(cand.url, { signal: ac.signal, headers: { "User-Agent": BUNDLE_UA } });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          text = await res.text();
+          text = await fetchChunkText(cand.url);
         } catch (err) {
           warnings.push(`skipped ${cand.url}: ${msg(err)}`);
           continue;
-        } finally {
-          clearTimeout(timer);
         }
         label = cand.url;
-        // basename sanitized to the portable set; empty → "chunk". A trailing
-        // script extension is stripped so the ".js" below isn't doubled
-        // ("/a.js" → "0-a.js", not "0-a.js.js").
-        base =
-          basename(new URL(cand.url).pathname).replace(/[^a-zA-Z0-9._-]/g, "").replace(/\.(js|mjs|cjs)$/i, "") ||
-          "chunk";
+        base = remoteBase(cand.url);
       }
-      try {
-        const bytes = Buffer.byteLength(text, "utf8");
-        if (bytes > remaining) {
-          warnings.push(`skipped ${label}: would exceed maxTotalBytes (${maxTotalBytes})`);
+      // Byte budget exhausted — stop the whole pass (walk keeps skipping
+      // smaller discoveries instead, so one oversized chunk can't starve it).
+      const saved = saveChunk(text, label, base);
+      if (saved === "over") break;
+    }
+
+    // Opt-in deep chunk walk (walkChunks): quoted same-origin .js refs inside
+    // fetched chunk sources point at lazy-loaded chunks the page HTML never
+    // advertised. Discovered chunks join `chunks` (keyword-search + unpack-
+    // eligible) through the same limiter and budgets; the shared `seen` set
+    // makes cycles impossible, and ≤20 walk chunks is a hard cap per run.
+    let walkCount = 0;
+    if (opts.walkChunks === true) {
+      const queue: string[] = [];
+      const scanForRefs = (text: string): void => {
+        for (const m of text.matchAll(new RegExp(WALK_REF_SRC, "g"))) {
+          const abs = absolutize(m[1]);
+          // same origin as the page only; absolutize already deduped via `seen`
+          if (abs && new URL(abs).host === host) queue.push(abs);
+        }
+      };
+      for (const c of chunks) scanForRefs(readFileSync(c.path, "utf8"));
+      while (queue.length > 0 && walkCount < WALK_CHUNK_CAP) {
+        if (chunks.length >= maxChunks) {
+          warnings.push(`walk stopped: maxChunks budget (${maxChunks}) reached`);
           break;
         }
-        const ci = chunks.length;
-        const sha1 = createHash("sha1").update(text).digest("hex");
-        const path = join(outDir, `${ci}-${base}.js`);
-        writeFileSync(path, text, "utf8");
-        chunks.push({ index: ci, url: label, bytes, sha1, path });
-        totalBytes += bytes;
-        pushMatches(text, ci, label, "raw");
-      } catch (err) {
-        warnings.push(`skipped ${label}: ${msg(err)}`);
+        if (maxTotalBytes - totalBytes <= 0) {
+          warnings.push(`walk stopped: byte budget (${maxTotalBytes} bytes) reached`);
+          break;
+        }
+        const walkUrl = queue.shift() as string;
+        let text: string;
+        try {
+          text = await fetchChunkText(walkUrl);
+        } catch (err) {
+          warnings.push(`skipped walk chunk ${walkUrl}: ${msg(err)}`);
+          continue;
+        }
+        if (saveChunk(text, walkUrl, remoteBase(walkUrl)) === "saved") {
+          walkCount++;
+          scanForRefs(text); // refs discovered mid-walk join the queue (seen dedupes)
+        }
+      }
+      if (walkCount >= WALK_CHUNK_CAP && queue.length > 0) {
+        warnings.push(`walk cap (${WALK_CHUNK_CAP}) reached; ${queue.length} discovered chunk(s) left unfetched`);
       }
     }
 

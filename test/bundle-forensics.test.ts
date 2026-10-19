@@ -347,6 +347,97 @@ describe("universal extraction: inline scripts + preload hints", () => {
   });
 });
 
+describe("walkChunks (B3: opt-in deep chunk walk)", () => {
+  const B2_JS = `${pageOrigin}/b.js`;
+  const C_JS = `${pageOrigin}/c.js`;
+  // a.js references itself (already-fetched → no refetch) and two more chunks;
+  // b.js points back at a.js (cycle → seen-set) and on to c.js. Ref bodies
+  // stay ≥7 chars — the plan-pinned lazy regex can't see shorter ones.
+  const walkMap: Record<string, string> = {
+    [PAGE]: `<html><script src="/a.js"></script></html>`,
+    [A_JS]: `var self = "${A_JS}"; var next = "../b.js";`,
+    [B2_JS]: `var back = "${A_JS}"; var deeper = "../c.js";`,
+    [C_JS]: `terminal-marker(1);`,
+  };
+  const countingFetch = (map: Record<string, string>, calls: string[]) =>
+    async (url: string) => {
+      calls.push(url);
+      return fakeFetchMap(map)(url);
+    };
+
+  it("walks quoted same-origin refs once; self-refs and cycles stay safe; walk chunks are keyword-searched", async () => {
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(walkMap, calls),
+      keywords: ["terminal-marker"],
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // page + first pass, then exactly one extra fetch per discovered chunk
+    expect(calls).toEqual([PAGE, A_JS, B2_JS, C_JS]);
+    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, B2_JS, C_JS]);
+    // walk bytes are keyword-searched like the rest
+    expect(rep.matches.some((m) => m.url === C_JS && m.keyword === "terminal-marker")).toBe(true);
+    expect(rep.warnings).toEqual([]);
+  });
+
+  it("walkChunks absent → zero extra fetches (pin)", async () => {
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(walkMap, calls),
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(calls).toEqual([PAGE, A_JS]); // page + html-advertised chunks only
+    expect(rep.chunkCount).toBe(1);
+  });
+
+  it("walk cap is 20 discovered chunks per run", async () => {
+    // 2-digit padding keeps every ref body ≥7 chars (regex minimum above)
+    const wUrls = Array.from({ length: 25 }, (_, i) => `${pageOrigin}/w${String(i).padStart(2, "0")}.js`);
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: Array.from({ length: 25 }, (_, i) => `var p${i}="/w${String(i).padStart(2, "0")}.js";`).join(""),
+    };
+    for (const u of wUrls) map[u] = "z".repeat(60);
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(map),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(21); // 1 first-pass + hard cap 20
+    expect(rep.warnings.join("\n")).toContain("walk cap (20)");
+    expect(rep.warnings.join("\n")).toContain("5 discovered chunk(s) left unfetched");
+  });
+
+  it("walk fetches stay under maxTotalBytes (oversized discoveries skip with a walk-marked warning)", async () => {
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: "y".repeat(5000) + `var next="../b.js";`,
+      [B2_JS]: "z".repeat(5000),
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(map),
+      maxTotalBytes: 6000,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(1);
+    expect(rep.warnings.join("\n")).toContain("/b.js: would exceed maxTotalBytes");
+  });
+});
+
 describe("analyze_bundle handler", () => {
   it("DI happy path: fake bundleFn report → JSON text with matches + outDir, args passed through", async () => {
     const seen: Array<{ url: string; opts?: { keywords?: string[]; maxChunks?: number } }> = [];
@@ -388,5 +479,19 @@ describe("analyze_bundle handler", () => {
     const res = await h.analyze_bundle({ url: PAGE });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("HTTP 404");
+  });
+
+  it("passes walkChunks through to bundleFn opts", async () => {
+    let seenOpts: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean } | undefined;
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(cacheDir()),
+      bundleFn: async (_url, opts) => {
+        seenOpts = opts;
+        return { error: "short-circuit" };
+      },
+    });
+    await h.analyze_bundle({ url: PAGE, walkChunks: true, maxChunks: 3 });
+    expect(seenOpts).toEqual({ maxChunks: 3, walkChunks: true });
   });
 });

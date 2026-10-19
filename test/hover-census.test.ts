@@ -328,3 +328,29 @@ describe("ACTIVE_ANIMS_SNIPPET + hover L5 enrichment", () => {
     expect(result.samples.map((s) => s.selector)).toEqual(["hover-candidate-0"]);
   });
 });
+
+// B4: mobile honesty — touch-only viewports skip the hover interaction loop.
+describe("mobile hover honesty", () => {
+  it("skips the hover loop on mobile and returns the touch-only note", async () => {
+    const { loader, hoverSelectors } = harness();
+    const result = await captureHoverCensus("https://example.com", { loader, viewport: "mobile" });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.samples).toEqual([]);
+    expect(result.note).toBe("touch-only context — hover interactions skipped");
+    // counts still come from the rules snippet — the census stays honest
+    expect(result.hoverRuleCount).toBe(2);
+    expect(result.candidates).toBe(2);
+    // pointer events are never used: no page.hover call at all
+    expect(hoverSelectors).toEqual([]);
+  });
+
+  it("desktop output carries no note key (additive optional, byte-identical shape)", async () => {
+    const { loader } = harness();
+    const result = await captureHoverCensus("https://example.com", { loader });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect("note" in result).toBe(false);
+    expect(result.samples.length).toBe(1);
+  });
+});

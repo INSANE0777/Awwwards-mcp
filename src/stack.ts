@@ -58,7 +58,7 @@ export function detectFramework(html: string): FrameworkMatch {
   return { framework: "static", markers: [], confidence: "low" };
 }
 
-export function detectCss(html: string): CssMatch {
+export function detectCss(html: string, framework: string = detectFramework(html).framework): CssMatch {
   let count = 0;
   const markers: string[] = [];
   const seen = new Set<string>();
@@ -69,9 +69,14 @@ export function detectCss(html: string): CssMatch {
     }
   }
   const bs = BOOTSTRAP_MARKERS.filter((m) => html.includes(m));
-  if (count >= 8) return { css: "tailwind", markers, confidence: "high" };
+  // Webflow arbitration: Webflow's own functional classes (w-nav, w-*) fool
+  // utility density counting — both dogfoods misread a Webflow page as
+  // Tailwind "high". On Webflow pages the bar doubles (>=16 medium, >=32
+  // high) and Tailwind confidence caps at medium even when the count clears it.
+  const onWebflow = framework === "webflow";
+  if (count >= (onWebflow ? 32 : 8)) return { css: "tailwind", markers, confidence: onWebflow ? "medium" : "high" };
   if (bs.length >= 2) return { css: "bootstrap", markers: bs, confidence: "high" };
-  if (count >= 3) return { css: "tailwind", markers, confidence: "medium" };
+  if (count >= (onWebflow ? 16 : 3)) return { css: "tailwind", markers, confidence: "medium" };
   if (bs.length === 1) return { css: "bootstrap", markers: bs, confidence: "medium" };
   return { css: "custom", markers: [], confidence: "low" };
 }
@@ -89,7 +94,7 @@ export function collectLibs(motionDna: unknown): string[] {
 export function buildStack(input: { html?: string; motionDna?: unknown } = {}): StackFingerprint {
   const page = String(input.html ?? "");
   const fw = detectFramework(page);
-  const css = detectCss(page);
+  const css = detectCss(page, fw.framework);
   return {
     id: STACK_ID,
     framework: fw.framework,

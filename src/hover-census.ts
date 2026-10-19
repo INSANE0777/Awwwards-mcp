@@ -36,6 +36,8 @@ export interface HoverCensus {
   candidates: number;
   samples: HoverSample[];
   reducedMotion: boolean;
+  /** B4: touch-only viewports skip the hover loop (pointer events don't reliably fire); records why samples is empty. */
+  note?: string;
 }
 
 /** Serialized getComputedStyle row: the 13 watched props + transition metadata. */
@@ -321,6 +323,20 @@ export async function captureHoverCensus(
         rules: string[];
         candidates: string[];
       };
+      // Touch-only viewport (mobile): synthetic pointer hover doesn't reliably
+      // fire there, so the interaction loop is skipped entirely and the census
+      // says why instead of returning misleading sampleless counts.
+      if (contextOpts.hasTouch) {
+        return {
+          url,
+          capturedAt: Date.now(),
+          hoverRuleCount: scan.rules.length,
+          candidates: scan.rules.length,
+          samples: [],
+          reducedMotion: !!opts?.reducedMotion,
+          note: "touch-only context — hover interactions skipped",
+        };
+      }
       const samples: HoverSample[] = [];
       for (let i = 0; i < MAX_SAMPLES; i++) {
         let before: HoverStyleRow | null = null;

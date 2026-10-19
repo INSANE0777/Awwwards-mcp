@@ -149,3 +149,35 @@ describe("analyzeStack", () => {
     expect(src).toContain("new AbortController()");
   });
 });
+
+// B2: Webflow pages emit functional utility-like classes that fool density
+// counting, so the Tailwind bar doubles and Tailwind confidence caps at medium.
+describe("detectCss · webflow arbitration", () => {
+  const WEBFLOW_8 =
+    `<div class="flex flex-col grid grid-cols-2 bg-white bg-black text-[#111] flex-row">` +
+    `<script src="webflow.js"></script>`;
+
+  it("8 utilities on a webflow page are NOT tailwind-high (the false positive both dogfoods hit)", () => {
+    expect(detectCss(WEBFLOW_8)).toEqual({
+      css: "custom",
+      markers: expect.any(Array),
+      confidence: "low",
+    });
+  });
+
+  it("40 real utilities on a webflow page win tailwind at capped medium confidence", () => {
+    const html = `<div class="${"flex ".repeat(40)}"><script src="webflow.js"></script>`;
+    expect(detectCss(html)).toEqual({
+      css: "tailwind",
+      markers: expect.any(Array),
+      confidence: "medium",
+    });
+  });
+
+  it("buildStack routes the framework detection into the arbitration (no standalone rescan drift)", () => {
+    const s = buildStack({ html: WEBFLOW_8 });
+    expect(s.framework).toBe("webflow");
+    expect(s.css).toBe("custom");
+    expect(s.cssConfidence).toBe("low");
+  });
+});

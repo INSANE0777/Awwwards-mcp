@@ -122,7 +122,7 @@ export type StackFn = (
 // analyze_bundle: fetches a page + its script chunks (bounded), greps keywords.
 export type BundleFn = (
   url: string,
-  opts?: { keywords?: string[]; maxChunks?: number },
+  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean },
 ) => Promise<BundleReport | { error: string }>;
 
 // build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
@@ -267,6 +267,7 @@ export interface Handlers {
     url: string;
     keywords?: string[];
     maxChunks?: number;
+    walkChunks?: boolean;
   }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
   capture_component(args: {
@@ -1168,16 +1169,25 @@ export function createHandlers(deps: {
     url: string;
     keywords?: string[];
     maxChunks?: number;
+    walkChunks?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: bundle-forensics is only touched when the tool actually runs.
       const capture =
         deps.bundleFn ??
-        ((url: string, opts?: { keywords?: string[]; maxChunks?: number }) =>
+        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean }) =>
           import("./bundle-forensics.js").then((m) =>
-            m.captureBundleForensics(url, { keywords: opts?.keywords, maxChunks: opts?.maxChunks }),
+            m.captureBundleForensics(url, {
+              keywords: opts?.keywords,
+              maxChunks: opts?.maxChunks,
+              walkChunks: opts?.walkChunks,
+            }),
           ));
-      const result = await capture(args.url, { keywords: args.keywords, maxChunks: args.maxChunks });
+      const result = await capture(args.url, {
+        keywords: args.keywords,
+        maxChunks: args.maxChunks,
+        walkChunks: args.walkChunks,
+      });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };
     } catch (err) {
