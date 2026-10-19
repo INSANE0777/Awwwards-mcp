@@ -1,5 +1,6 @@
-// Bundle forensics: fetch a page's external <script src> chunks under hard
-// bounds (chunk count, total bytes, per-chunk timeout), save + hash them for
+// Bundle forensics: fetch a page's script chunks — external <script src>,
+// inline <script>, and modulepreload / preload-as-script link hints — under
+// hard bounds (chunk count, total bytes, per-chunk timeout), save + hash them for
 // later forensic passes, and keyword-search the raw chunk text. Chunk
 // failures degrade to warnings — a blocked or slow CDN can never fail the
 // capture. Optional unpack pass: when
@@ -18,6 +19,10 @@ export const MAX_CHUNKS = 40;
 const CHUNK_TIMEOUT_MS = 15_000;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_MATCHES = 40;
+// Inline-script bounds: captured whole (never sliced); larger ones and
+// everything beyond the cap are skipped with a warning.
+const INLINE_CHUNK_MAX = 200 * 1024;
+const INLINE_CHUNK_CAP = 20;
 
 const UNPACK_CHUNK_CAP = 10;
 const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
@@ -80,21 +85,48 @@ export async function captureBundleForensics(
     if (!pageRes.ok) return { error: `HTTP ${pageRes.status} for ${pageUrl}` };
     const pageText = await pageRes.text();
 
-    // External script srcs: absolutize, keep http(s) only, dedupe, appearance
-    // order. Inline scripts have no src attribute and never match the regex.
+    // One pass over <script>/<link> open tags keeps HTML appearance order
+    // across the three sources: script srcs, inline scripts, and
+    // modulepreload / preload-as-script hints (how Next/Astro/Remix
+    // advertise lazy chunks). Remote candidates share one dedupe set, so a
+    // URL advertised both ways becomes a single chunk.
     const seen = new Set<string>();
-    const srcs: string[] = [];
-    for (const m of pageText.matchAll(/<script[^>]*\ssrc=["']([^"']+)["']/gi)) {
+    const absolutize = (raw: string): string | null => {
       let abs: URL;
       try {
-        abs = new URL(m[1], pageUrl);
+        abs = new URL(raw, pageUrl);
       } catch {
-        continue; // malformed src — not a fetchable script
+        return null; // malformed ref — not a fetchable script
       }
-      if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
-      if (seen.has(abs.href)) continue;
+      if (abs.protocol !== "http:" && abs.protocol !== "https:") return null;
+      if (seen.has(abs.href)) return null;
       seen.add(abs.href);
-      srcs.push(abs.href);
+      return abs.href;
+    };
+    const targets: ({ kind: "remote"; url: string } | { kind: "inline"; code: string })[] = [];
+    for (const t of pageText.matchAll(/<(script|link)\b[^>]*>/gi)) {
+      const open = t[0];
+      const tagEnd = t.index + open.length;
+      if (t[1].toLowerCase() === "script") {
+        const src = /\ssrc=["']([^"']+)["']/i.exec(open)?.[1];
+        if (src !== undefined) {
+          const abs = absolutize(src);
+          if (abs) targets.push({ kind: "remote", url: abs });
+          continue;
+        }
+        // Inline script: text between this open tag and its closing tag.
+        const close = pageText.indexOf("</script", tagEnd);
+        if (close !== -1) targets.push({ kind: "inline", code: pageText.slice(tagEnd, close) });
+        continue;
+      }
+      // <link>: only modulepreload, or preload-as-script, is a script hint.
+      const href = /\shref=["']([^"']+)["']/i.exec(open)?.[1];
+      if (href === undefined) continue;
+      const rels = (/\srel=["']([^"']+)["']/i.exec(open)?.[1] ?? "").toLowerCase().split(/\s+/);
+      const as = (/\sas=["']([^"']+)["']/i.exec(open)?.[1] ?? "").toLowerCase();
+      if (!rels.includes("modulepreload") && !(rels.includes("preload") && as === "script")) continue;
+      const abs = absolutize(href);
+      if (abs) targets.push({ kind: "remote", url: abs });
     }
 
     const maxChunks = Math.min(100, Math.max(1, opts.maxChunks ?? MAX_CHUNKS));
@@ -107,9 +139,13 @@ export async function captureBundleForensics(
     const warnings: string[] = [];
     let totalBytes = 0;
 
-    for (const src of srcs) {
+    let inlineNext = 0;
+    let inlineCapWarned = false;
+    for (const cand of targets) {
       if (chunks.length >= maxChunks) {
-        warnings.push(`skipped ${src}: maxChunks budget (${maxChunks}) reached`);
+        warnings.push(
+          `skipped ${cand.kind === "remote" ? cand.url : "inline script"}: maxChunks budget (${maxChunks}) reached`,
+        );
         continue;
       }
       const remaining = maxTotalBytes - totalBytes;
@@ -119,29 +155,60 @@ export async function captureBundleForensics(
         );
         break;
       }
-      await limiter.acquire();
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), CHUNK_TIMEOUT_MS);
-      try {
-        const res = await fetched(src, { signal: ac.signal, headers: { "User-Agent": BUNDLE_UA } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        const bytes = Buffer.byteLength(text, "utf8");
-        if (bytes > remaining) {
-          warnings.push(`skipped ${src}: would exceed maxTotalBytes (${maxTotalBytes})`);
-          break;
+      let text: string;
+      let label: string;
+      let base: string;
+      if (cand.kind === "inline") {
+        if (inlineNext >= INLINE_CHUNK_CAP) {
+          if (!inlineCapWarned) {
+            warnings.push(`inline script cap (${INLINE_CHUNK_CAP}) reached; skipping remaining inline scripts`);
+            inlineCapWarned = true;
+          }
+          continue;
         }
-        const ci = chunks.length;
+        const inlineBytes = Buffer.byteLength(cand.code, "utf8");
+        if (inlineBytes > INLINE_CHUNK_MAX) {
+          warnings.push(
+            `skipped inline script #${inlineNext}: ${inlineBytes}B exceeds ${INLINE_CHUNK_MAX}B inline cap`,
+          );
+          continue;
+        }
+        text = cand.code;
+        label = `inline:${inlineNext++}`;
+        base = "inline";
+      } else {
+        await limiter.acquire();
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), CHUNK_TIMEOUT_MS);
+        try {
+          const res = await fetched(cand.url, { signal: ac.signal, headers: { "User-Agent": BUNDLE_UA } });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          text = await res.text();
+        } catch (err) {
+          warnings.push(`skipped ${cand.url}: ${msg(err)}`);
+          continue;
+        } finally {
+          clearTimeout(timer);
+        }
+        label = cand.url;
         // basename sanitized to the portable set; empty → "chunk". A trailing
         // script extension is stripped so the ".js" below isn't doubled
         // ("/a.js" → "0-a.js", not "0-a.js.js").
-        const base =
-          basename(new URL(src).pathname).replace(/[^a-zA-Z0-9._-]/g, "").replace(/\.(js|mjs|cjs)$/i, "") ||
+        base =
+          basename(new URL(cand.url).pathname).replace(/[^a-zA-Z0-9._-]/g, "").replace(/\.(js|mjs|cjs)$/i, "") ||
           "chunk";
+      }
+      try {
+        const bytes = Buffer.byteLength(text, "utf8");
+        if (bytes > remaining) {
+          warnings.push(`skipped ${label}: would exceed maxTotalBytes (${maxTotalBytes})`);
+          break;
+        }
+        const ci = chunks.length;
         const sha1 = createHash("sha1").update(text).digest("hex");
         const path = join(outDir, `${ci}-${base}.js`);
         writeFileSync(path, text, "utf8");
-        chunks.push({ index: ci, url: src, bytes, sha1, path });
+        chunks.push({ index: ci, url: label, bytes, sha1, path });
         totalBytes += bytes;
         for (const kw of keywords) {
           const re = new RegExp(escapeRegex(kw), "gi");
@@ -150,7 +217,7 @@ export async function captureBundleForensics(
             if (m.index === re.lastIndex) re.lastIndex++; // zero-width guard
             matches.push({
               chunk: ci,
-              url: src,
+              url: label,
               line: text.slice(0, m.index).split("\n").length,
               preview: text.slice(Math.max(0, m.index - 60), m.index + 60),
               keyword: kw,
@@ -159,9 +226,7 @@ export async function captureBundleForensics(
           if (matches.length >= MAX_MATCHES) break;
         }
       } catch (err) {
-        warnings.push(`skipped ${src}: ${msg(err)}`);
-      } finally {
-        clearTimeout(timer);
+        warnings.push(`skipped ${label}: ${msg(err)}`);
       }
     }
 

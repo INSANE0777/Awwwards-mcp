@@ -44,12 +44,14 @@ describe("captureBundleForensics", () => {
     expect("error" in rep).toBe(false);
     if ("error" in rep) return;
     cleanup.push(rep.outDir);
-    expect(rep.chunkCount).toBe(2); // inline scripts have no src — excluded
+    expect(rep.chunkCount).toBe(3); // 2 external srcs + 1 inline script (now captured)
     expect(rep.totalBytes).toBeGreaterThan(0);
     expect(rep.chunks[0].sha1).toHaveLength(40); // node:crypto sha1, house pattern
     expect(rep.chunks[0].url).toBe(A_JS); // appearance order, absolutized
     expect(rep.chunks[0].path.endsWith("0-a.js")).toBe(true);
     expect(existsSync(rep.chunks[0].path)).toBe(true);
+    expect(rep.chunks[2].url).toBe("inline:0"); // inline chunk, unfetched content saved verbatim
+    expect(readFileSync(rep.chunks[2].path, "utf8")).toBe("inline()");
     expect(rep.matches).toEqual([
       {
         chunk: 0,
@@ -183,6 +185,89 @@ describe("captureBundleForensics", () => {
     cleanup.push(rep.outDir);
     expect(rep.chunkCount).toBe(1);
     expect(rep.totalBytes).toBe(5000);
+    expect(rep.warnings.join("\n")).toContain("maxTotalBytes");
+  });
+});
+
+describe("universal extraction: inline scripts + preload hints", () => {
+  it("captures inline scripts, modulepreload and preload-as-script hints in HTML order, deduping shared URLs", async () => {
+    const inlineOne = "console.log('one');attachLetterSwapRef();";
+    const big = "q".repeat(210_000); // 210KB > 200KB inline cap → skipped with a warning
+    const M1 = `${pageOrigin}/m1.js`;
+    const DUP = `${pageOrigin}/dup.js`;
+    const map: Record<string, string> = {
+      [PAGE]: [
+        `<script src="/a.js"></script>`,
+        `<script>${inlineOne}</script>`,
+        `<link rel="modulepreload" href="/m1.js">`,
+        `<script src="/dup.js"></script>`, // same URL as preload hint below → one chunk
+        `<link rel="preload" as="script" href="/dup.js">`,
+        `<script>${big}</script>`,
+        `<script>var two=2;</script>`,
+        `<link rel="preload" as="style" href="/nope.css">`, // not a script hint
+        `<link rel="stylesheet" href="/nope2.css">`,
+      ].join(""),
+      [A_JS]: "function attachLetterSwap(i,l){}",
+      [M1]: "var m1=1;",
+      [DUP]: "var dup=1;",
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(map),
+      keywords: ["attachLetterSwap"],
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // Appearance order across all sources; dup.js deduped script+preload → 5 chunks, not 6.
+    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, "inline:0", M1, DUP, "inline:1"]);
+    expect(rep.chunkCount).toBe(5);
+    // Inline chunk content saved to disk verbatim, hash like fetched chunks.
+    expect(readFileSync(rep.chunks[1].path, "utf8")).toBe(inlineOne);
+    expect(readFileSync(rep.chunks[4].path, "utf8")).toBe("var two=2;");
+    expect(rep.chunks[1].sha1).toHaveLength(40);
+    // Oversized inline skipped whole, never sliced into the bundle.
+    expect(rep.warnings.join("\n")).toContain("exceeds");
+    expect(rep.chunks.some((c) => c.bytes === 210_000)).toBe(false);
+    // Keyword grep runs against inline chunks too.
+    expect(rep.matches.some((mm) => mm.url === "inline:0" && mm.keyword === "attachLetterSwap")).toBe(true);
+  });
+
+  it("bounds inline scripts: cap 20 with warning, 200KB skip with warning", async () => {
+    const big = "w".repeat(210_000);
+    const tags = Array.from({ length: 25 }, (_, i) =>
+      i === 4 ? `<script>${big}</script>` : `<script>var i${i}=1;</script>`,
+    );
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap({ [PAGE]: tags.join("") }),
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(20); // 25 inline, 1 oversized → 20 captured, 4 beyond cap
+    expect(rep.chunks.map((c) => c.url)).toEqual(Array.from({ length: 20 }, (_, i) => `inline:${i}`));
+    const warns = rep.warnings.join("\n");
+    expect(warns).toContain("exceeds"); // 200KB inline skip
+    expect(warns).toContain("inline script cap"); // 20-cap
+  });
+
+  it("inline bytes count toward maxTotalBytes stop", async () => {
+    const B2 = `${pageOrigin}/b.js`;
+    const threeK = "z".repeat(3000);
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap({
+        [PAGE]: `<script>${threeK}</script><script src="/b.js"></script>`,
+        [B2]: "y".repeat(5000),
+      }),
+      maxTotalBytes: 6000,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(1); // inline (3000B) captured; b.js 5000B would exceed 6000 → stop
+    expect(rep.totalBytes).toBe(3000);
     expect(rep.warnings.join("\n")).toContain("maxTotalBytes");
   });
 });
