@@ -2,10 +2,11 @@
 // bounds (chunk count, total bytes, per-chunk timeout), save + hash them for
 // later forensic passes, and keyword-search the raw chunk text. Chunk
 // failures degrade to warnings — a blocked or slow CDN can never fail the
-// capture. Unpack pass (webcrack) lands in a follow-up; its loader seam is
-// already in the opts below.
+// capture. Optional unpack pass: when
+// the "webcrack" package resolves (lazy import or DI loader), chunks are
+// de-obfuscated into pretty files + per-module files, still degrading per chunk.
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { RateLimiter } from "./awwwards.js";
@@ -18,6 +19,12 @@ const CHUNK_TIMEOUT_MS = 15_000;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_MATCHES = 40;
 
+const UNPACK_CHUNK_CAP = 10;
+const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
+
+export const UNPACK_HINT =
+  "npm install -g webcrack — optional; de-obfuscates and unpacks script chunks into per-module files";
+
 const msg = (err: unknown): string =>
   err instanceof Error ? err.message.replace(/\s+/g, " ").trim() : String(err);
 
@@ -29,10 +36,11 @@ export interface BundleReport {
   outDir: string;
   chunkCount: number;
   totalBytes: number;
-  chunks: { index: number; url: string; bytes: number; sha1: string; path: string }[];
+  chunks: { index: number; url: string; bytes: number; sha1: string; path: string; deobfuscated?: boolean }[];
   matches: { chunk: number; url: string; line: number; preview: string; keyword: string }[];
   warnings: string[];
   unpacked: boolean;
+  unpackedDir?: string;
   hint?: string;
 }
 
@@ -41,8 +49,8 @@ export interface BundleForensicsOpts {
   maxChunks?: number;
   maxTotalBytes?: number;
   fetchFn?: (url: string, init?: RequestInit) => Promise<Response>;
-  // DI seam for the webcrack unpack pass (lazy "webcrack" import by default).
-  // Never runs today — unpacked stays false in Task 5's reports.
+  // DI seam for the webcrack unpack pass; when absent the "webcrack" package
+  // is lazily imported at call time (optional dep — no hard dependency).
   unpackLoader?: () => Promise<any>;
   outDir?: string;
 }
@@ -148,6 +156,63 @@ export async function captureBundleForensics(
       }
     }
 
+    // Optional unpack pass: hard-capped (first 10 chunks, 2MB each), each
+    // chunk try/caught — a webcrack crash or odd result shape can never fail
+    // the report beyond a warning.
+    const m: any = opts.unpackLoader
+      ? await opts.unpackLoader().catch(() => null)
+      : await import("webcrack" as string).catch(() => null);
+    let unpackedDir: string | undefined;
+    let unpackedCount = 0;
+    if (m && typeof m.webcrack === "function") {
+      for (const c of chunks) {
+        if (c.index >= UNPACK_CHUNK_CAP) break;
+        if (c.bytes > UNPACK_CHUNK_BYTES) {
+          warnings.push(`unpack skipped chunk ${c.index}: ${c.bytes}B exceeds ${UNPACK_CHUNK_BYTES}B limit`);
+          continue;
+        }
+        try {
+          const res = await m.webcrack(readFileSync(c.path, "utf8"), {
+            unminify: true,
+            deobfuscate: true,
+            unpack: true,
+          });
+          if (!res || typeof res.code !== "string") {
+            throw new Error(`unexpected webcrack result shape (code: ${typeof res?.code})`);
+          }
+          const pretty = c.path.replace(/\.js$/, ".pretty.js");
+          writeFileSync(pretty, res.code, "utf8");
+          c.path = pretty;
+          c.deobfuscated = true;
+          unpackedCount++;
+          unpackedDir ??= join(outDir, "unpacked");
+          const mods: unknown = res.bundle?.modules;
+          const entries: [unknown, any][] =
+            mods instanceof Map
+              ? [...mods.entries()]
+              : Array.isArray(mods)
+                ? mods.map((mo: any): [unknown, any] => [mo?.id, mo])
+                : [];
+          if (entries.length === 0) {
+            warnings.push(`chunk ${c.index}: webcrack returned no bundle modules; skipped`);
+            continue;
+          }
+          const dir = join(unpackedDir, String(c.index).padStart(3, "0"));
+          mkdirSync(dir, { recursive: true });
+          for (const [id, mo] of entries) {
+            if (!mo || typeof mo.code !== "string") continue;
+            const name =
+              (typeof mo.path === "string" ? basename(mo.path) : "").replace(/[^a-zA-Z0-9._-]/g, "") ||
+              `${String(id ?? "mod")}.js`;
+            writeFileSync(join(dir, name.endsWith(".js") ? name : `${name}.js`), mo.code, "utf8");
+          }
+        } catch (err) {
+          warnings.push(`unpack skipped chunk ${c.index}: ${msg(err)}`);
+        }
+      }
+    }
+
+    const unpacked = unpackedCount > 0;
     return {
       url: pageUrl,
       host,
@@ -157,8 +222,9 @@ export async function captureBundleForensics(
       chunks,
       matches,
       warnings,
-      unpacked: false,
-      hint: "chunks were keyword-searched as raw text; bundle unpacking (optional webcrack dependency) is not wired yet",
+      unpacked,
+      unpackedDir: unpacked ? unpackedDir : undefined,
+      hint: unpacked ? undefined : UNPACK_HINT,
     };
   } catch (err) {
     return { error: msg(err) };

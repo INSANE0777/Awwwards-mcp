@@ -1,4 +1,5 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { captureBundleForensics } from "../src/bundle-forensics.js";
 
@@ -51,6 +52,64 @@ describe("captureBundleForensics", () => {
     ]);
     expect(rep.unpacked).toBe(false);
     expect(rep.warnings).toEqual([]);
+  });
+
+  // One-chunk page shared by the webcrack unpack tests.
+  const unpackFetch = fakeFetchMap({
+    [PAGE]: `<html><script src="/a.js"></script></html>`,
+    [A_JS]: "var a=1;",
+  });
+
+  it("unpacks with webcrack when the lazy import resolves", async () => {
+    const unpackLoader = async () => ({
+      webcrack: async (code: string) => ({
+        code: "/* pretty */\n" + code,
+        bundle: {
+          type: "webpack",
+          modules: new Map([[870178, { id: 870178, code: "const x = 1;", path: "870178.js" }]]),
+        },
+      }),
+    });
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: unpackFetch,
+      keywords: ["attach"],
+      unpackLoader,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.unpacked).toBe(true);
+    expect(rep.unpackedDir).toBeTruthy();
+    expect(rep.chunks[0].deobfuscated).toBe(true);
+    expect(rep.chunks[0].path.endsWith("0-a.pretty.js")).toBe(true);
+    expect(readFileSync(rep.chunks[0].path, "utf8").startsWith("/* pretty */")).toBe(true);
+    expect(existsSync(join(rep.outDir, "unpacked", "000", "870178.js"))).toBe(true);
+  });
+
+  it("degrades to raw chunks + hint when webcrack is missing", async () => {
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: unpackFetch,
+      unpackLoader: async () => {
+        throw new Error("not installed");
+      },
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.unpacked).toBe(false);
+    expect(rep.hint).toContain("webcrack");
+    expect(rep.warnings).toEqual([]); // missing optional dep is a hint, not a warning
+  });
+
+  it("never explodes on unexpected webcrack shapes", async () => {
+    const unpackLoader = async () => ({ webcrack: async () => ({ code: "x" }) });
+    const rep = await captureBundleForensics(PAGE, { fetchFn: unpackFetch, unpackLoader });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.unpacked).toBe(true); // pretty code still saved despite no bundle
+    expect(rep.chunks[0].deobfuscated).toBe(true);
+    expect(rep.warnings.join("\n")).toContain("modules"); // skipped-modules warning
   });
 
   it("caps chunks and records a warning beyond maxChunks", async () => {
