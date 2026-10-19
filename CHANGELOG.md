@@ -3,6 +3,30 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.11.0 - 2026-10-20
+
+The precision ladder completed: scrub curves, choreography, and polish.
+
+- `analyze_scroll_map` gains an opt-in `scrubProbe`: the tool drives the page
+  through up to 8 scroll steps and samples each scrubbed trigger's real
+  progress curve (scrollY -> progress -> transform), so scrub behavior is
+  measured, not inferred from declared start/end.
+- `analyze_scroll_map` now also returns `choreography` hints: stagger values
+  detected from captured tween vars and delay-step groups - rebuilds get
+  entrance ordering, not just per-element timing.
+- Bundle forensics polish: inline `ld+json`/`importmap`/`speculationrules`
+  blocks are no longer captured as chunks; keyword search now also scans
+  webcrack-de-obfuscated output (matches carry `source: "raw" | "pretty"`);
+  the unpack cap counts only qualifying chunks (an oversized or failing
+  chunk no longer consumes one of the 10 slots); distinct hint when webcrack
+  is installed but nothing was unpacked.
+- Motion Evidence Sheet: the first keyframe no longer wastes its slot on the
+  pre-paint frame (guarded to 600ms); the cursor-trail overlay scales with
+  the actual viewport instead of assuming 1440x900.
+- Fixed a fetch-order race in search previews that intermittently reordered
+  thumbnails when serving from cache (deterministic preview fetch + slug
+  tie-break; the long-standing ~10% suite-order flake is gone).
+
 ## v1.10.0 - 2026-10-20
 
 Motion precision, bundle forensics, and a measured verify loop. Now 25 tools.
