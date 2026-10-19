@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SCROLL_CENSUS_SNIPPET, reduceScrollCensus, captureScrollCensus, sampleKeyframes } from "../src/census.js";
-import type { RawAnim, ScrollScan } from "../src/census.js";
+import type { RawAnim, ScrollScan, GsapTriggerRow } from "../src/census.js";
 
 // Fixture builder: Trigger is used verbatim in results, so tests can encode
 // expected counts by handing raw anims pre-classified (the snippet owns the
@@ -27,6 +27,7 @@ const scan: ScrollScan = {
   ],
   smilSelectors: ["svg#logo"],
   nativeTimelines: [{ selector: "main", kind: "scroll" }],
+  gsapTriggers: [],
 };
 
 describe("reduceScrollCensus", () => {
@@ -48,6 +49,7 @@ describe("reduceScrollCensus", () => {
       anims: [anim({ selector: "svg path", props: ["stroke-dashoffset"] })],
       smilSelectors: [],
       nativeTimelines: [],
+      gsapTriggers: [],
     }, 1);
     expect(c.anims[0].svgStroke).toBe(true);
     expect(c.svgStrokes).toContain("svg path");
@@ -58,8 +60,23 @@ describe("reduceScrollCensus", () => {
       anims: [{ ...anim({}), keyframes: [{ offset: 0, props: { transform: "none" } }] }],
       smilSelectors: [],
       nativeTimelines: [],
+      gsapTriggers: [],
     }, 1);
     expect(c.anims[0].keyframes).toEqual([{ offset: 0, props: { transform: "none" } }]);
+  });
+
+  it("passes gsapTriggers through to the census preserving order", () => {
+    const rows: GsapTriggerRow[] = [
+      { selector: "div.a", scrub: true, pin: false, startPx: 0, endPx: 500, progress: 0.5, vars: { y: "100" } },
+      { selector: "", scrub: false, pin: false, startPx: null, endPx: null, progress: null, vars: {} },
+    ];
+    const c = reduceScrollCensus("u", {
+      anims: [],
+      smilSelectors: [],
+      nativeTimelines: [],
+      gsapTriggers: rows,
+    }, 1);
+    expect(c.gsapTriggers).toEqual(rows);
   });
 });
 
@@ -80,6 +97,15 @@ describe("SCROLL_CENSUS_SNIPPET", () => {
     const src = String(SCROLL_CENSUS_SNIPPET);
     expect(src).toContain("getKeyframes");
     expect(src).toContain("kfCount < 60");
+  });
+
+  it("harvests the GSAP registry with exact bounds (source-lock)", () => {
+    // 20-row cap, 24-char var clamp, and the brief's 11 priority vars keys.
+    const src = String(SCROLL_CENSUS_SNIPPET);
+    expect(src).toContain("gsapTriggers.length >= 20");
+    expect(src).toContain(".slice(0, 24)");
+    expect(src).toContain("autoAlpha");
+    expect(src).toContain("gsapTriggers");
   });
 });
 
@@ -124,6 +150,75 @@ describe("sampleKeyframes", () => {
   });
 });
 
+// Direct snippet execution: the harness below routes a fixed fixture through
+// page.evaluate, but the GSAP registry pass needs a fake ScrollTrigger global,
+// so these tests stub globalThis (restored in finally) and call the snippet
+// body in-process — the DOM passes no-op harmlessly under their own try/catch.
+describe("gsapTriggers capture (direct snippet run)", () => {
+  const g = globalThis as any;
+
+  function withST<T>(stGlobal: unknown, fn: () => T): T {
+    const prev = g.ScrollTrigger;
+    g.ScrollTrigger = stGlobal;
+    try {
+      return fn();
+    } finally {
+      if (prev === undefined) delete g.ScrollTrigger;
+      else g.ScrollTrigger = prev;
+    }
+  }
+
+  it("captures compiled ScrollTrigger numerics + tween vars (bounded)", () => {
+    const el = { nodeType: 1, tagName: "DIV" };
+    const fakeST = {
+      getAll: function () {
+        return [{
+          trigger: el,
+          start: 640,
+          end: 1800,
+          progress: 0.3,
+          animation: { vars: { y: 100, stagger: 0.09, onUpdate: function () {} } },
+        }];
+      },
+    };
+    const scan = withST(fakeST, SCROLL_CENSUS_SNIPPET);
+    const gt = scan.gsapTriggers;
+    expect(gt.length).toBe(1);
+    expect(gt[0].startPx).toBe(640);
+    expect(gt[0].endPx).toBe(1800);
+    expect(gt[0].progress).toBe(0.3);
+    expect(gt[0].selector).toBe("div");
+    expect(gt[0].scrub).toBe(false);
+    expect(gt[0].pin).toBe(false);
+    expect(gt[0].vars.y).toBe("100");
+    expect(gt[0].vars.stagger).toBe("0.09");
+    expect(gt[0].vars.onUpdate).toBeUndefined(); // functions/objects skipped
+  });
+
+  it("caps at 20 rows and nulls uncompiled numerics", () => {
+    const fakeST = {
+      getAll: function () {
+        const arr: Record<string, never>[] = [];
+        for (let i = 0; i < 25; i++) arr.push({});
+        return arr;
+      },
+    };
+    const scan = withST(fakeST, SCROLL_CENSUS_SNIPPET);
+    expect(scan.gsapTriggers.length).toBe(20);
+    const row = scan.gsapTriggers[0];
+    expect(row.startPx).toBeNull();
+    expect(row.endPx).toBeNull();
+    expect(row.progress).toBeNull();
+    expect(row.selector).toBe("");
+    expect(row.vars).toEqual({});
+  });
+
+  it("always emits gsapTriggers ([] when no GSAP)", () => {
+    const scan = withST(undefined, SCROLL_CENSUS_SNIPPET);
+    expect(scan.gsapTriggers).toEqual([]);
+  });
+});
+
 // Offline orchestrator harness: a fake page whose evaluate returns the fixture
 // scan; a fake browser that hands it out; a loader resolving a fake chromium.
 // fakeBrowser optionally records the context opts passed to newPage and can
@@ -156,6 +251,7 @@ describe("captureScrollCensus", () => {
     ],
     smilSelectors: [],
     nativeTimelines: [{ selector: "main", kind: "scroll" }],
+    gsapTriggers: [],
   };
 
   it("captures a census through a fake browser", async () => {

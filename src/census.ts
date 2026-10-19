@@ -17,6 +17,17 @@ export interface KeyframeSample {
   props: Record<string, string>;
 }
 
+/** One GSAP ScrollTrigger row: compiled numerics + bounded tween vars. */
+export interface GsapTriggerRow {
+  selector: string;
+  scrub: boolean;
+  pin: boolean;
+  startPx: number | null;
+  endPx: number | null;
+  progress: number | null;
+  vars: Record<string, string>;
+}
+
 /** One per-element animation row, as serialized from the page. */
 export interface RawAnim {
   selector: string;
@@ -38,6 +49,8 @@ export interface ScrollScan {
   anims: RawAnim[];
   smilSelectors: string[];
   nativeTimelines: { selector: string; kind: "scroll" | "view" }[];
+  /** GSAP ScrollTrigger registry rows — always emitted, [] when no GSAP. */
+  gsapTriggers: GsapTriggerRow[];
 }
 
 export interface ScrollCensus {
@@ -47,6 +60,8 @@ export interface ScrollCensus {
   anims: RawAnim[];
   svgStrokes: string[];
   nativeScrollTimelines: number;
+  /** GSAP deep capture rows, passthrough from the scan (order preserved). */
+  gsapTriggers: GsapTriggerRow[];
   reducedMotion: boolean;
 }
 
@@ -285,7 +300,45 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
     }
   } catch {}
 
-  return { anims, smilSelectors, nativeTimelines };
+  // Pass 4: GSAP ScrollTrigger registry — compiled start/end px, live
+  // progress, and bounded tween vars (≤20 rows, ≤24 chars per var value,
+  // priority keys only; functions/objects skipped). Independent of
+  // getAnimations, so it works even when animations are hidden from the Web
+  // Animations API.
+  const STVARS_KEYS = ["x", "y", "rotate", "scale", "scaleX", "scaleY", "opacity", "autoAlpha", "stagger", "width", "height"];
+  const gsapTriggers: GsapTriggerRow[] = [];
+  try {
+    const stList = stGlobal && stGlobal.getAll ? stGlobal.getAll().slice(0, 120) : [];
+    for (const st of stList) {
+      if (gsapTriggers.length >= 20) break;
+      try {
+        const trig = st.trigger ?? st.getTrigger?.() ?? null;
+        const vars: Record<string, string> = {};
+        const tv = st.animation && st.animation.vars ? st.animation.vars : null;
+        if (tv) {
+          for (const vk of STVARS_KEYS) {
+            try {
+              const vv = tv[vk];
+              if (vv !== undefined && typeof vv !== "object" && typeof vv !== "function") {
+                vars[vk] = String(vv).slice(0, 24);
+              }
+            } catch {}
+          }
+        }
+        gsapTriggers.push({
+          selector: trig && trig.nodeType === 1 ? selPath(trig) : "",
+          scrub: Boolean(st.vars?.scrub),
+          pin: Boolean(st.vars?.pin || st.pin),
+          startPx: typeof st.start === "number" ? st.start : null,
+          endPx: typeof st.end === "number" ? st.end : null,
+          progress: typeof st.progress === "number" ? st.progress : null,
+          vars,
+        });
+      } catch {}
+    }
+  } catch {}
+
+  return { anims, smilSelectors, nativeTimelines, gsapTriggers };
 };
 
 // PURE: aggregates a raw scan into the census. Counts per trigger source,
@@ -326,6 +379,7 @@ export function reduceScrollCensus(
     anims,
     svgStrokes: [...strokes],
     nativeScrollTimelines: scan.nativeTimelines.length,
+    gsapTriggers: scan.gsapTriggers,
     reducedMotion,
   };
 }
