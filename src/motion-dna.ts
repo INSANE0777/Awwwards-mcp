@@ -1,10 +1,22 @@
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
+import { SCROLL_CENSUS_SNIPPET, reduceScrollCensus, type ScrollScan } from "./census.js";
 import { normalizeEasing, quartiles } from "./easings.js";
-import { installSnippetShims, preScroll } from "./structure.js";
+import { installSnippetShims, preScroll, type WaitStrategy } from "./structure.js";
 import { resolveViewport, type ViewportName } from "./viewport.js";
 import type { MotionDna } from "./types.js";
 
 export type { MotionDna };
+
+/** captureMotionDnaUnified's return: MotionDna + additive scroll-census summary. */
+export interface UnifiedMotionDna extends MotionDna {
+  censusSummary?: {
+    /** Census counts object verbatim (reduceScrollCensus's per-source tallies). */
+    counts: Record<string, number>;
+    /** Flagged rows over per-element rows — same convention as MotionDna.scroll. */
+    scrubRatio: number;
+    pinCount: number;
+  };
+}
 
 /** What page.evaluate(MOTION_SNIPPET) serializes back from the page. */
 export interface MotionScan {
@@ -225,6 +237,83 @@ export async function captureMotionDna(
     await page.waitForTimeout(500);
     const scan = (await page.evaluate(MOTION_SNIPPET)) as MotionScan;
     return reduceScan(url, scan, Date.now());
+  } finally {
+    try {
+      await browser.close();
+    } catch {
+      /* keep the primary error */
+    }
+  }
+}
+
+/**
+ * Single-launch motion capture (plan Task C2): ONE browser launch/page runs
+ * MOTION_SNIPPET then SCROLL_CENSUS_SNIPPET (imported from census.js — both
+ * snippets already satisfy the plain-function/no-arrow rule) and reduces
+ * both. Trade-off vs the old double-launch pattern (captureMotionDna +
+ * captureScrollCensus separately): two evaluates in one launch halve the
+ * cold-start cost and pin both scans to the same page state; the price is a
+ * longer-lived page. Throws exactly like captureMotionDna (the handler's
+ * catch turns it into the unchanged {error} response); the old fn stays
+ * exported for compat.
+ */
+export async function captureMotionDnaUnified(
+  url: string,
+  opts: {
+    timeoutMs?: number;
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+    reducedMotion?: boolean;
+    loader?: () => Promise<any>;
+  } = {},
+): Promise<UnifiedMotionDna> {
+  let chromium: any;
+  try {
+    ({ chromium } = await (opts.loader ?? (() => import("playwright" as string)))());
+  } catch {
+    throw new Error(CAPTURE_INSTALL_HINT);
+  }
+  let browser: any;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch {
+    throw new Error(CAPTURE_INSTALL_HINT);
+  }
+  try {
+    // Same call sequence as captureMotionDna (load + fixed settle + scroll
+    // through + settle) with the census capture's waitStrategy/reducedMotion
+    // opts (see captureScrollCensus).
+    const { width, height, ...contextOpts } = resolveViewport(opts.viewport ?? "desktop");
+    const page = await browser.newPage({
+      viewport: { width, height },
+      ...contextOpts,
+      ...(opts.reducedMotion ? { reducedMotion: "reduce" as const } : {}),
+    });
+    await installSnippetShims(page);
+    await page.goto(url, {
+      waitUntil: opts.waitStrategy ?? "load",
+      timeout: opts.timeoutMs ?? 45_000,
+    });
+    await page.waitForTimeout(3000);
+    await preScroll(page);
+    // "load" can fire before late XHRs settle (see structure.ts).
+    await page.waitForTimeout(500);
+    // Motion scan first, while the settled page still sits at scrollTop 0
+    // (ScrollTriggers sample their rest state); the census reads the same
+    // DOM right after.
+    const scan = (await page.evaluate(MOTION_SNIPPET)) as MotionScan;
+    const censusScan = (await page.evaluate(SCROLL_CENSUS_SNIPPET)) as ScrollScan;
+    const dna = reduceScan(url, scan, Date.now());
+    const census = reduceScrollCensus(url, censusScan, Date.now(), !!opts.reducedMotion);
+    const scrubCount = census.anims.filter((a) => a.scrub).length;
+    return {
+      ...dna,
+      censusSummary: {
+        counts: census.counts,
+        scrubRatio: census.anims.length > 0 ? scrubCount / census.anims.length : 0,
+        pinCount: census.anims.filter((a) => a.pin).length,
+      },
+    };
   } finally {
     try {
       await browser.close();

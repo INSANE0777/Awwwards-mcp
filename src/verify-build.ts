@@ -208,6 +208,14 @@ async function perfEvidenceLine(
   buildUrl: string,
 ): Promise<string> {
   try {
+    // FPS-window audit (plan Task C1, comfyui frontend issue #15997: a helper
+    // that samples rAF AFTER the workload describes the idle tail — a busy
+    // workload can appear green). Ours cannot slide into that failure: the
+    // perf-live collector is registered via Page.addScriptToEvaluateOnNewDocument
+    // BEFORE navigation, so its in-page deadline (performance.now() + seconds)
+    // starts at page-time 0 and the busy load/init work always falls INSIDE
+    // the measured window. Residual bias points the strict way: navigation
+    // dead-time dilutes fps downward, never green-washes it. Bounded to 6s.
     // Plan default: small measured window, ≤10s.
     const meas = await perfFn(buildUrl, { seconds: 6 });
     if ("error" in meas) return `perf: not measured (${meas.error})`;
@@ -385,4 +393,72 @@ export async function verifyBuild(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ---- C3 token-diet helpers ----
+// Pure compaction of capture results for the tools' `compact` flag. Strip
+// rules (plan Task C3): heavy per-element detail → counts; every top-level
+// numeric, trigger list and flag stays. census.ts / hover-census.ts are out
+// of this wave's scope, so the helpers live here (this module already owns
+// the ScrollCensus/HoverCensus typings).
+
+/** ScrollCensus → diet: anims lose keyframes/durations/easings (props→count); scrubCurves → count. */
+export function compactScrollCensus(c: ScrollCensus): {
+  url: string;
+  capturedAt: number;
+  counts: ScrollCensus["counts"];
+  nativeScrollTimelines: number;
+  svgStrokes: string[];
+  gsapTriggers: Array<Omit<ScrollCensus["gsapTriggers"][number], "vars">>;
+  animCount: number;
+  scrubCount: number;
+  pinCount: number;
+  scrubCurveCount: number;
+  reducedMotion: boolean;
+} {
+  return {
+    url: c.url,
+    capturedAt: c.capturedAt,
+    counts: c.counts,
+    nativeScrollTimelines: c.nativeScrollTimelines,
+    svgStrokes: c.svgStrokes,
+    // Registry rows keep their compiled numerics; the bounded (but verbose)
+    // tween vars map is the per-trigger detail that gets stripped.
+    gsapTriggers: c.gsapTriggers.map((g) => ({
+      selector: g.selector,
+      scrub: g.scrub,
+      pin: g.pin,
+      startPx: g.startPx,
+      endPx: g.endPx,
+      progress: g.progress,
+    })),
+    animCount: c.anims.length,
+    scrubCount: c.anims.filter((a) => a.scrub).length,
+    pinCount: c.anims.filter((a) => a.pin).length,
+    scrubCurveCount: c.scrubCurves?.length ?? 0,
+    reducedMotion: c.reducedMotion,
+  };
+}
+
+/** HoverCensus → diet: sample bodies (computed-style rows, trails) → selectors + count. */
+export function compactHoverCensus(h: HoverCensus): {
+  url: string;
+  capturedAt: number;
+  hoverRuleCount: number;
+  candidates: number;
+  sampleCount: number;
+  sampleSelectors: string[];
+  note?: string;
+  reducedMotion: boolean;
+} {
+  return {
+    url: h.url,
+    capturedAt: h.capturedAt,
+    hoverRuleCount: h.hoverRuleCount,
+    candidates: h.candidates,
+    sampleCount: h.samples.length,
+    sampleSelectors: h.samples.map((s) => s.selector),
+    ...(h.note !== undefined ? { note: h.note } : {}),
+    reducedMotion: h.reducedMotion,
+  };
 }

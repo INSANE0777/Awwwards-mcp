@@ -39,6 +39,11 @@ design DNA, band maps and motion recordings included.
                     src/index-cli.ts ── crawl CLI (awwwards-index)
 ```
 
+`awwwards-verify` (`src/verify-cli.ts` → `dist/verify-cli.js`): verify_build as a
+CLI — `awwwards-verify <buildUrl> <referenceUrl> [--viewport desktop|mobile]`
+prints one JSON verdict line (exit 0 pass / 1 warn / 2 fail / 3 error / 4 usage).
+Note: it spawns a real browser.
+
 ## Module map (`src/`)
 
 | Module | Lines | Role |

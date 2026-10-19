@@ -15,7 +15,8 @@ import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
 import type { VerifyBuildFn } from "./verify-build.js";
-import type { ComponentPack } from "./component.js";
+import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
+import type { ComponentNode, ComponentPack } from "./component.js";
 import type { PoseGrid } from "./pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "./pose-stub.js";
 import type { StackFingerprint } from "./stack.js";
@@ -88,7 +89,9 @@ export type MotionFn = (
 
 export type MotionDnaFn = (
   url: string,
-  opts?: { viewport?: ViewportName },
+  // C2: same opts contract as the census peers — the default switched from
+  // captureMotionDna (viewport-only) to captureMotionDnaUnified.
+  opts?: { waitStrategy?: WaitStrategy; viewport?: ViewportName; reducedMotion?: boolean },
 ) => Promise<MotionDna>;
 
 export type ScrollMapFn = (
@@ -138,6 +141,68 @@ export type CaptureComponentFn = (
   url: string,
   opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number },
 ) => Promise<ComponentPack | { error: string }>;
+
+// C3 token-diet helpers (plan Task C3): pure compaction for the `compact`
+// flag on get_site_details / capture_component. Heavy per-element detail →
+// counts; top-level numerics and triggers stay. The census-typed siblings
+// (compactScrollCensus / compactHoverCensus) live in verify-build.ts because
+// census.ts / hover-census.ts are out of this wave's scope.
+export interface SlimComponentNode {
+  tag: string;
+  classes: string[];
+  rect: ComponentNode["rect"];
+  children: SlimComponentNode[];
+}
+
+/** ComponentPack → diet: the node tree keeps {tag, classes, rect} + children only. */
+export function compactComponentPack(p: ComponentPack): {
+  id: string;
+  url: string;
+  selector: string;
+  capturedAt: number;
+  viewport: { width: number; height: number };
+  nodeCount: number;
+  root: SlimComponentNode;
+  fonts: string[];
+  colors: string[];
+} {
+  // styles/text/svg/anims/pseudos are the per-node detail that gets
+  // stripped; structure (tag/classes/rect) is what rebuild prompts need.
+  const walk = (n: ComponentNode): SlimComponentNode => ({
+    tag: n.tag,
+    classes: n.classes,
+    rect: n.rect,
+    children: n.children.map(walk),
+  });
+  return {
+    id: p.id,
+    url: p.url,
+    selector: p.selector,
+    capturedAt: p.capturedAt,
+    viewport: p.viewport,
+    nodeCount: p.nodeCount,
+    root: walk(p.root),
+    fonts: p.fonts,
+    colors: p.colors,
+  };
+}
+
+/** SiteDetails → diet: palette/technologies/elements lists → counts; awards + numerics stay. */
+export function compactSiteDetails(d: SiteDetails): Record<string, unknown> {
+  return {
+    slug: d.slug,
+    title: d.title,
+    liveUrl: d.liveUrl,
+    nominee: d.nominee,
+    score: d.score,
+    juryDimensions: d.juryDimensions,
+    awards: d.awards,
+    paletteCount: d.palette.length,
+    technologiesCount: d.technologies.length,
+    elementsCount: d.elements.length,
+    ogImage: d.ogImage,
+  };
+}
 
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -215,7 +280,7 @@ function errorResponse(err: unknown): ToolResponse {
 
 export interface Handlers {
   search_sites(args: SearchArgs): Promise<ToolResponse>;
-  get_site_details(args: { slug: string }): Promise<ToolResponse>;
+  get_site_details(args: { slug: string; compact?: boolean }): Promise<ToolResponse>;
   compare_sites(args: { slugs: string[] }): Promise<ToolResponse>;
   create_design_brief(args: DesignBriefInput & {
     viewport?: ViewportName;
@@ -256,12 +321,14 @@ export interface Handlers {
     viewport?: ViewportName;
     reducedMotion?: boolean;
     scrubProbe?: boolean;
+    compact?: boolean;
   }): Promise<ToolResponse>;
   analyze_hover_census(args: {
     url: string;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    compact?: boolean;
   }): Promise<ToolResponse>;
   analyze_bundle(args: {
     url: string;
@@ -275,6 +342,7 @@ export interface Handlers {
     selector?: string;
     viewport?: ViewportName;
     maxNodes?: number;
+    compact?: boolean;
   }): Promise<ToolResponse>;
   capture_pose_3d(args: {
     url: string;
@@ -642,7 +710,14 @@ export function createHandlers(deps: {
     return d;
   }
 
-  async function get_site_details(args: { slug: string }): Promise<ToolResponse> {
+  // ---- C3 token-diet helpers ----
+  // Pure compaction for the four tools' `compact` flag (plan Task C3). Heavy
+  // per-element detail → counts; top-level numerics and triggers stay. The
+  // helpers (compactComponentPack / compactSiteDetails) live at module scope
+  // so tests can call them directly; census-typed siblings live in
+  // verify-build.ts (census.ts/hover-census.ts are out of this wave's scope).
+
+  async function get_site_details(args: { slug: string; compact?: boolean }): Promise<ToolResponse> {
     try {
       const d = await loadDetail(args.slug);
       if (!d) {
@@ -654,6 +729,11 @@ export function createHandlers(deps: {
           )],
           isError: true,
         };
+      }
+      // C3: compact=true returns the token-diet JSON (lists → counts, no
+      // markdown body, no inline screenshot); default stays byte-identical.
+      if (args.compact) {
+        return { content: [text(JSON.stringify(compactSiteDetails(d), null, 1))] };
       }
       const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
       const liveUrl = d.liveUrl ?? cachedSite?.liveUrl ?? null;
@@ -1112,6 +1192,7 @@ export function createHandlers(deps: {
     viewport?: ViewportName;
     reducedMotion?: boolean;
     scrubProbe?: boolean;
+    compact?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1135,7 +1216,11 @@ export function createHandlers(deps: {
       // itself is serialized unchanged, wrapped with `choreography` — composed
       // regardless of scrubProbe and reads existing fields only.
       const choreography = choreographyFromCensus(result);
-      return { content: [text(JSON.stringify({ ...result, choreography }, null, 1))] };
+      // C3: compact=true swaps the census payload for the token-diet summary;
+      // the handler-composed choreography block still ships (its hints are
+      // top-level trigger info the diet keeps).
+      const census = args.compact ? compactScrollCensus(result) : result;
+      return { content: [text(JSON.stringify({ ...census, choreography }, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1146,6 +1231,7 @@ export function createHandlers(deps: {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    compact?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1159,7 +1245,8 @@ export function createHandlers(deps: {
         reducedMotion: args.reducedMotion,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
-      return { content: [text(JSON.stringify(result, null, 1))] };
+      // C3: compact=true replaces sample bodies with count + selectors.
+      return { content: [text(JSON.stringify(args.compact ? compactHoverCensus(result) : result, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1251,6 +1338,7 @@ export function createHandlers(deps: {
     selector?: string;
     viewport?: ViewportName;
     maxNodes?: number;
+    compact?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1264,7 +1352,9 @@ export function createHandlers(deps: {
         maxNodes: args.maxNodes,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
-      return { content: [text(JSON.stringify(result, null, 1))] };
+      // C3: compact=true strips per-node styles/text/svg/anims; the tree's
+      // tag/classes/rect skeleton + fonts/colors stay.
+      return { content: [text(JSON.stringify(args.compact ? compactComponentPack(result) : result, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1394,11 +1484,12 @@ export function createHandlers(deps: {
       if (cached && Date.now() - cached.capturedAt < MOTION_DNA_TTL_MS) {
         return { content: [text(JSON.stringify(cached, null, 1))] };
       }
-      // Lazy default: playwright is only touched when the tool actually runs.
+      // C2: lazy default switched to the single-launch orchestrator (the old
+      // captureMotionDna stays exported for compat / kit callers).
       const capture =
         deps.motionDnaFn ??
-        ((url: string, opts?: { viewport?: ViewportName }) =>
-          import("./motion-dna.js").then((m) => m.captureMotionDna(url, opts)));
+        ((url: string, opts?: { waitStrategy?: WaitStrategy; viewport?: ViewportName; reducedMotion?: boolean }) =>
+          import("./motion-dna.js").then((m) => m.captureMotionDnaUnified(url, opts)));
       const dna = await capture(args.url, { viewport: "desktop" });
       cache.upsertMotionDna(dna);
       return { content: [text(JSON.stringify(dna, null, 1))] };

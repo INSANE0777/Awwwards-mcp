@@ -6,7 +6,8 @@
   "license": "MIT",
   "bin": {
     "awwwards-mcp": "dist/cli.js",
-    "awwwards-index": "dist/index-cli.js"
+    "awwwards-index": "dist/index-cli.js",
+    "awwwards-verify": "dist/verify-cli.js"
   },
   "files": [
     "dist",
