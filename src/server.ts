@@ -11,6 +11,7 @@ import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
+import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
 import type { VerifyBuildFn } from "./verify-build.js";
@@ -1121,7 +1122,11 @@ export function createHandlers(deps: {
         scrubProbe: args.scrubProbe,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
-      return { content: [text(JSON.stringify(result, null, 1))] };
+      // L4 additive key: stagger hints distilled from the census. The census
+      // itself is serialized unchanged, wrapped with `choreography` — composed
+      // regardless of scrubProbe and reads existing fields only.
+      const choreography = choreographyFromCensus(result);
+      return { content: [text(JSON.stringify({ ...result, choreography }, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }

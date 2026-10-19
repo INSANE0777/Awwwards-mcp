@@ -247,7 +247,7 @@ server.tool(
 
 server.tool(
   "analyze_scroll_map",
-  "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation. Optional scrubProbe drives the page and returns real progress curves per scrubbed trigger.",
+  "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation. Optional scrubProbe drives the page and returns real progress curves per scrubbed trigger. Every payload also carries a `choreography` block: stagger hints (hint selector/value/source, groups) distilled from GSAP tween vars and stepped delays across sibling animations.",
   {
     url: z.string().url().describe("Absolute page URL to census"),
     waitStrategy: z.enum(["load", "networkidle"]).optional(),
