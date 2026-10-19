@@ -3,6 +3,45 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.10.0 - 2026-10-20
+
+Motion precision, bundle forensics, and a measured verify loop. Now 25 tools.
+
+- New `analyze_stack` tool: framework and CSS fingerprint (Next, Astro,
+  Nuxt, Remix, SvelteKit, WordPress, Webflow, Framer; Tailwind/Bootstrap
+  density) from one polite HTML fetch - no browser, no new dependencies.
+- New `build_gsap_stub` tool:turns captured motion censuses into a runnable
+  GSAP + ScrollTrigger stub (durations, easings, scrub/pin, reduced-motion
+  guard).
+- New `analyze_bundle` tool: bundle forensics for a live page - fetches its
+  script chunks (bounded: 40 chunks, 10 MB, 1 request/second; script tags,
+  inline scripts, and modulepreload/preload hints), saves them locally, and
+  greps keywords so agents can read the actual animation mechanism instead
+  of guessing. Optional webcrack de-obfuscation/unpack if installed (lazy,
+  degrades to raw chunks + hint). Runs on URLs you are authorized to
+  analyze.
+- `analyze_scroll_map` now returns value-precise motion: per-animation
+  keyframe matrices (real from/to values like `translateY(56px) -> 0`,
+  bounded to 4 frames x 4 props/row) and a site-level `gsapTriggers` array
+  with compiled pixel `startPx`/`endPx`, live `progress`, and tween vars
+  (e.g. `stagger: 0.09`).
+- `analyze_hover_census` now samples animations DURING hover (`activeAnims`
+  + in-flight transform trail), catching event-driven tweens that do not
+  exist at rest - the on-hover letter-swap class of effects is now
+  recoverable without reading source.
+- `verify_build` is instrumented: beyond band/motion scoring it runs a
+  real-browser perf probe on the build (fps, dropped frames, long tasks,
+  layout thrash) plus an anti-pattern scan (transitioning blur, animated
+  layout properties, `transition:all`) and names the worst offender in the
+  evidence.
+- Existing installs: the daily environment notice now hints the optional
+  `webcrack` install for bundle de-obfuscation (hint only - environment
+  health is unchanged without it).
+- CI: parser-drift probes treat network blocks as inconclusive instead of
+  filing false drift issues.
+- Docs/skills: NEUTOMNI one-shot rehost showcase, any-URL recreation
+  positioning, and all five skills updated for the new tools.
+
 ## v1.9.0 - 2026-10-17
 
 Motion Evidence, fidelity capture, and the recreation pipeline.
