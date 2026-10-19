@@ -15,6 +15,12 @@ inspiration it's a full evidence loop: band-map any page, census its scroll and
 hover motion, fingerprint its framework, capture canvas/pose grids, then
 **verify your build against the reference** (band + motion scoring) and generate
 GSAP timeline stubs from the captured motion.
+
+And it's not just Awwwards websites — every capture, census, and verification
+tool **runs on any URL**. Just give it any site link and tell it to recreate:
+band-map it, study its motion, rebuild section by section, and score your
+build against the original.
+
 Free-text queries run on a porter-stemmed, prefix-matching FTS5 index with BM25
 ranking — "magazines" now finds Magazine-tagged sites (68 on the live index),
 best matches first, where the old substring path returned zero. Multi-word
