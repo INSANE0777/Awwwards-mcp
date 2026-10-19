@@ -265,6 +265,10 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   // Page height, probed during the pass (feeds the scroll tour; survives the
   // try-block for the sheet's SheetCtx.totalHeight).
   let totalHeight = 0;
+  // Recording canvas, probed at record time (page.viewportSize()); survives
+  // the try-block for the sheet's SheetCtx.viewport. null (no viewport set)
+  // → undefined, and the sheet keeps its 1440×900 fallback.
+  let viewport: { width: number; height: number } | undefined;
   // Wrap a block as a phase; the block itself is untouched (lifecycle frozen).
   const phase = async <T>(kind: MotionTimeline["phases"][number]["kind"], body: () => Promise<T>, extra?: Partial<{ scrollY: number; targetX: number; targetY: number }>): Promise<T> => {
     if (!collect) return body();
@@ -291,6 +295,7 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
     });
     try {
       const page = await context.newPage();
+      viewport = page.viewportSize() ?? undefined;
       await phase("dwell", () => page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 }));
       // Preloader + entrance animations on camera. This top-of-page wait also
       // stands in for capture.ts's fixed 3s "load" settle (see budget above).
@@ -521,7 +526,7 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
     // inside the degrade try so a module-load failure degrades like any other
     // sheet failure instead of escaping as an unhandled rejection.
     sheetFn ??= (await import("./motion-sheet.js")).buildMotionSheet;
-    const result = await sheetFn(videoPath, { url, timeline, totalHeight }, { outDir: opts.cacheImagesDir });
+    const result = await sheetFn(videoPath, { url, timeline, totalHeight, viewport }, { outDir: opts.cacheImagesDir });
     return { ...base, sheet: { htmlPath: result.htmlPath, mdPath: result.mdPath, keyframes: result.keyframes, masks: result.masks } };
   } catch (err) {
     // Degrade, never fail: the recording + filmstrip are already good.

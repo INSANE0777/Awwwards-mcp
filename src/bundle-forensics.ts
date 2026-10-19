@@ -30,6 +30,11 @@ const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
 export const UNPACK_HINT =
   "npm install -g webcrack — optional; de-obfuscates and unpacks script chunks into per-module files";
 
+// Distinct hint for the "webcrack loaded but nothing unpacked" case — no
+// install tone; states the unpack bounds instead.
+const UNPACK_NOOP_HINT =
+  "webcrack is installed but nothing was unpacked — de-obfuscation covers only the first 10 chunks (2MB each); raw chunks are saved either way";
+
 const msg = (err: unknown): string =>
   err instanceof Error ? err.message.replace(/\s+/g, " ").trim() : String(err);
 
@@ -42,7 +47,7 @@ export interface BundleReport {
   chunkCount: number;
   totalBytes: number;
   chunks: { index: number; url: string; bytes: number; sha1: string; path: string; deobfuscated?: boolean }[];
-  matches: { chunk: number; url: string; line: number; preview: string; keyword: string }[];
+  matches: { chunk: number; url: string; line: number; preview: string; keyword: string; source?: "raw" | "pretty" }[];
   warnings: string[];
   unpacked: boolean;
   unpackedDir?: string;
@@ -115,6 +120,10 @@ export async function captureBundleForensics(
           continue;
         }
         // Inline script: text between this open tag and its closing tag.
+        // JSON-data types (ld+json, importmap, speculationrules) are inert
+        // data, not runnable bundle code — skipped silently.
+        const type = /\stype=["']([^"']+)["']/i.exec(open)?.[1] ?? "";
+        if (/ld\+json|importmap|speculationrules/i.test(type)) continue;
         const close = pageText.indexOf("</script", tagEnd);
         if (close !== -1) targets.push({ kind: "inline", code: pageText.slice(tagEnd, close) });
         continue;
@@ -138,6 +147,28 @@ export async function captureBundleForensics(
     const matches: BundleReport["matches"] = [];
     const warnings: string[] = [];
     let totalBytes = 0;
+
+    // One keyword scanner for every text source — raw chunks and webcrack's
+    // pretty files alike. `source` records where the hit came from; the
+    // MAX_MATCHES cap spans all sources (40 total, unchanged).
+    const pushMatches = (text: string, ci: number, label: string, source: "raw" | "pretty"): void => {
+      for (const kw of keywords) {
+        const re = new RegExp(escapeRegex(kw), "gi");
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(text)) !== null && matches.length < MAX_MATCHES) {
+          if (m.index === re.lastIndex) re.lastIndex++; // zero-width guard
+          matches.push({
+            chunk: ci,
+            url: label,
+            line: text.slice(0, m.index).split("\n").length,
+            preview: text.slice(Math.max(0, m.index - 60), m.index + 60),
+            keyword: kw,
+            source,
+          });
+        }
+        if (matches.length >= MAX_MATCHES) break;
+      }
+    };
 
     let inlineNext = 0;
     let inlineCapWarned = false;
@@ -210,37 +241,27 @@ export async function captureBundleForensics(
         writeFileSync(path, text, "utf8");
         chunks.push({ index: ci, url: label, bytes, sha1, path });
         totalBytes += bytes;
-        for (const kw of keywords) {
-          const re = new RegExp(escapeRegex(kw), "gi");
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(text)) !== null && matches.length < MAX_MATCHES) {
-            if (m.index === re.lastIndex) re.lastIndex++; // zero-width guard
-            matches.push({
-              chunk: ci,
-              url: label,
-              line: text.slice(0, m.index).split("\n").length,
-              preview: text.slice(Math.max(0, m.index - 60), m.index + 60),
-              keyword: kw,
-            });
-          }
-          if (matches.length >= MAX_MATCHES) break;
-        }
+        pushMatches(text, ci, label, "raw");
       } catch (err) {
         warnings.push(`skipped ${label}: ${msg(err)}`);
       }
     }
 
-    // Optional unpack pass: hard-capped (first 10 chunks, 2MB each), each
-    // chunk try/caught — a webcrack crash or odd result shape can never fail
-    // the report beyond a warning.
+    // Optional unpack pass: hard-capped (first 10 QUALIFYING chunks, 2MB each
+    // — see the loop), each chunk try/caught — a webcrack crash or odd result
+    // shape can never fail the report beyond a warning.
     const m: any = opts.unpackLoader
       ? await opts.unpackLoader().catch(() => null)
       : await import("webcrack" as string).catch(() => null);
     let unpackedDir: string | undefined;
     let unpackedCount = 0;
-    if (m && typeof m.webcrack === "function") {
+    const unpackLoaded = !!(m && typeof m.webcrack === "function");
+    if (unpackLoaded) {
+      // The ≤10 budget is spent only on chunks we actually unpack: oversized
+      // chunks and webcrack crashes never consume a slot — later qualifying
+      // chunks keep filling until 10 successes or chunks run out.
       for (const c of chunks) {
-        if (c.index >= UNPACK_CHUNK_CAP) break;
+        if (unpackedCount >= UNPACK_CHUNK_CAP) break;
         if (c.bytes > UNPACK_CHUNK_BYTES) {
           warnings.push(`unpack skipped chunk ${c.index}: ${c.bytes}B exceeds ${UNPACK_CHUNK_BYTES}B limit`);
           continue;
@@ -258,6 +279,8 @@ export async function captureBundleForensics(
           writeFileSync(pretty, res.code, "utf8");
           c.path = pretty;
           c.deobfuscated = true;
+          // The pretty file is a second text source for the keyword scan.
+          pushMatches(res.code, c.index, c.url, "pretty");
           unpackedCount++;
           if (!unpackedDir) {
             unpackedDir = join(outDir, "unpacked");
@@ -303,7 +326,7 @@ export async function captureBundleForensics(
       warnings,
       unpacked,
       unpackedDir: unpacked ? unpackedDir : undefined,
-      hint: unpacked ? undefined : UNPACK_HINT,
+      hint: unpacked ? undefined : unpackLoaded ? UNPACK_NOOP_HINT : UNPACK_HINT,
     };
   } catch (err) {
     return { error: msg(err) };

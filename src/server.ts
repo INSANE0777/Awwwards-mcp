@@ -11,6 +11,7 @@ import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
+import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
 import type { VerifyBuildFn } from "./verify-build.js";
@@ -96,6 +97,7 @@ export type ScrollMapFn = (
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
   },
 ) => Promise<ScrollCensus | { error: string }>;
 
@@ -253,6 +255,7 @@ export interface Handlers {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
   }): Promise<ToolResponse>;
   analyze_hover_census(args: {
     url: string;
@@ -387,7 +390,12 @@ export function createHandlers(deps: {
   }
 
   async function compactContent(slice: SiteSummary[], start: number, header: string): Promise<Block[]> {
-    const images = await Promise.all(slice.slice(0, 2).map(siteImage));
+    // Previews fetch sequentially in card order: getImage's async disk-cache
+    // miss-check races under Promise.all, making the fetch (side-effect) order
+    // scheduler-dependent instead of card-ordered. ≤2 previews; nothing
+    // depends on parallelism here.
+    const images: (Block | null)[] = [];
+    for (const s of slice.slice(0, 2)) images.push(await siteImage(s));
     return [
       text(`${header}\n\n${slice.map((s, i) => formatCompactSite(s, start + i)).join("\n")}`),
       ...images.flatMap((image, i): Block[] => image
@@ -408,7 +416,10 @@ export function createHandlers(deps: {
       score: cache.getMeta<{ score?: number }>(`detail:${s.slug}`, SITE_TTL_MS)?.score ?? null,
     }));
     withScores.sort(
-      (a, b) => (b.score ?? -1) - (a.score ?? -1) || b.s.createdAt - a.s.createdAt,
+      (a, b) =>
+        (b.score ?? -1) - (a.score ?? -1) ||
+        b.s.createdAt - a.s.createdAt ||
+        a.s.slug.localeCompare(b.s.slug),
     );
     return withScores.map((w) => w.s);
   }
@@ -1099,20 +1110,31 @@ export function createHandlers(deps: {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
       const capture =
         deps.scrollMapFn ??
-        ((url: string, opts?: { waitStrategy?: WaitStrategy; viewport?: ViewportName; reducedMotion?: boolean }) =>
+        ((url: string, opts?: {
+          waitStrategy?: WaitStrategy;
+          viewport?: ViewportName;
+          reducedMotion?: boolean;
+          scrubProbe?: boolean;
+        }) =>
           import("./census.js").then((m) => m.captureScrollCensus(url, opts)));
       const result = await capture(args.url, {
         waitStrategy: args.waitStrategy,
         viewport: args.viewport ?? "desktop",
         reducedMotion: args.reducedMotion,
+        scrubProbe: args.scrubProbe,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
-      return { content: [text(JSON.stringify(result, null, 1))] };
+      // L4 additive key: stagger hints distilled from the census. The census
+      // itself is serialized unchanged, wrapped with `choreography` — composed
+      // regardless of scrubProbe and reads existing fields only.
+      const choreography = choreographyFromCensus(result);
+      return { content: [text(JSON.stringify({ ...result, choreography }, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }

@@ -79,6 +79,7 @@ function fakeChromium(
       calls.push("eval:page");
       return undefined;
     },
+    viewportSize: () => ({ width: 1440, height: 900 }),
     mouse: {
       move: async () => {
         calls.push("mouse:move");
@@ -297,6 +298,7 @@ describe("recordSiteMotion", () => {
     expect(sheetCalls[0].ctx.url).toBe(URL_UNDER_TEST);
     expect(sheetCalls[0].ctx.timeline).toBe(res.timeline);
     expect(sheetCalls[0].ctx.totalHeight).toBe(1200); // fake page height
+    expect(sheetCalls[0].ctx.viewport).toEqual({ width: 1440, height: 900 }); // threaded from page.viewportSize()
     expect(sheetCalls[0].opts).toEqual({ outDir: dir }); // same dir as the video
     // Old success fields intact.
     expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));

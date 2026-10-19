@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import type { ScrollCensus } from "../src/census.js";
 import { utcDayStart } from "../src/feed.js";
 import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
@@ -297,12 +298,11 @@ describe("search_sites", () => {
       .map((block) => (block as { type: "text"; text: string }).text))
       .toEqual(["Preview #1: stale-0", "Preview #2: stale-1"]);
     expect(res.content.filter((block) => block.type === "image")).toHaveLength(2);
-    // The two previews fetch concurrently (Promise.all), so the spy's call
-    // order races — assert the set, and let the response-order assertions
-    // above pin the ordering guarantee.
-    expect(new Set(thumbnail.mock.calls.map(([path]) => path))).toEqual(
-      new Set(["submissions/stale-0.jpg", "submissions/stale-1.jpg"]),
-    );
+    // compactContent fetches previews in card order (sequential by design),
+    // so the spy's recorded order is deterministic — pin it exactly.
+    expect(thumbnail.mock.calls.map(([path]) => path)).toEqual([
+      "submissions/stale-0.jpg", "submissions/stale-1.jpg",
+    ]);
   });
 
   it("keeps a partially filled compact page when its top-up fails", async () => {
@@ -1677,5 +1677,61 @@ describe("new_winners + watch_site", () => {
 
     expect(await body({ action: "remove", kind: "studio", pattern: "toyfight" })).toContain("Removed");
     expect(await body({ action: "remove", kind: "studio", pattern: "toyfight" })).toContain("No watch");
+  });
+});
+
+describe("analyze_scroll_map handler", () => {
+  const census = (): ScrollCensus => ({
+    url: "https://example.com/page",
+    capturedAt: 1700000000000,
+    counts: {
+      "gsap-scrolltrigger": 1,
+      "css-scroll-timeline": 0,
+      "css-view-timeline": 0,
+      "data-attr": 0,
+      "css-keyframe": 0,
+      smil: 0,
+      unknown: 0,
+    },
+    anims: [],
+    svgStrokes: [],
+    nativeScrollTimelines: 0,
+    gsapTriggers: [
+      {
+        selector: "main>h1",
+        scrub: false,
+        pin: false,
+        startPx: 0,
+        endPx: 800,
+        progress: 0,
+        vars: { stagger: "0.09" },
+      },
+    ],
+    reducedMotion: false,
+  });
+
+  it("composes choreography into the JSON additively; census payload unchanged", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache, scrollMapFn: async () => census() });
+    const res = await h.analyze_scroll_map({ url: "https://example.com/page" });
+    expect(res.isError).toBeUndefined();
+    const payload = JSON.parse((res.content[0] as any).text);
+    expect(payload.url).toBe("https://example.com/page");
+    expect(payload.gsapTriggers[0].vars.stagger).toBe("0.09");
+    expect(payload.choreography).toEqual({
+      hints: [{ selector: "main>h1", value: 0.09, source: "tween-var" }],
+      groups: 1,
+    });
+    expect(payload.scrubCurves).toBeUndefined();
+  });
+
+  it("error path stays unchanged (no choreography key)", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache, scrollMapFn: async () => ({ error: "boom" }) });
+    const res = await h.analyze_scroll_map({ url: "https://unreachable.example" });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toBe("boom");
   });
 });

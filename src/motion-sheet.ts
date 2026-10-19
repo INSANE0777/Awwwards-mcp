@@ -15,6 +15,10 @@ export interface SheetCtx {
   // undefined-check, never `in` (Task 1 note).
   timeline?: MotionTimeline;
   totalHeight?: number;
+  // Recording canvas, threaded from page.viewportSize() at record time.
+  // Trail coordinates scale by tile/viewport; absent keeps the 1440×900
+  // assumption (and byte-identical output with it).
+  viewport?: { width: number; height: number };
 }
 
 export interface SheetOpts {
@@ -45,6 +49,10 @@ const TILE_W = 720;
 // Tile-cell height GUESS: the desktop recording canvas is 1440×900, so a
 // 720-wide tile is 450 tall. Trail/overlay math assumes it (stated in the md).
 const TILE_H = 450;
+// Pre-paint guard: a run starting at t≈0 keys a tile before the browser has
+// painted anything (blank/white frame). Only the FIRST keyframe clamps into
+// this window; later runs keep their own times.
+const PREPAINT_MS = 600;
 
 const EXPECTED: Record<PhaseKind, string> = {
   dwell: "entrance / idle",
@@ -154,7 +162,11 @@ export async function buildMotionSheet(video: string, ctx: SheetCtx, opts: Sheet
       ? runs.map((_, i) => i)
       : Array.from({ length: MAX_KEYFRAMES }, (_, i) => Math.round((i * (runs.length - 1)) / (MAX_KEYFRAMES - 1)));
   const times = tl
-    ? indices.map((i) => (runs[i]!.startMs / 1000).toFixed(1))
+    ? indices.map((runIdx, i) =>
+        // indices[0] is always run 0 (both branches start at 0) — clamp it past
+        // the pre-paint window only.
+        ((i === 0 ? Math.max(runs[runIdx]!.startMs, PREPAINT_MS) : runs[runIdx]!.startMs) / 1000).toFixed(1),
+      )
     : Array.from({ length: MAX_KEYFRAMES }, (_, i) => (i * SAMPLE_S).toFixed(1));
   if (!tl) indices.push(...times.map((_, i) => i));
 
@@ -261,7 +273,11 @@ export async function buildMotionSheet(video: string, ctx: SheetCtx, opts: Sheet
     mdParts.push("- timeline not collected (collectTimeline:false) — captions unavailable; keyframes are uniform 4s samples.");
   }
   if (ctx.totalHeight !== undefined) mdParts.push(`- page height: ${ctx.totalHeight}px`);
-  mdParts.push("- viewport: not recorded — trail/overlay math assumes a 1440×900 desktop canvas (720×450 tiles)");
+  mdParts.push(
+    ctx.viewport
+      ? `- viewport: ${ctx.viewport.width}×${ctx.viewport.height} — trail/overlay math scaled to the ${TILE_W}px tile grid`
+      : "- viewport: not recorded — trail/overlay math assumes a 1440×900 desktop canvas (720×450 tiles)",
+  );
   if (tl && tl.trail.length > 0) {
     const xs = tl.trail.map((p) => p.x);
     const ys = tl.trail.map((p) => p.y);
@@ -297,11 +313,17 @@ export async function buildMotionSheet(video: string, ctx: SheetCtx, opts: Sheet
   // The static sheet: relative image refs only, no JS, no CDN; the cursor
   // trail is an SVG polyline over the grid's first cell; the timeline strip
   // is pure CSS (phase blocks positioned on a seconds axis).
+  // Trail scaling: page coordinates → the 720-wide tile cell. Absent viewport
+  // keeps the original 1440×900 assumption; 720/1440 and 450/900 are both
+  // exactly 0.5, so the no-viewport output stays byte-identical with the
+  // pre-viewport build.
+  const vw = ctx.viewport?.width ?? 1440;
+  const vh = ctx.viewport?.height ?? 900;
   const trailSvg = tl
     ? `<svg viewBox="0 0 ${TILE_W} ${TILE_H}" preserveAspectRatio="none">${
         tl.trail.length > 0
           ? `<polyline points="${tl.trail
-              .map((p) => `${(p.x * 0.5).toFixed(1)},${(p.y * 0.5).toFixed(1)}`)
+              .map((p) => `${((p.x * TILE_W) / vw).toFixed(1)},${((p.y * TILE_H) / vh).toFixed(1)}`)
               .join(" ")}"/></svg><p class="note">cursor trail (scaled to tile cell, shown over cell 0)</p>`
           : "</svg>"
       }`
