@@ -85,14 +85,16 @@ describe("buildMotionSheet", () => {
     }
 
     // Keyframes are per-tile -ss extractions at each run's first frame,
-    // scaled to the 720px tile width; grid + onion are single extra calls.
+    // scaled to the 720px tile width; the first tile is clamped past the
+    // 600ms pre-paint window (run 0 starts at 0 — later runs untouched);
+    // grid + onion are single extra calls.
     const tileCalls = calls.filter((a) => a.includes(video));
     expect(tileCalls).toHaveLength(5);
-    expect(tileCalls.map((c) => c[2])).toEqual(["0.0", "4.1", "5.0", "6.2", "6.9"]);
+    expect(tileCalls.map((c) => c[2])).toEqual(["0.6", "4.1", "5.0", "6.2", "6.9"]);
     expect(tileCalls[0]).toEqual([
       "-y",
       "-ss",
-      "0.0",
+      "0.6",
       "-i",
       video,
       "-frames:v",
@@ -116,7 +118,7 @@ describe("buildMotionSheet", () => {
     expect(md).toContain("https://example.com");
     expect(md).toContain("- duration: 8.5s");
     expect(md).toContain("![kf 0](sheet-kf-0.jpg)");
-    expect(md).toContain("t=0.0s");
+    expect(md).toContain("t=0.6s"); // first keyframe clamped past the pre-paint window
     expect(md).toContain("phase=dwell");
     expect(md).toContain("phase=scroll");
     expect(md).toContain("phase=hover");
@@ -228,5 +230,54 @@ describe("buildMotionSheet", () => {
     expect(html).not.toContain("cursor trail");
     // Timeline strip still renders.
     expect(html).toContain('<div class="ph ph-dwell"');
+  });
+
+  it("clamps only the first keyframe into the pre-paint window; later runs keep their times", async () => {
+    const { dir, video } = setup();
+    const calls: string[][] = [];
+    const tl: MotionTimeline = {
+      t0: 0,
+      phases: [
+        { kind: "dwell", startMs: 0, endMs: 400 },
+        { kind: "scroll", startMs: 400, endMs: 900, scrollY: 450 },
+        { kind: "return", startMs: 900, endMs: 1400 },
+      ],
+      trail: [],
+    };
+    await buildMotionSheet(
+      video,
+      { url: "https://example.com", timeline: tl },
+      { ffmpegPath: "ffmpeg-stub-bin", ffmpegFn: fakeFfmpeg(calls) },
+    );
+    // dwell 0ms → clamped to 0.6s; scroll 400ms and return 900ms untouched.
+    expect(calls.filter((a) => a.includes(video)).map((c) => c[2])).toEqual(["0.6", "0.4", "0.9"]);
+  });
+
+  it("scales the trail polyline to the recorded viewport and notes it in the md", async () => {
+    const { dir, video } = setup();
+    const res = await buildMotionSheet(
+      video,
+      { url: "https://example.com", timeline: TIMELINE, viewport: { width: 720, height: 450 } },
+      { ffmpegPath: "ffmpeg-stub-bin", ffmpegFn: fakeFfmpeg([]) },
+    );
+    // Hand-computed: a 720×450 canvas on the 720×450 tile scales 1:1, so the
+    // raw trail coordinates pass through unchanged.
+    const html = readFileSync(res.htmlPath, "utf8");
+    expect(html).toContain('points="60.0,300.0 400.0,700.0"');
+    const md = readFileSync(res.mdPath, "utf8");
+    expect(md).toContain("- viewport: 720×450");
+  });
+
+  it("pins the absent-viewport trail scaling: page coords ×0.5 (1440×900 canvas → 720×450 tile)", async () => {
+    const { dir, video } = setup();
+    const res = await buildMotionSheet(
+      video,
+      { url: "https://example.com", timeline: TIMELINE },
+      { ffmpegPath: "ffmpeg-stub-bin", ffmpegFn: fakeFfmpeg([]) },
+    );
+    // Byte pin for the no-viewport fallback: {60,300}/{400,700} × 0.5 =
+    // (30.0,150.0) (200.0,350.0) — exactly the pre-viewport polyline.
+    const html = readFileSync(res.htmlPath, "utf8");
+    expect(html).toContain('points="30.0,150.0 200.0,350.0"');
   });
 });
