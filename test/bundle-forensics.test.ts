@@ -59,6 +59,7 @@ describe("captureBundleForensics", () => {
         line: 1,
         preview: expect.stringContaining("attachLetterSwap"),
         keyword: "attachLetterSwap",
+        source: "raw",
       },
     ]);
     expect(rep.unpacked).toBe(false);
@@ -73,8 +74,8 @@ describe("captureBundleForensics", () => {
 
   it("unpacks with webcrack when the lazy import resolves", async () => {
     const unpackLoader = async () => ({
-      webcrack: async (code: string) => ({
-        code: "/* pretty */\n" + code,
+      webcrack: async (_code: string) => ({
+        code: "/* pretty */\n" + "function attach(){}", // pretty carries the keyword; the raw chunk does not
         bundle: {
           type: "webpack",
           modules: new Map([[870178, { id: 870178, code: "const x = 1;", path: "870178.js" }]]),
@@ -95,6 +96,18 @@ describe("captureBundleForensics", () => {
     expect(rep.chunks[0].path.endsWith("0-a.pretty.js")).toBe(true);
     expect(readFileSync(rep.chunks[0].path, "utf8").startsWith("/* pretty */")).toBe(true);
     expect(existsSync(join(rep.outDir, "unpacked", "000", "870178.js"))).toBe(true);
+    // The keyword exists ONLY in the pretty content — the union-scan found it
+    // there and labeled it "pretty" (raw chunks scan as "raw" elsewhere).
+    expect(rep.matches).toEqual([
+      {
+        chunk: 0,
+        url: A_JS,
+        line: 2, // after "/* pretty */" — the keyword is on the pretty file's second line
+        preview: expect.stringContaining("attach"),
+        keyword: "attach",
+        source: "pretty",
+      },
+    ]);
   });
 
   it("degrades to raw chunks + hint when webcrack is missing", async () => {
@@ -110,6 +123,47 @@ describe("captureBundleForensics", () => {
     expect(rep.unpacked).toBe(false);
     expect(rep.hint).toContain("webcrack");
     expect(rep.warnings).toEqual([]); // missing optional dep is a hint, not a warning
+  });
+
+  it("shows the installed-but-nothing-unpacked hint when webcrack loads but unpacks zero chunks", async () => {
+    const unpackLoader = async () => ({
+      webcrack: async () => {
+        throw new Error("boom");
+      },
+    });
+    const rep = await captureBundleForensics(PAGE, { fetchFn: unpackFetch, unpackLoader });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.unpacked).toBe(false);
+    // Distinct wording, no install tone; the unpack bounds are spelled out.
+    expect(rep.hint).toContain("installed but nothing was unpacked");
+    expect(rep.hint).toContain("first 10 chunks");
+    expect(rep.hint).toContain("2MB");
+    expect(rep.hint).not.toContain("npm install");
+    expect(rep.warnings.join("\n")).toContain("unpack skipped chunk 0: boom");
+  });
+
+  it("unpack cap consumes only qualifying chunks: 2 oversized + 10 small → 10 unpacked", async () => {
+    const srcs = Array.from({ length: 12 }, (_, i) => `${pageOrigin}/k${i}.js`);
+    const map: Record<string, string> = {
+      [PAGE]: `<html>${srcs.map((s) => `<script src="${s}"></script>`).join("")}</html>`,
+    };
+    for (let i = 0; i < srcs.length; i++) map[srcs[i]!] = i < 2 ? "x".repeat(2_500_000) : "var q=1;";
+    const unpackLoader = async () => ({
+      webcrack: async (code: string) => ({
+        code: "/* pretty */\n" + code,
+        bundle: { modules: new Map([[1, { id: 1, code: "const y = 1;", path: "1.js" }]]) },
+      }),
+    });
+    const rep = await captureBundleForensics(PAGE, { fetchFn: fakeFetchMap(map), unpackLoader });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.unpacked).toBe(true);
+    const deobfuscated = rep.chunks.filter((c) => c.deobfuscated).length;
+    expect(deobfuscated).toBe(10); // slots filled by qualifying chunks, not positions
+    expect(rep.warnings.filter((w) => w.includes("unpack skipped")).length).toBe(2); // the 2 oversized
   });
 
   it("never explodes on unexpected webcrack shapes", async () => {
@@ -269,6 +323,27 @@ describe("universal extraction: inline scripts + preload hints", () => {
     expect(rep.chunkCount).toBe(1); // inline (3000B) captured; b.js 5000B would exceed 6000 → stop
     expect(rep.totalBytes).toBe(3000);
     expect(rep.warnings.join("\n")).toContain("maxTotalBytes");
+  });
+
+  it("silently skips inline JSON-data scripts (ld+json/importmap/speculationrules); other non-JS types stay captured", async () => {
+    const map: Record<string, string> = {
+      [PAGE]: [
+        `<script type="application/ld+json">{"name":"x"}</script>`,
+        `<script type="importmap">{"imports":{}}</script>`,
+        `<script type="speculationrules">{"prefetch":[]}</script>`,
+        `<script type="text/template">tpl()</script>`, // not one of the JSON-data types → still a chunk
+        `<script>real()</script>`,
+      ].join(""),
+    };
+    const rep = await captureBundleForensics(PAGE, { fetchFn: fakeFetchMap(map), unpackLoader: async () => null });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // Only the two runnable inline scripts survive; inert JSON data is not bundle.
+    expect(rep.chunks.map((c) => c.url)).toEqual(["inline:0", "inline:1"]);
+    expect(readFileSync(rep.chunks[0].path, "utf8")).toBe("tpl()");
+    expect(readFileSync(rep.chunks[1].path, "utf8")).toBe("real()");
+    expect(rep.warnings).toEqual([]); // the JSON-data skips are silent
   });
 });
 
