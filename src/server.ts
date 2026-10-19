@@ -96,6 +96,7 @@ export type ScrollMapFn = (
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
   },
 ) => Promise<ScrollCensus | { error: string }>;
 
@@ -253,6 +254,7 @@ export interface Handlers {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
   }): Promise<ToolResponse>;
   analyze_hover_census(args: {
     url: string;
@@ -1099,17 +1101,24 @@ export function createHandlers(deps: {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
       const capture =
         deps.scrollMapFn ??
-        ((url: string, opts?: { waitStrategy?: WaitStrategy; viewport?: ViewportName; reducedMotion?: boolean }) =>
+        ((url: string, opts?: {
+          waitStrategy?: WaitStrategy;
+          viewport?: ViewportName;
+          reducedMotion?: boolean;
+          scrubProbe?: boolean;
+        }) =>
           import("./census.js").then((m) => m.captureScrollCensus(url, opts)));
       const result = await capture(args.url, {
         waitStrategy: args.waitStrategy,
         viewport: args.viewport ?? "desktop",
         reducedMotion: args.reducedMotion,
+        scrubProbe: args.scrubProbe,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };

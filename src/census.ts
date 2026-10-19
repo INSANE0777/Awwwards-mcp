@@ -28,6 +28,21 @@ export interface GsapTriggerRow {
   vars: Record<string, string>;
 }
 
+/** One sampled point of the L3 scrub probe (commanded/actual scrollY + live state). */
+export interface ScrubProbeSample {
+  scrollY: number;
+  progress: number | null;
+  transform: string | null;
+}
+
+/** One scrubbed trigger's real progress curve, read live across the scroll range. */
+export interface ScrubCurve {
+  selector: string;
+  startPx: number;
+  endPx: number;
+  steps: { scrollY: number; progress: number; transform: string | null }[];
+}
+
 /** One per-element animation row, as serialized from the page. */
 export interface RawAnim {
   selector: string;
@@ -62,6 +77,8 @@ export interface ScrollCensus {
   nativeScrollTimelines: number;
   /** GSAP deep capture rows — always present ([] when empty; required so the serialized JSON always carries the key); passthrough from the scan, order preserved. */
   gsapTriggers: GsapTriggerRow[];
+  /** L3 scrub probe curves — present ONLY when opts.scrubProbe was true; [] when the probe found nothing or failed. Absent (never []) when the flag is off, so disabled keeps the payload lean. */
+  scrubCurves?: ScrubCurve[];
   reducedMotion: boolean;
 }
 
@@ -341,6 +358,146 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
   return { anims, smilSelectors, nativeTimelines, gsapTriggers };
 };
 
+// Phase-0 of the L3 scrub probe. Runs IN THE PAGE once, AFTER the census
+// evaluate (page still open): re-reads the same stGlobal atlas the census
+// used, picks the first ≤6 triggers with BOTH bounds compiled (numeric
+// startPx AND endPx) and maps them to selector paths. The per-step snippet
+// then re-finds these SAME triggers by selector path, so atlas order drift
+// across steps cannot swap which trigger a curve belongs to. Plain function
+// expression (no arrow — page.evaluate re-serializes the source), zero outer
+// references, every probe try/caught. selPath is an inner copy of the
+// SCROLL_CENSUS_SNIPPET helper (self-containment > DRY — see the census
+// snippet comment; keep the two in sync).
+export const SCRUB_PROBE_INTRO = function (): {
+  maxScroll: number;
+  triggers: { selector: string; startPx: number; endPx: number }[];
+} {
+  const g = globalThis as any;
+  const out: { maxScroll: number; triggers: { selector: string; startPx: number; endPx: number }[] } = {
+    maxScroll: 0,
+    triggers: [],
+  };
+  try {
+    const doc = g.document;
+    const win = g;
+    // Banked scroll range: scrollHeight minus the viewport, floored at 0.
+    let sh = 0;
+    try {
+      sh = Math.round(doc.documentElement.scrollHeight || 0);
+    } catch {}
+    let ih = 0;
+    try {
+      ih = Math.round(win.innerHeight || 0);
+    } catch {}
+    out.maxScroll = sh > 0 ? Math.max(0, sh - ih) : 0;
+
+    // CSS selector path up to depth 6: tagName lowercase, nth-of-type
+    // disambiguation only when same-tag siblings exceed 1. (sync: selPath in
+    // SCROLL_CENSUS_SNIPPET)
+    function selPath(el: any): string {
+      const parts: string[] = [];
+      let node = el;
+      for (let depth = 0; node && depth < 6; depth++) {
+        let part = String(node.tagName || "*").toLowerCase();
+        try {
+          const parent = node.parentElement;
+          if (parent) {
+            const same = Array.from(parent.children).filter(function (c: any) {
+              return String(c.tagName) === String(node.tagName);
+            });
+            if (same.length > 1) part += ":nth-of-type(" + (same.indexOf(node) + 1) + ")";
+          }
+        } catch {}
+        parts.unshift(part);
+        node = node.parentElement;
+      }
+      return parts.join(">");
+    }
+
+    // First ≤6 registry triggers with both bounds compiled; selector-path
+    // keyed so later steps can re-locate the same instance.
+    try {
+      const stGlobal = win.ScrollTrigger || win.gsap?.plugins?.ScrollTrigger || null;
+      const list = stGlobal && stGlobal.getAll ? stGlobal.getAll().slice(0, 120) : [];
+      for (const st of list) {
+        if (out.triggers.length >= 6) break;
+        try {
+          if (typeof st.start !== "number" || typeof st.end !== "number") continue;
+          const trig = st.trigger ?? st.getTrigger?.() ?? null;
+          if (!trig || trig.nodeType !== 1) continue;
+          out.triggers.push({ selector: selPath(trig), startPx: st.start, endPx: st.end });
+        } catch {}
+      }
+    } catch {}
+  } catch {}
+  return out;
+};
+
+// Runs IN THE PAGE via page.evaluate(SCRUB_PROBE_STEP, selectors) once per
+// scroll step: re-finds each saved trigger element by selector path, matches
+// it back to the LIVE ScrollTrigger registry (stOf-style, same precedence as
+// the census), and samples progress + computed transform (≤60 chars) + the
+// page's actual scrollY. Rows keep the selectors' order. Plain function
+// expression, no arrows, zero outer references, every probe try/caught.
+// stOf is an inner copy of the SCROLL_CENSUS_SNIPPET helper (self-containment
+// > DRY — see the census snippet comment; keep the two in sync).
+export const SCRUB_PROBE_STEP = function (selectors: string[]): {
+  progress: number | null;
+  transform: string | null;
+  scrollY: number;
+}[] {
+  const g = globalThis as any;
+  const rows: { progress: number | null; transform: string | null; scrollY: number }[] = [];
+  const sels = Array.isArray(selectors) ? selectors.slice(0, 6) : [];
+  try {
+    const doc = g.document;
+    function stOf(el: any): any {
+      try {
+        const stGlobal = g.ScrollTrigger || g.gsap?.plugins?.ScrollTrigger || null;
+        if (!stGlobal?.getAll) return null;
+        const list = stGlobal.getAll().slice(0, 120);
+        for (const st of list) {
+          const t = st.trigger ?? st.getTrigger?.() ?? null;
+          if (t && t.nodeType === 1 && t === el) return st;
+        }
+        for (const st of list) {
+          const t = st.trigger ?? st.getTrigger?.() ?? null;
+          if (t && t.nodeType === 1 && el && (t.contains?.(el) || el.contains?.(t))) return st;
+        }
+      } catch {}
+      return null;
+    }
+    let scrollY = 0;
+    try {
+      scrollY = Math.round(g.scrollY) || 0;
+    } catch {}
+    for (const sel of sels) {
+      const row = { progress: null as number | null, transform: null as string | null, scrollY };
+      try {
+        const el = doc.querySelector(String(sel));
+        if (el) {
+          const st = stOf(el);
+          if (st && typeof st.progress === "number") row.progress = st.progress;
+          try {
+            row.transform = String(g.getComputedStyle(el).transform).slice(0, 60);
+          } catch {}
+        }
+      } catch {}
+      rows.push(row);
+    }
+  } catch {}
+  return rows;
+};
+
+// Runs IN THE PAGE via page.evaluate(SCRUB_SCROLL_TO, y): one plain scroll
+// command, same shape as pose3d.ts's SCROLL_TO (kept local — census must not
+// import from pose3d).
+const SCRUB_SCROLL_TO = function (y: number): void {
+  try {
+    globalThis.scrollTo(0, Math.max(0, Math.round(y)));
+  } catch {}
+};
+
 // PURE: aggregates a raw scan into the census. Counts per trigger source,
 // propagates stroke flags (SMIL owners count as strokes), sorts the preview
 // list scrub-first then pin-first.
@@ -391,6 +548,7 @@ export async function captureScrollCensus(
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    scrubProbe?: boolean;
     loader?: () => Promise<any>;
   },
 ): Promise<ScrollCensus | { error: string }> {
@@ -418,7 +576,105 @@ export async function captureScrollCensus(
       await preScroll(page);
       await page.waitForTimeout(500);
       const scan = (await page.evaluate(SCROLL_CENSUS_SNIPPET)) as ScrollScan;
-      return reduceScrollCensus(url, scan, Date.now(), !!opts?.reducedMotion);
+      const census = reduceScrollCensus(url, scan, Date.now(), !!opts?.reducedMotion);
+      // L3 scrub probe: opt-in second phase, page still open after the census
+      // evaluate. Drives ≤8 evenly spaced scrollTo steps across 0..maxScroll
+      // and samples the same triggers' live progress each step. ZERO extra
+      // evaluates when the flag is off, and scrubCurves stays absent unless
+      // the flag was set (lean-pack contract, pinned by tests).
+      if (opts?.scrubProbe) {
+        const curves: ScrubCurve[] = [];
+        try {
+          const intro = (await page.evaluate(SCRUB_PROBE_INTRO)) as {
+            maxScroll: number;
+            triggers: { selector: string; startPx: number; endPx: number }[];
+          };
+          const triggers = (intro && Array.isArray(intro.triggers) ? intro.triggers : []).filter(
+            function (t) {
+              return (
+                t &&
+                typeof t.selector === "string" &&
+                t.selector.length > 0 &&
+                typeof t.startPx === "number" &&
+                typeof t.endPx === "number"
+              );
+            },
+          ).slice(0, 6);
+          const maxScroll =
+            intro && typeof intro.maxScroll === "number" && intro.maxScroll > 0
+              ? Math.floor(intro.maxScroll)
+              : 0;
+          if (triggers.length > 0 && maxScroll > 0) {
+            // Rows are sampled in the triggers' order, so per-trigger buckets
+            // align by index — no selector-key collisions between curves.
+            const perTrigger: ScrubProbeSample[][] = triggers.map(function () {
+              return [];
+            });
+            let lastY = -1;
+            for (let step = 0; step < 8; step++) {
+              const y = Math.round((maxScroll * step) / 7);
+              // Evenly spaced points only repeat when maxScroll is 0 (loop is
+              // guarded above) — still honor "visited y ⇒ skip the scroll,
+              // keep the sample".
+              if (y !== lastY) {
+                lastY = y;
+                try {
+                  await page.evaluate(SCRUB_SCROLL_TO, y);
+                } catch {
+                  /* a refused scroll still gets sampled at the old offset */
+                }
+                await page.waitForTimeout(150);
+              }
+              try {
+                const rows = (await page.evaluate(
+                  SCRUB_PROBE_STEP,
+                  triggers.map(function (t) {
+                    return t.selector;
+                  }),
+                )) as ScrubProbeSample[];
+                for (let i = 0; i < triggers.length; i++) {
+                  const row = rows && rows[i] ? rows[i] : null;
+                  perTrigger[i].push({
+                    scrollY:
+                      row && typeof row.scrollY === "number" ? row.scrollY : y,
+                    progress:
+                      row && typeof row.progress === "number" ? row.progress : null,
+                    transform:
+                      row && typeof row.transform === "string" ? row.transform : null,
+                  });
+                }
+              } catch {
+                /* the step fails for all triggers; keep what earlier steps got */
+              }
+            }
+            // Silence per-trigger failures: one null progress (element or
+            // registry row unresolvable at any step) drops that trigger from
+            // the curves and the probe continues.
+            for (let i = 0; i < triggers.length; i++) {
+              const steps = perTrigger[i];
+              if (steps.length === 0) continue;
+              if (steps.some(function (s) {
+                return s.progress === null;
+              })) {
+                continue;
+              }
+              curves.push({
+                selector: triggers[i].selector,
+                startPx: triggers[i].startPx,
+                endPx: triggers[i].endPx,
+                steps: steps.map(function (s) {
+                  return { scrollY: s.scrollY, progress: s.progress as number, transform: s.transform };
+                }),
+              });
+            }
+          }
+        } catch {
+          /* probe is best-effort: any phase failure leaves curves empty */
+        }
+        // Flag ON: the key is always present ([] when nothing probed).
+        census.scrubCurves = curves;
+      }
+      return census;
     } finally {
       try {
         await browser.close();

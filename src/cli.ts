@@ -247,13 +247,15 @@ server.tool(
 
 server.tool(
   "analyze_scroll_map",
-  "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation.",
+  "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation. Optional scrubProbe drives the page and returns real progress curves per scrubbed trigger.",
   {
     url: z.string().url().describe("Absolute page URL to census"),
     waitStrategy: z.enum(["load", "networkidle"]).optional(),
     viewport: viewportSchema,
     reducedMotion: z.boolean().default(false)
       .describe("Emulate prefers-reduced-motion: reduce for this capture"),
+    scrubProbe: z.boolean().optional()
+      .describe("drive the page through up to 8 scroll steps and sample each scrubbed trigger's progress curve (adds seconds)"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_scroll_map(args)),

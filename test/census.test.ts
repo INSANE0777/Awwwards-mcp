@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { SCROLL_CENSUS_SNIPPET, reduceScrollCensus, captureScrollCensus, sampleKeyframes } from "../src/census.js";
+import {
+  SCROLL_CENSUS_SNIPPET,
+  SCRUB_PROBE_INTRO,
+  SCRUB_PROBE_STEP,
+  reduceScrollCensus,
+  captureScrollCensus,
+  sampleKeyframes,
+} from "../src/census.js";
 import type { RawAnim, ScrollScan, GsapTriggerRow } from "../src/census.js";
 
 // Fixture builder: Trigger is used verbatim in results, so tests can encode
@@ -287,5 +294,253 @@ describe("captureScrollCensus", () => {
     if ("error" in result) return;
     expect(result.reducedMotion).toBe(true);
     expect((getSeenContextOpts() as { reducedMotion?: string }).reducedMotion).toBe("reduce");
+  });
+});
+
+// L3 scrub probe. The fake page routes evaluate calls by sniffing the snippet
+// source (census / intro / scroll / step markers never overlap) and records
+// the call sequence plus every commanded scrollY, so the disabled path can be
+// pinned at zero extra evaluates and the enabled path checked against the
+// brief's bounds.
+type IntroFixture = { maxScroll: number; triggers: { selector: string; startPx: number; endPx: number }[] };
+
+function probeHarness(
+  scan: ScrollScan,
+  intro: IntroFixture | Error,
+  stepRowFn?: (selIndex: number) => { progress: number | null; transform: string | null },
+) {
+  const calls: string[] = [];
+  const scrolled: number[] = [];
+  const fakePage = {
+    addInitScript: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    evaluate: async (fn: unknown, arg?: unknown) => {
+      const src = String(fn);
+      if (src.includes("getAnimations")) {
+        calls.push("census");
+        return scan;
+      }
+      if (src.includes("maxScroll")) {
+        calls.push("intro");
+        if (intro instanceof Error) throw intro;
+        return intro;
+      }
+      // preScroll's settle loop also says scrollTo — mark it separately so
+      // probe assertions can filter the always-present census-phase calls.
+      if (src.includes("scrollTo(0, 0)")) {
+        calls.push("prescroll");
+        return undefined;
+      }
+      if (src.includes("Math.round(y)")) {
+        calls.push("scroll");
+        scrolled.push(Number(arg));
+        return undefined;
+      }
+      calls.push("step");
+      const count = intro instanceof Error ? 0 : intro.triggers.length;
+      const lastY = scrolled.length > 0 ? scrolled[scrolled.length - 1] : 0;
+      return Array.from({ length: count }, (_, i) => ({
+        scrollY: lastY,
+        progress: stepRowFn ? stepRowFn(i).progress : 0.5,
+        transform: stepRowFn ? stepRowFn(i).transform : "none",
+      }));
+    },
+  };
+  const fakeBrowser = {
+    newPage: async () => fakePage,
+    close: async () => {},
+  };
+  const loader = async () => ({ chromium: { launch: async () => fakeBrowser } });
+  return { loader, calls, scrolled };
+}
+
+const introFixture: IntroFixture = {
+  maxScroll: 7000,
+  triggers: [
+    { selector: "div.a", startPx: 0, endPx: 7000 },
+    { selector: "div.b", startPx: 1000, endPx: 5000 },
+  ],
+};
+
+describe("captureScrollCensus scrubProbe", () => {
+  it("disabled: zero extra evaluates and scrubCurves stays absent", async () => {
+    const { loader, calls, scrolled } = probeHarness(scan, introFixture);
+    const result = await captureScrollCensus("https://example.com", { loader });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(calls.filter((c) => c !== "prescroll")).toEqual(["census"]);
+    expect(scrolled).toEqual([]);
+    expect("scrubCurves" in result).toBe(false);
+  });
+
+  it("enabled: drives ≤8 monotonic steps across 0..maxScroll with aligned curves", async () => {
+    const { loader, calls, scrolled } = probeHarness(scan, introFixture);
+    const result = await captureScrollCensus("https://example.com", {
+      loader,
+      scrubProbe: true,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    // preScroll aside: 1 census + 1 intro + 8 scrolls + 8 samples.
+    const probing = calls.filter((c) => c !== "prescroll");
+    expect(probing[0]).toBe("census");
+    expect(probing[1]).toBe("intro");
+    expect(calls.filter((c) => c === "scroll").length).toBe(8);
+    expect(calls.filter((c) => c === "step").length).toBe(8);
+    expect(scrolled.length).toBeLessThanOrEqual(8);
+    expect(scrolled[0]).toBe(0);
+    expect(scrolled[scrolled.length - 1]).toBe(7000);
+    for (let i = 1; i < scrolled.length; i++) {
+      expect(scrolled[i]).toBeGreaterThan(scrolled[i - 1]);
+    }
+    const curves = result.scrubCurves ?? [];
+    expect(curves.length).toBe(2);
+    expect(curves[0]).toEqual({
+      selector: "div.a",
+      startPx: 0,
+      endPx: 7000,
+      steps: [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000].map((y) => ({
+        scrollY: y,
+        progress: 0.5,
+        transform: "none",
+      })),
+    });
+    expect(curves[1]).toEqual({
+      selector: "div.b",
+      startPx: 1000,
+      endPx: 5000,
+      steps: [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000].map((y) => ({
+        scrollY: y,
+        progress: 0.5,
+        transform: "none",
+      })),
+    });
+  });
+
+  it("silently drops a trigger whose progress is unreadable at any step", async () => {
+    const { loader } = probeHarness(scan, introFixture, (i) => ({
+      progress: i === 1 ? null : 0.25,
+      transform: "none",
+    }));
+    const result = await captureScrollCensus("https://example.com", {
+      loader,
+      scrubProbe: true,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    const curves = result.scrubCurves ?? [];
+    expect(curves.length).toBe(1);
+    expect(curves[0].selector).toBe("div.a");
+    expect(curves[0].steps.every((s) => s.progress === 0.25)).toBe(true);
+  });
+
+  it("probe phase failure leaves scrubCurves empty (but present) and never throws", async () => {
+    const { loader, scrolled } = probeHarness(scan, new Error("page exploded"));
+    const result = await captureScrollCensus("https://example.com", {
+      loader,
+      scrubProbe: true,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.scrubCurves).toEqual([]);
+    expect(scrolled).toEqual([]);
+  });
+
+  it("a page with no banked scroll range samples nothing", async () => {
+    const { loader, calls, scrolled } = probeHarness(scan, {
+      maxScroll: 0,
+      triggers: [{ selector: "div.a", startPx: 0, endPx: 0 }],
+    });
+    const result = await captureScrollCensus("https://example.com", {
+      loader,
+      scrubProbe: true,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.scrubCurves).toEqual([]);
+    expect(scrolled).toEqual([]);
+    expect(calls.filter((c) => c !== "prescroll")).toEqual(["census", "intro"]);
+  });
+});
+
+// Direct snippet runs: patch globalThis (restored in finally) with a fake
+// ScrollTrigger registry / document so the probe snippets execute in-process.
+describe("SCRUB_PROBE snippets (direct snippet runs + source locks)", () => {
+  const g = globalThis as any;
+
+  function withEnv<T>(env: Record<string, unknown>, fn: () => T): T {
+    const saved: Record<string, { v: unknown; had: boolean }> = {};
+    for (const k of Object.keys(env)) {
+      saved[k] = { v: g[k], had: k in g };
+      if (env[k] === undefined) delete g[k];
+      else g[k] = env[k];
+    }
+    try {
+      return fn();
+    } finally {
+      for (const k of Object.keys(saved)) {
+        if (saved[k].had) g[k] = saved[k].v;
+        else delete g[k];
+      }
+    }
+  }
+
+  it("intro picks the first ≤6 triggers with numeric start AND end bounds", () => {
+    const el = { nodeType: 1, tagName: "DIV" };
+    const fakeST = {
+      getAll: function () {
+        const rows: unknown[] = [{ trigger: el, start: "x", end: 100 }]; // non-numeric start → skipped
+        for (let i = 0; i < 8; i++) {
+          rows.push({ trigger: el, start: i * 100, end: i * 100 + 500 });
+        }
+        return rows;
+      },
+    };
+    const out = withEnv({ ScrollTrigger: fakeST, document: undefined }, SCRUB_PROBE_INTRO);
+    expect(out.maxScroll).toBe(0); // no document probe available in-process
+    expect(out.triggers.length).toBe(6);
+    expect(out.triggers[0]).toEqual({ selector: "div", startPx: 0, endPx: 500 });
+    expect(out.triggers[1].startPx).toBe(100);
+  });
+
+  it("step re-finds saved selectors and samples live progress (nulls on miss)", () => {
+    const el = { nodeType: 1, tagName: "DIV", parentElement: null };
+    const fakeST = {
+      getAll: function () {
+        return [{ trigger: el, progress: 0.42, start: 0, end: 500 }];
+      },
+    };
+    const fakeDoc = {
+      querySelector: function (s: string) {
+        return s === "div.a" ? el : null;
+      },
+    };
+    const rows = withEnv(
+      { ScrollTrigger: fakeST, document: fakeDoc, scrollY: 240 },
+      function () {
+        return SCRUB_PROBE_STEP(["div.a", "div.missing"]);
+      },
+    );
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toEqual({ progress: 0.42, transform: null, scrollY: 240 });
+    expect(rows[1].progress).toBeNull();
+  });
+
+  it("both probe snippets are serializable plain functions (no-arrow lock)", () => {
+    for (const snippet of [SCRUB_PROBE_INTRO, SCRUB_PROBE_STEP]) {
+      expect(typeof snippet).toBe("function");
+      expect(String(snippet)).not.toContain("=>");
+    }
+  });
+
+  it("probe bounds are locked in source (≤6 triggers, ≤60-char transform)", () => {
+    const intro = String(SCRUB_PROBE_INTRO);
+    expect(intro).toContain("triggers.length >= 6");
+    expect(intro).toContain("maxScroll");
+    const step = String(SCRUB_PROBE_STEP);
+    expect(step).toContain("selectors.slice(0, 6)");
+    expect(step).toContain(".slice(0, 60)");
+    expect(step).toContain("querySelector");
   });
 });
