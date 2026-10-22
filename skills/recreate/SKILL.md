@@ -20,7 +20,7 @@ Scope: whole page or specific sections? A continuous scroll-narrative (fixed sta
 
 ## Phase 1 — Evidence (free MCP, all read-only)
 
-> **Any URL works.** The reference does **not** need to exist on Awwwards. Only the search/index tools (`search_sites`, `get_site_details`, `new_winners`, …) are Awwwards-sourced; every capture tool below runs on any public link. If `search_sites` has no match, say so once and continue — the live evidence still gives you everything.
+> **Any URL works, but check Awwwards first.** Step 1 is always `search_sites` with the site's domain/name. If the site is listed → `get_site_details` for its recorded DNA (palette, tech, elements, awards) and carry that into the report. If no match → say so once and continue: only the search/index tools are Awwwards-sourced; every capture tool below runs on any public link, and the live evidence still gives you everything.
 
 - `analyze_stack <url>` → framework + CSS + libs (tells you whether the reference is Webflow/Next/static and which motion libs matter).
 - `analyze_page_structure <url>` → bands (section order + heights). If bands collapse into a giant, `capture_component` with explicit id/class selectors instead.
