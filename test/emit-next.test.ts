@@ -188,6 +188,8 @@ describe("emitNext", () => {
         "components/Section01.tsx",
         "components/Section02.tsx",
         "components/Section03.tsx",
+        "hooks/useSectionMotion.ts",
+        "motion.manifest.json",
       ].sort(),
     );
   });

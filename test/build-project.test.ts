@@ -537,6 +537,11 @@ describe("emitVite", () => {
         "src/styles/section-1.css",
         "src/styles/section-2.css",
         "src/styles/section-3.css",
+        "src/animations/section01.js",
+        "src/animations/section02.js",
+        "src/animations/section03.js",
+        "src/animations/registry.js",
+        "motion.manifest.json",
       ].sort(),
     );
   });
@@ -596,6 +601,11 @@ describe("emitAstro", () => {
         "src/styles/section-1.css",
         "src/styles/section-2.css",
         "src/styles/section-3.css",
+        "src/animations/section01.js",
+        "src/animations/section02.js",
+        "src/animations/section03.js",
+        "src/animations/registry.js",
+        "motion.manifest.json",
       ].sort(),
     );
   });
