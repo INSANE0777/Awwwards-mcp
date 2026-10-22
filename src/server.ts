@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { parseCategories, parseDetail, parseElements, parseListing } from "./parsers.js";
 import {
   AwwwardsClient,
@@ -15,6 +16,7 @@ import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
 import type { VerifyBuildFn } from "./verify-build.js";
+import type { BuildProjectFn } from "./build-project.js";
 import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
 import type { ComponentNode, ComponentPack } from "./component.js";
 import type { PoseGrid } from "./pose3d.js";
@@ -359,6 +361,7 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   analyze_stack(args: { url: string; timeoutMs?: number }): Promise<ToolResponse>;
   build_gsap_stub(args: { scrollCensus: unknown; poseGrid?: unknown }): Promise<ToolResponse>;
+  build_project(args: { htmlPath: string; target: "vite" | "astro" | "next"; out: string; name?: string }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
     scrubOnly?: boolean;
@@ -395,6 +398,7 @@ export function createHandlers(deps: {
   poseStubFn?: PoseStubFn;
   stackFn?: StackFn;
   gsapStubFn?: GsapStubFn;
+  buildProjectFn?: BuildProjectFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1443,6 +1447,30 @@ export function createHandlers(deps: {
     }
   }
 
+  // build_project: converts a LOCAL single-file rebuild into a runnable
+  // project tree by delegating to the buildProject core (bin shares it).
+  async function build_project(args: { htmlPath: string; target: "vite" | "astro" | "next"; out: string; name?: string }): Promise<ToolResponse> {
+    try {
+      if (!existsSync(args.htmlPath)) {
+        return { content: [text(`htmlPath does not exist: ${args.htmlPath}`)], isError: true };
+      }
+      const build =
+        deps.buildProjectFn ??
+        ((a: { html: string; target: "vite" | "astro" | "next"; out: string; name?: string }) =>
+          import("./build-project.js").then((m) => m.buildProject(a)));
+      const result = await build({
+        html: args.htmlPath,
+        target: args.target,
+        out: args.out,
+        ...(args.name ? { name: args.name } : {}),
+      });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function record_site_motion(args: {
     url: string;
     frames?: number;
@@ -1659,6 +1687,7 @@ export function createHandlers(deps: {
     build_pose_stub,
     analyze_stack,
     build_gsap_stub,
+    build_project,
     record_site_motion,
     get_motion_dna,
     search_motion,

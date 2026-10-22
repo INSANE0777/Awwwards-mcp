@@ -300,6 +300,21 @@ server.tool(
 );
 
 server.tool(
+  "build_project",
+  "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. Pairs with verify_build: build → convert → verify.",
+  {
+    htmlPath: z.string().describe("Local path to the single-file rebuild html to convert"),
+    target: z.enum(["vite", "astro", "next"]).describe("Framework of the generated project"),
+    out: z.string().describe("Directory to scaffold the project into (created as needed)"),
+    name: z.string().optional().describe("package.json name (default rebuild-site)"),
+  },
+  // First local-write tool in the suite, on purpose: it reads a local html and
+  // scaffolds a project directory — no awwwards.com traffic, nothing remote.
+  { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  (args) => asMcpResult(handlers.build_project(args)),
+);
+
+server.tool(
   "verify_build",
   "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
   {

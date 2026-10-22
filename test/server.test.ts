@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compactSiteDetails, createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
@@ -1945,5 +1945,62 @@ describe("C3 compact response modes", () => {
     const full = await h.get_site_details({ slug: "l-i-s-a" });
     expect(full.content[0].type).toBe("text");
     expect((full.content[0] as any).text).toContain("Live site:");
+  });
+});
+
+describe("build_project handler (v1.12 — first local-write tool)", () => {
+  it("checks htmlPath existence, forwards args to the injected build fn, returns the result JSON", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const dir = tmpDir();
+    writeFileSync(join(dir, "site.html"), "<!doctype html><html><body></body></html>");
+    const seen: Array<{ html: string; target: string; out: string; name?: string }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      buildProjectFn: async (a) => {
+        seen.push(a);
+        return { outDir: "/abs/out", target: "next", files: ["package.json", "app/page.tsx"], warnings: ["asset not found: ./assets/gone.png"] };
+      },
+    });
+    const res = await h.build_project({ htmlPath: join(dir, "site.html"), target: "next", out: "out/site", name: "Neu Omni 2" });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual([{ html: join(dir, "site.html"), target: "next", out: "out/site", name: "Neu Omni 2" }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.outDir).toBe("/abs/out");
+    expect(parsed.files).toContain("app/page.tsx");
+    expect(parsed.warnings).toEqual(["asset not found: ./assets/gone.png"]);
+  });
+
+  it("missing html -> isError before the build fn runs; core {error} -> isError; default core reads a real tmp file", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const dir = tmpDir();
+    writeFileSync(join(dir, "exists.html"), "<!doctype html><html><body></body></html>");
+    const seen: unknown[] = [];
+    const h = createHandlers({
+      client,
+      cache,
+      buildProjectFn: async (a) => {
+        seen.push(a);
+        return { error: "cannot read x" };
+      },
+    });
+    const missing = await h.build_project({ htmlPath: join(dir, "nope.html"), target: "vite", out: dir });
+    expect(missing.isError).toBe(true);
+    expect((missing.content[0] as any).text).toContain("htmlPath does not exist");
+    expect(seen).toHaveLength(0);
+    const err = await h.build_project({ htmlPath: join(dir, "exists.html"), target: "vite", out: "o" });
+    expect(err.isError).toBe(true);
+    expect((err.content[0] as any).text).toContain("cannot read x");
+    // default path writes a real tree from a real tmp html (offline fs only)
+    const h2 = createHandlers({ client, cache });
+    const htmlPath = join(dir, "site.html");
+    writeFileSync(htmlPath, '<!doctype html><html><body><section class="c-1"><p>x</p></section></body></html>');
+    const res = await h2.build_project({ htmlPath, target: "vite", out: join(dir, "proj") });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.target).toBe("vite");
+    expect(existsSync(join(dir, "proj", "index.html"))).toBe(true);
   });
 });

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  full-page rebuild generated from 3 component pack(s) across 3 band(s)
+  fonts needed: "Demo Local", sans-serif
+  exact-copy full-page rebuild — operator attests ownership or authorization of the source site (--attested)
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Demo+Local&display=swap">
+<style>
+  :root {
+  --c-1: rgb(20, 20, 20);
+  --fs-1: 16px;
+  --sp-1: 0px;
+  }
+  .media-slot { background: #e5e5e5; display: block; }
+.c-0 { position: relative; display: flex; flex-direction: column; gap: var(--sp-1); }
+.c-1 { color: var(--c-1); }
+.c-120 { color: #999; }
+.c-12 { display: grid; }
+.c-12 .c-13 { font-size: var(--fs-1); }
+.c-12 h2 { letter-spacing: 0.5px; }
+.c-23 { background-image: url("./assets/hero-b.png"); padding: var(--sp-1); }
+body { margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+</head>
+<body>
+<section class="c-0">
+      <div class="c-1">
+        <div class="c-2">Crafted digital work</div>
+      </div>
+    </section>
+<section class="c-12">
+      <div class="c-13">
+        <img class="c-14" src="./assets/hero-a.png" alt="" style="aspect-ratio: 4/3">
+      </div>
+      <section class="c-15">
+        <div class="c-16">nested keeps depth honest</div>
+      </section>
+      <div class="c-17"><!-- [script dropped by rebuild: behavior/document metadata is re-expressed, not copied] --></div>
+    </section>
+<section class="c-23">
+      <div class="c-24">Pricing</div>
+    </section>
+<script>
+gsap.registerPlugin(ScrollTrigger);
+
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (!REDUCED) {
+  // captured anim: .c-13 | props: opacity
+  gsap.timeline({ scrollTrigger: { trigger: ".c-13", start: "top 80%" }, defaults: { duration: 0.6, ease: "power2.out" } })
+  .from(".c-13", { opacity: 0, y: 40 });
+
+  // motion-dna sample 1: section .c-23 animates as a unit
+  gsap.timeline({ scrollTrigger: { trigger: ".c-23", start: "top 85%", end: "bottom top" }, defaults: { duration: 0.7, ease: "power1.out" } })
+    .from(".c-23", { opacity: 0, y: 40 });
+
+  // motion-dna sample 2: .c-24 scrubs; the captured end is a function string
+  gsap.timeline({ scrollTrigger: { trigger: ".c-24", start: "top 80%", end: "function(){ return getMax(); }", scrub: true }, defaults: { duration: 0.8, ease: "power2.out" } })
+    .from(".c-24", { opacity: 0, y: 40, onStart: () => { void 0; } });
+  ScrollTrigger.refresh();
+} else {
+  // static first frame: no tweens created, content renders in its final state
+}
+</script>
+</body>
+</html>
