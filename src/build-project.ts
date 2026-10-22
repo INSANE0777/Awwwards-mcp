@@ -378,14 +378,22 @@ export function extractScripts(html: string): ExtractedScripts {
 // URLs, root-absolute paths and refs containing ".." never enter the list, so
 // copies can never climb out of the output dir.
 const ASSET_REF_RE =
-  /<(?:link|script|img|image|source|video|audio|track)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["'][^>]*>|url\(\s*["']?([^)"'\s]+)["']?\s*\)/gi;
+  /<(?:link|script|img|image|source|video|audio|track|a)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["'][^>]*>|url\(\s*["']?([^)"'\s]+)["']?\s*\)/gi;
+
+const ASSET_EXT =
+  /\.(?:css|js|mjs|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|m4a|jpg|jpeg|png|webp|avif|gif|svg|pdf|json)$/i;
+const TEXT_ASSET = /\.(?:css|js|mjs)$/i;
+const QUOTED_REF_RE = /url\(\s*["']?([^)"'\s]+)["']?\s*\)|["'`]([^"'`\s]+)["'`]/g;
+
+const isAssetRef = (ref: string): boolean =>
+  ASSET_EXT.test(ref) || ref.replace(/^\.\//, "").startsWith("assets/");
 
 const collectAssetRefs = (html: string): string[] => {
   const seen = new Set<string>();
   const refs: string[] = [];
   for (const m of html.matchAll(ASSET_REF_RE)) {
     const ref = m[1] ?? m[2];
-    if (!ref || ref.includes("..") || !isLocalRef(ref)) continue;
+    if (!ref || ref.includes("..") || !isLocalRef(ref) || !isAssetRef(ref)) continue;
     const key = ref.replace(/^\.\//, "");
     if (seen.has(key)) continue;
     seen.add(key);
@@ -394,6 +402,22 @@ const collectAssetRefs = (html: string): string[] => {
   return refs;
 };
 
+// Dependencies of a copied css/js file (fonts, audio, images). Only local refs
+// with a file extension are followed; quadratic-brace/data URLs never qualify.
+// In JS, a bare `"cover.jpg"` is usually a runtime label, so require a path
+// separator there (css url() refs stay unrestricted).
+const collectTextAssetRefs = (text: string, js: boolean): string[] => {
+  const refs: string[] = [];
+  for (const m of text.matchAll(QUOTED_REF_RE)) {
+    const ref = m[1] ?? m[2];
+    if (!ref || ref.includes("..") || !isLocalRef(ref) || !ASSET_EXT.test(ref)) continue;
+    if (js && !ref.includes("/")) continue;
+    refs.push(ref);
+  }
+  return refs;
+};
+const JS_TEXT_ASSET = /\.(?:js|mjs)$/i;
+
 export interface CopyAssetsResult {
   copied: string[];
   missing: string[];
@@ -401,20 +425,47 @@ export interface CopyAssetsResult {
 
 // Copies every local ref into <outDir>/<into>/<ref path>, preserving the
 // source's relative shape (assets/css/js keep resolving next to their page).
-// A missing source is a warning (missing[]), never a hard failure.
+// Copied css/js files are scanned for their own local deps (fonts, audio,
+// images), so a stylesheet or app script cannot 404 its children. A missing
+// source is a warning (missing[]), never a hard failure.
 export async function copyAssets(html: string, srcDir: string, outDir: string, opts: { into?: string } = {}): Promise<CopyAssetsResult> {
   const root = join(resolve(outDir), opts.into ?? "");
+  const srcRoot = resolve(srcDir);
   const copied: string[] = [];
   const missing: string[] = [];
-  for (const ref of collectAssetRefs(html)) {
-    const to = join(root, ref.replace(/^\.\//, ""));
-    const from = resolve(srcDir, ref);
+  const seen = new Set<string>();
+  const missingSeen = new Set<string>();
+  const jobs = collectAssetRefs(html).map((ref) => ({
+    from: resolve(srcRoot, ref),
+    to: join(root, ref.replace(/^\.\//, "")),
+    label: ref,
+  }));
+  while (jobs.length > 0) {
+    const job = jobs.shift()!;
+    const dest = resolve(job.to);
+    if (seen.has(dest)) continue;
+    seen.add(dest);
     try {
-      await mkdir(dirname(to), { recursive: true });
-      await copyFile(from, to);
-      copied.push(ref);
+      await mkdir(dirname(job.to), { recursive: true });
+      await copyFile(job.from, job.to);
+      copied.push(job.label);
     } catch {
-      missing.push(ref);
+      if (!missingSeen.has(job.label)) missing.push(job.label);
+      missingSeen.add(job.label);
+      continue;
+    }
+    if (!TEXT_ASSET.test(job.from)) continue;
+    try {
+      const text = await readFile(job.from, "utf8");
+      for (const ref of collectTextAssetRefs(text, JS_TEXT_ASSET.test(job.from))) {
+        jobs.push({
+          from: resolve(dirname(job.from), ref),
+          to: join(dirname(job.to), ref.replace(/^\.\//, "")),
+          label: ref,
+        });
+      }
+    } catch {
+      // unreadable text asset: the copy itself already succeeded
     }
   }
   return { copied, missing };
@@ -659,12 +710,15 @@ export function emitVite(split: Split, outDir: string, name: string): { files: S
       devDependencies: { vite: "^7" },
     }),
   );
-  // Root assets keep their verbatim refs in dev; `vite build` bundles the
-  // stylesheet link but cannot bundle classic (non-module) rehost scripts, so
-  // the plugin copies assets/ into dist where those src paths still resolve.
+  // Root inputs keep their verbatim refs in dev; `vite build` bundles the
+  // stylesheet/images but cannot bundle classic (non-module) rehost scripts.
+  // The plugin copies every non-project input (assets/, vendor/, app.js, ...)
+  // into dist so those src paths still resolve after build.
   add(
     "vite.config.js",
-    `import { cpSync, existsSync } from "node:fs";
+    `import { cpSync, readdirSync } from "node:fs";
+
+const PROJECT = new Set(["index.html", "package.json", "package-lock.json", "node_modules", "src", "dist", "public", "vite.config.js"]);
 
 export default {
   base: "./",
@@ -672,7 +726,10 @@ export default {
     {
       name: "copy-classic-assets",
       closeBundle() {
-        if (existsSync("assets")) cpSync("assets", "dist/assets", { recursive: true });
+        for (const name of readdirSync(".")) {
+          if (PROJECT.has(name) || name.startsWith(".")) continue;
+          cpSync(name, \`dist/\${name}\`, { recursive: true });
+        }
       },
     },
   ],

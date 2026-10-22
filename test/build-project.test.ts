@@ -17,6 +17,7 @@ import {
 const FIXTURES = join(__dirname, "fixtures", "build-project");
 const sample = () => readFileSync(join(FIXTURES, "sample.html"), "utf8");
 const sample2 = () => readFileSync(join(FIXTURES, "sample2.html"), "utf8");
+const sample3 = () => readFileSync(join(FIXTURES, "sample3.html"), "utf8");
 
 // Real-shape variant: band roots may be divs (full-page.mjs renumbering keeps
 // class="c-N" on whatever tag the pack root was captured as).
@@ -283,6 +284,79 @@ describe("rehost shape: external local css/js + inline scripts", () => {
         expect(readFileSync(join(assets, "site.css"), "utf8")).toContain(".hero { color:");
         expect(readFileSync(join(assets, "site.js"), "utf8")).toContain("__siteScriptRan");
         expect(readdirSync(assets).sort()).toEqual(["site.css", "site.js"]);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("root-relative rehost: styles.css + vendor scripts in strict order", () => {
+  const order = (text: string, needles: string[]): number[] => needles.map((n) => text.indexOf(n));
+
+  it("collects root-relative css/js and follows their local deps", () => {
+    const split = splitBuild(sample3());
+    expect(split.sections.detected).toBe("generic");
+    expect(split.assetRefs).toEqual([
+      "styles.css",
+      "vendor/gsap.min.js",
+      "vendor/ScrollTrigger.min.js",
+      "app.js",
+    ]);
+    expect(split.scripts.headInlineJs[0]).toContain("prefers-reduced-motion");
+    expect(split.scripts.bodyScripts.map((b) => (b.kind === "external" ? b.src : b.js))).toEqual([
+      "vendor/gsap.min.js",
+      "vendor/ScrollTrigger.min.js",
+      "app.js",
+    ]);
+  });
+
+  it("vite: link + classic scripts keep their original order", () => {
+    const index = byPath(viteByName(sample3()))["index.html"] ?? "";
+    const [css, gsap, st, app] = order(index, [
+      'href="styles.css"',
+      'src="vendor/gsap.min.js"',
+      'src="vendor/ScrollTrigger.min.js"',
+      'src="app.js"',
+    ]);
+    expect(css).toBeGreaterThan(-1);
+    expect(gsap).toBeGreaterThan(css);
+    expect(st).toBeGreaterThan(gsap);
+    expect(app).toBeGreaterThan(st);
+    expect(index).toContain("prefers-reduced-motion");
+  });
+
+  it("astro: link in head, vendor scripts as is:inline in one ordered block", () => {
+    const index = byPath(astroByName(sample3()))["src/pages/index.astro"] ?? "";
+    const [css, gsap, st, app] = order(index, [
+      'href="styles.css"',
+      'is:inline src="vendor/gsap.min.js"',
+      'is:inline src="vendor/ScrollTrigger.min.js"',
+      'is:inline src="app.js"',
+    ]);
+    expect(css).toBeGreaterThan(-1);
+    expect(gsap).toBeGreaterThan(css);
+    expect(st).toBeGreaterThan(gsap);
+    expect(app).toBeGreaterThan(st);
+    expect(index).toMatch(/<script is:inline>\s*if\(matchMedia/);
+  });
+
+  it("buildProject copies root css/js, vendor order files and css/js-referenced assets", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-root-"));
+    try {
+      for (const target of ["vite", "astro", "next"] as const) {
+        const out = join(dir, target);
+        const res = await buildProject({ html: join(FIXTURES, "sample3.html"), target, out });
+        expect(res).toHaveProperty("files");
+        if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+        expect(res.warnings).toEqual([]);
+        const base = target === "vite" ? out : join(out, "public");
+        for (const ref of ["styles.css", "app.js", "vendor/gsap.min.js", "vendor/ScrollTrigger.min.js"]) {
+          expect(existsSync(join(base, ref))).toBe(true);
+        }
+        // transitive deps: @font-face url() in css, new Audio() in js
+        expect(readFileSync(join(base, "assets", "font.woff2"), "utf8")).toContain("fixture-font-bytes");
+        expect(readFileSync(join(base, "assets", "audio.mp3"), "utf8")).toContain("fixture-audio-bytes");
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });

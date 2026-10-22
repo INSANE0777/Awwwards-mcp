@@ -7,6 +7,7 @@ import { join } from "node:path";
 const FIXTURES = join(__dirname, "fixtures", "build-project");
 const sample = () => readFileSync(join(FIXTURES, "sample.html"), "utf8");
 const sample2 = () => readFileSync(join(FIXTURES, "sample2.html"), "utf8");
+const sample3 = () => readFileSync(join(FIXTURES, "sample3.html"), "utf8");
 
 const nextByName = (html: string, name = "Neu Omni 2") => emitNext(splitBuild(html), "unused", name).files;
 const byPath = (files: Array<{ path: string; content: string }>) =>
@@ -328,6 +329,21 @@ gsap.timeline({ scrollTrigger: { trigger: ".c-999", start: "top 85%" } })
     expect(page).not.toContain("__heroRuns");
     expect(files.map((x) => x.path)).not.toContain("components/SiteScripts.tsx");
     expect(JSON.stringify(files).split("__heroRuns").length - 1).toBe(1);
+  });
+
+  it("root-relative rehost: public paths + strict vendor order, head bootstrap kept", () => {
+    const files = nextByName(sample3());
+    const f = byPath(files);
+    const layout = f["app/layout.tsx"] ?? "";
+    expect(layout).toContain('<link rel="stylesheet" href="/styles.css" />');
+    const [css, gsap, st, app] = ['href="/styles.css"', '<script src="/vendor/gsap.min.js">', '<script src="/vendor/ScrollTrigger.min.js">', '<script src="/app.js">'].map((n) => layout.indexOf(n));
+    expect(css).toBeGreaterThan(-1);
+    expect(gsap).toBeGreaterThan(css);
+    expect(st).toBeGreaterThan(gsap);
+    expect(app).toBeGreaterThan(st);
+    expect(layout).toContain("prefers-reduced-motion");
+    expect(f["components/Section01.tsx"]).toContain('<div className="stage" id="stage" dangerouslySetInnerHTML');
+    expect(f["components/Section02.tsx"]).toContain('<div className="scroll-space" id="space" dangerouslySetInnerHTML');
   });
 
   it("determinism: two runs are byte-equal", () => {
