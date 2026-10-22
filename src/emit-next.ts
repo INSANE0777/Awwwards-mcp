@@ -12,7 +12,7 @@
 // that dependency behind it. Import cycle with build-project.ts is
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
-import { attributeBlocks, bodyBounds, cssTo, headBounds, nn, packageName, scriptFile } from "./build-project.js";
+import { attributeBlocks, bodyBounds, cssTo, nn, packageName, scriptFile } from "./build-project.js";
 import type { BodyScript, EmitResult, LoaderScript, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
 
 // Dashed HTML/SVG attrs → JSX camelCase. Dashed-but-unlisted (data-*, aria-*,
@@ -43,9 +43,15 @@ const ATTR_MAP = new Map(Object.entries({
   "font-weight": "fontWeight",
   "for": "htmlFor",
   "http-equiv": "httpEquiv",
+  "hreflang": "hrefLang",
   "imagesizes": "imageSizes",
   "imagesrcset": "imageSrcSet",
   "inputmode": "inputMode",
+  "itemid": "itemId",
+  "itemprop": "itemProp",
+  "itemref": "itemRef",
+  "itemscope": "itemScope",
+  "itemtype": "itemType",
   "letter-spacing": "letterSpacing",
   "maxlength": "maxLength",
   "minlength": "minLength",
@@ -282,16 +288,15 @@ const escapeHtmlText = (text: string): string =>
 const jsxRawScript = (open: string, body: string): string =>
   `${open.replace(/\s*\/?>$/, "")} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(body).replace(/</g, "\\u003c")} }} />`;
 
-// Document head carried into layout.tsx: captured title (fallback --name),
-// meta/og/favicon links, and non-JS data scripts (ld+json/importmap). Local
-// stylesheets were folded before the split; remote ones are added by the
-// caller from headTags. Executable head scripts are handled separately (inline
-// stays in head, externals go to SiteScripts).
-const rehostHeadLines = (shell: string, name: string): string[] => {
-  const { start, end } = headBounds(shell);
-  const head = end > start ? shell.slice(start, end) : "";
+// Document head carried into layout.tsx in exact captured order: title, meta,
+// links, data scripts, and executable scripts (their pre-paint positions). Local
+// stylesheets were folded before the split; <style> blocks are skipped because
+// their CSS ships through tokens/site.css.
+const rehostHeadLines = (rehost: RehostSplit, name: string): string[] => {
+  const head = rehost.headHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
   const lines: string[] = [];
   let hasTitle = false;
+  let scriptIndex = 0;
   for (const m of head.matchAll(/<title\b[^>]*>[\s\S]*?<\/title\s*>|<meta\b[^>]*>|<link\b[^>]*>|<script\b[^>]*>[\s\S]*?<\/script\s*>/gi)) {
     const tag = m[0];
     if (/^<title/i.test(tag)) {
@@ -306,13 +311,17 @@ const rehostHeadLines = (shell: string, name: string): string[] => {
       continue;
     }
     if (/^<link/i.test(tag)) {
-      if (/rel\s*=\s*["']?stylesheet/i.test(tag)) continue;
       lines.push(jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(tag))));
       continue;
     }
     const open = /^<script\b[^>]*>/i.exec(tag)?.[0] ?? "";
     const type = headAttr(open, "type").toLowerCase();
-    if (JS_SCRIPT_TYPES.has(type)) continue; // executable head scripts handled by headScripts
+    if (JS_SCRIPT_TYPES.has(type)) {
+      const entry = rehost.headScripts[scriptIndex];
+      scriptIndex += 1;
+      if (entry) lines.push(headScriptJsx(entry));
+      continue;
+    }
     const body = /^<script\b[^>]*>([\s\S]*?)<\/script\s*>$/i.exec(tag)?.[1] ?? "";
     lines.push(jsxRawScript(htmlToJsx(open), body));
   }
@@ -333,7 +342,7 @@ const headScriptJsx = (entry: LoaderScript): string => {
 
 // Rehost layout: document head metadata + head scripts in captured order, one
 // client loader for body scripts (see SiteScripts).
-const rehostLayout = (headLines: string[], cssImports: string[], headScripts: LoaderScript[]): string =>
+const rehostLayout = (headLines: string[], cssImports: string[]): string =>
   `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
 import SiteScripts from "../components/SiteScripts";
 
@@ -342,7 +351,7 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <head>${layoutHeadTags([...headLines, ...headScripts.map(headScriptJsx)])}</head>
+      <head>${layoutHeadTags(headLines)}</head>
       <body>
         {children}
         <SiteScripts />
@@ -704,10 +713,7 @@ export function emitNext(split: Split, outDir: string, name: string): EmitResult
       add("styles/site.css", cssTo(split.styles.siteCss, "/"));
       cssImports.push('import "../styles/site.css";');
     }
-    const styleLinks = split.headTags
-      .filter((t) => t.kind === "style")
-      .map((t) => jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(t.tag))));
-    add("app/layout.tsx", rehostLayout([...rehostHeadLines(rehost.shell, name), ...styleLinks], cssImports, rehost.headScripts));
+    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name), cssImports));
     add("app/page.tsx", rehostPage(rehost));
     rehost.sections.forEach((s, i) => {
       const section = rehostSection(s, i);

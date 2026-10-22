@@ -93,6 +93,10 @@ describe("htmlToJsx: style attr (kit ports)", () => {
     expect(htmlToJsx('<link rel="preconnect" crossorigin>')).toContain('crossOrigin="anonymous"');
     expect(htmlToJsx('<script nomodule fetchpriority="high"></script>')).toContain("noModule");
     expect(htmlToJsx('<script nomodule fetchpriority="high"></script>')).toContain('fetchPriority="high"');
+    expect(htmlToJsx('<link rel="alternate" hreflang="en">')).toContain('hrefLang="en"');
+    expect(htmlToJsx('<meta itemprop="name" itemscope itemtype="https://schema.org/Thing">')).toContain('itemProp="name"');
+    expect(htmlToJsx('<meta itemprop="name" itemscope itemtype="https://schema.org/Thing">')).toContain("itemScope");
+    expect(htmlToJsx('<meta itemprop="name" itemscope itemtype="https://schema.org/Thing">')).toContain('itemType="https://schema.org/Thing"');
   });
 
   it("uses the first colon only (url values with colons survive)", () => {

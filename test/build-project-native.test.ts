@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import ts from "typescript";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProject, emitAstro, emitVite, splitBuild, splitRehost } from "../src/build-project.js";
@@ -155,6 +155,8 @@ describe("next: native rehost tree", () => {
         `<!doctype html><html><head>
 <link rel="preconnect" href="https://fonts.test" crossorigin>
 <link rel="preload" as="font" href="https://fonts.test/f.woff2" type="font/woff2" crossorigin fetchpriority="high">
+<link rel="alternate" hreflang="en" href="https://example.test/en">
+<meta itemprop="name" content="Head fixture">
 <script src="https://cdn.test/a.js" integrity="sha384-x" crossorigin="anonymous" defer referrerpolicy="no-referrer" nomodule></script>
 <script nonce="abc" id="boot">window.__boot = 1;</script>
 </head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
@@ -167,17 +169,34 @@ describe("next: native rehost tree", () => {
       expect(layout).toContain('referrerPolicy="no-referrer"');
       expect(layout).toContain("noModule");
       expect(layout).toContain('fetchPriority="high"');
+      expect(layout).toContain('hrefLang="en"');
+      expect(layout).toContain('itemProp="name"');
       expect(layout).not.toContain("crossorigin");
       expect(layout).not.toContain("referrerpolicy");
       expect(layout).not.toContain("nomodule");
       expect(layout).not.toContain("fetchpriority");
+      expect(layout).not.toContain("hreflang");
+      expect(layout).not.toContain("itemprop");
 
       // Strict JSX stub: only real props exist, no permissive index signature.
-      writeFileSync(join(out, "components", "SiteScripts.tsx"), "export default function SiteScripts() {\n  return null;\n}\n");
-      writeFileSync(join(out, "react.d.ts"), 'declare module "react" {\n  export type ReactNode = unknown;\n}\n');
-      writeFileSync(
-        join(out, "jsx.d.ts"),
-        `declare namespace JSX {
+      // In-process TypeScript program (independent of the build's own tsc run).
+      const checkFiles: Record<string, string> = {
+        "/app/layout.tsx": layout,
+        "/components/SiteScripts.tsx": "export default function SiteScripts() {\n  return null;\n}\n",
+        "/react.d.ts": 'declare module "react" {\n  export type ReactNode = unknown;\n}\n',
+        "/jsx.d.ts": `type Readonly<T> = T;
+interface Function {}
+interface IArguments {}
+interface NewableFunction {}
+interface Number {}
+interface Object {}
+interface RegExp {}
+interface String {}
+interface Boolean {}
+interface CallableFunction {}
+interface Array<T> { readonly length: number; }
+interface ReadonlyArray<T> { readonly length: number; }
+declare namespace JSX {
   interface Element {}
   interface IntrinsicElements {
     html: { lang?: string; children?: unknown };
@@ -186,8 +205,8 @@ describe("next: native rehost tree", () => {
     main: { id?: string; children?: unknown };
     section: { id?: string; className?: string; children?: unknown };
     title: { children?: unknown };
-    link: { rel?: string; href?: string; type?: string; as?: string; crossOrigin?: string; fetchPriority?: string };
-    meta: { name?: string; content?: string; property?: string; charSet?: string };
+    link: { rel?: string; href?: string; type?: string; as?: string; crossOrigin?: string; fetchPriority?: string; hrefLang?: string };
+    meta: { name?: string; content?: string; property?: string; charSet?: string; itemProp?: string; itemScope?: boolean; itemType?: string; itemId?: string; itemRef?: string };
     script: {
       src?: string;
       integrity?: string;
@@ -205,33 +224,46 @@ describe("next: native rehost tree", () => {
   }
 }
 `,
-      );
-      writeFileSync(
-        join(out, "tsconfig.check.json"),
-        JSON.stringify({
-          compilerOptions: {
-            target: "ES2017",
-            lib: ["esnext"],
-            strict: true,
-            noEmit: true,
-            jsx: "preserve",
-            module: "esnext",
-            moduleResolution: "bundler",
-            types: [],
-          },
-          include: ["app/**/*.tsx", "components/**/*.tsx", "react.d.ts", "jsx.d.ts"],
-        }),
-      );
-      try {
-        execFileSync(
-          process.execPath,
-          [join(process.cwd(), "node_modules", "typescript", "bin", "tsc"), "-p", join(out, "tsconfig.check.json")],
-          { stdio: "pipe", encoding: "utf8" },
-        );
-      } catch (err) {
-        const e = err as { stdout?: string; stderr?: string };
-        throw new Error(`strict tsc failed:\n${e.stdout ?? ""}${e.stderr ?? ""}`);
-      }
+      };
+      const options: ts.CompilerOptions = {
+        target: ts.ScriptTarget.ES2017,
+        strict: true,
+        noEmit: true,
+        noLib: true,
+        skipLibCheck: true,
+        jsx: ts.JsxEmit.Preserve,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        types: [],
+      };
+      const host: ts.CompilerHost = {
+        getSourceFile: (name, languageVersion) => {
+          const text = checkFiles[ts.normalizePath(name)];
+          if (text === undefined) return undefined;
+          return ts.createSourceFile(
+            name,
+            text,
+            languageVersion,
+            true,
+            name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+          );
+        },
+        getDefaultLibFileName: () => "/lib.d.ts",
+        writeFile: () => {},
+        getCurrentDirectory: () => "/",
+        getDirectories: () => [],
+        fileExists: (name) => checkFiles[ts.normalizePath(name)] !== undefined,
+        readFile: (name) => checkFiles[ts.normalizePath(name)],
+        getCanonicalFileName: (name) => name,
+        useCaseSensitiveFileNames: () => true,
+        getNewLine: () => "\n",
+      };
+      const program = ts.createProgram(Object.keys(checkFiles), options, host);
+      const messages = ts.getPreEmitDiagnostics(program).map((d) => {
+        const where = d.file?.fileName ?? "ts";
+        return `${where}: ${ts.flattenDiagnosticMessageText(d.messageText, "\n")}`;
+      });
+      expect(messages).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -489,6 +521,29 @@ describe("head scripts keep captured order in <head> (not the loader)", () => {
     expect(inline).toBeLessThan(text.indexOf("</head>"));
   };
 
+  it("keeps a data script between executable head scripts in every target", () => {
+    const mixed = `<!doctype html><html><head>
+<script src="https://cdn.test/first.js"></script>
+<script type="application/ld+json">{"@type":"Thing","name":"Between"}</script>
+<script src="https://cdn.test/second.js"></script>
+</head><body><main id="main"><section id="a">A</section><section id="b">B</section></main><script src="app.js"></script></body></html>`;
+    const orderOf = (text: string) =>
+      order(text, ["https://cdn.test/first.js", "application/ld+json", "https://cdn.test/second.js"]);
+    const assertBetween = (text: string) => {
+      const [first, data, second] = orderOf(text);
+      expect(first).toBeGreaterThan(-1);
+      expect(data).toBeGreaterThan(first);
+      expect(second).toBeGreaterThan(data);
+      expect(text).toContain("Between");
+    };
+    const next = byPath(emitNext(splitBuild(mixed), "unused", "x").files);
+    assertBetween(next["app/layout.tsx"] ?? "");
+    const astro = byPath(emitAstro(splitBuild(mixed), "unused", "x").files);
+    assertBetween(astro["src/pages/index.astro"] ?? "");
+    const vite = byPath(emitVite(splitBuild(mixed), "unused", "x").files);
+    assertBetween(vite["index.html"] ?? "");
+  });
+
   it("next: layout head cdn -> inline; SiteScripts only body scripts", () => {
     const f = byPath(emitNext(splitBuild(html), "unused", "x").files);
     const layout = f["app/layout.tsx"] ?? "";
@@ -698,13 +753,13 @@ describe("buildProject: local stylesheet folding + css url rebasing", () => {
       writeFileSync(join(dir, "b.css"), ".b { color: blue; }\n");
       writeFileSync(
         join(dir, "index.html"),
-        `<!doctype html><html><head><style>/* @import "b.css"; */\n.x { color: red; }</style></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+        `<!doctype html><html><head><style>/* @import "b.css"; */\n.x { color: red; content: "/* keep */"; }</style></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
       );
       const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
       if ("error" in res) throw new Error(res.error);
       expect(res.warnings).toEqual([]);
       const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
-      expect(site).toContain(".x { color: red; }");
+      expect(site).toContain('.x { color: red; content: "/* keep */"; }');
       expect(site).not.toContain(".b { color: blue; }");
       expect(site).not.toContain("@import");
     } finally {
@@ -732,6 +787,19 @@ describe("buildProject: local stylesheet folding + css url rebasing", () => {
       expect(site).toContain("@supports (display: grid)");
       expect(site.indexOf("@layer base")).toBeLessThan(site.indexOf("@supports (display: grid)"));
       expect(site.indexOf("@supports (display: grid)")).toBeLessThan(site.indexOf(".b { display: grid; }"));
+
+      writeFileSync(join(dir, "nested.css"), '@import "b.css" supports(not (display: grid));\n.n { color: blue; }\n');
+      writeFileSync(
+        join(dir, "nested.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="nested.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const nested = await buildProject({ html: join(dir, "nested.html"), target: "next", out: join(dir, "nested-out") });
+      if ("error" in nested) throw new Error(nested.error);
+      expect(nested.warnings).toEqual([]);
+      const nestedCss = readFileSync(join(dir, "nested-out", "styles", "site.css"), "utf8");
+      expect(nestedCss).toContain("@supports (not (display: grid))");
+      expect(nestedCss).toContain(".b { display: grid; }");
+      expect(nestedCss).not.toContain("@media (display: grid)");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

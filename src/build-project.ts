@@ -56,6 +56,7 @@ export interface RehostSplit {
   shell: string; // whole document with section nodes replaced by <SectionNN /> markers
   container: string; // tag#id label of the content container (e.g. main#main)
   sections: RebuildSection[];
+  headHtml: string; // captured <head> inner HTML, used to replay all head tags in order
   headScripts: LoaderScript[]; // <head> scripts in source order (external + inline)
   scripts: LoaderScript[]; // body scripts in source order
 }
@@ -288,8 +289,37 @@ const parseRules = (css: string): string[] => {
 // @import must precede every rule; a captured file may have one after a rule
 // (invalid CSS) or an inline chunk may bring one in after earlier page rules.
 const CSS_IMPORT_AT = /@import\s+(?:url\(\s*(["']?)[^)"']+\1\s*\)|"[^"]*"|'[^']*')\s*[^;]*;/gi;
-const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
-const stripCssComments = (css: string): string => css.replace(CSS_COMMENT, "");
+// Quote-aware: `content: "/* x */"` is data, not a comment. Backslash escapes
+// inside strings are preserved so an escaped quote cannot end the string early.
+const stripCssComments = (css: string): string => {
+  let out = "";
+  let quote = "";
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i] ?? "";
+    if (quote !== "") {
+      out += ch;
+      if (ch === "\\") {
+        out += css[i + 1] ?? "";
+        i += 1;
+      } else if (ch === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      i = end === -1 ? css.length : end + 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+};
 
 const hoistCssImports = (css: string): { css: string; hoisted: string[] } => {
   const matches = [...css.matchAll(CSS_IMPORT_AT)];
@@ -759,10 +789,12 @@ export function splitRehost(html: string): RehostSplit | null {
 
   const entries = collectScriptEntries(html);
   const stripHead = ({ head: _head, ...entry }: LoaderScript & { head: boolean }): LoaderScript => entry;
+  const { start: headStart, end: headEnd } = headBounds(html);
   return {
     shell,
     container: container.label,
     sections,
+    headHtml: headEnd > headStart ? html.slice(headStart, headEnd) : "",
     headScripts: entries.filter((s) => s.head).map(stripHead),
     scripts: entries.filter((s) => !s.head).map(stripHead),
   };
@@ -956,6 +988,25 @@ const resolveProjectRef = (fromDir: string, ref: string): string | null => {
 
 const escapeStyleClose = (css: string): string => css.replace(/<\/style/gi, "<\\/style");
 
+// Reads `name(...)` with balanced parens so nested conditions
+// (`supports(not (display: grid))`) survive intact.
+const readCssFunction = (input: string, name: string): { inner: string; rest: string } | null => {
+  const start = new RegExp(`^${name}\\s*\\(`, "i").exec(input);
+  if (!start) return null;
+  let depth = 1;
+  let i = start[0].length;
+  for (; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+  }
+  if (depth !== 0) return null;
+  return { inner: input.slice(start[0].length, i), rest: input.slice(i + 1) };
+};
+
 const wrapCssImport = (child: string, condition: string): string => {
   let rest = condition.trim();
   let out = child;
@@ -965,10 +1016,10 @@ const wrapCssImport = (child: string, condition: string): string => {
     layerName = (layer[1] ?? "").trim();
     rest = rest.slice(layer[0].length);
   }
-  const supports = /^supports\(\s*([\s\S]*?)\)\s*/i.exec(rest);
+  const supports = readCssFunction(rest, "supports");
   if (supports) {
-    out = `@supports (${(supports[1] ?? "").trim()}) { ${out} }`;
-    rest = rest.slice(supports[0].length);
+    out = `@supports (${supports.inner.trim()}) { ${out} }`;
+    rest = supports.rest.trim();
   }
   if (layerName !== null) out = `@layer${layerName ? ` ${layerName}` : ""} { ${out} }`;
   if (rest !== "") out = `@media ${rest} { ${out} }`;
@@ -1187,12 +1238,36 @@ const headScriptTag = (entry: LoaderScript, dir: string, astro: boolean): string
   return astro ? `<script is:inline${attrs}>${entry.js}</script>` : `<script${attrs}>${entry.js}</script>`;
 };
 
-const headScriptTags = (scripts: LoaderScript[], dir: string, astro: boolean): string[] =>
-  scripts.map((s) => headScriptTag(s, dir, astro));
+// Replays every captured head tag in source order: metadata, stylesheet links,
+// data scripts, and executable scripts at their original positions. <style>
+// blocks are skipped because their CSS is emitted through tokens/site.css.
+const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean): string => {
+  const head = rehost.headHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
+  const lines: string[] = [];
+  let scriptIndex = 0;
+  for (const m of head.matchAll(
+    /<title\b[^>]*>[\s\S]*?<\/title\s*>|<meta\b[^>]*>|<link\b[^>]*>|<script\b[^>]*>[\s\S]*?<\/script\s*>/gi,
+  )) {
+    const tag = m[0];
+    if (/^<script/i.test(tag)) {
+      const open = /^<script\b[^>]*>/i.exec(tag)?.[0] ?? "";
+      if (JS_TYPES.has(attr(open, "type").toLowerCase())) {
+        const entry = rehost.headScripts[scriptIndex];
+        scriptIndex += 1;
+        if (entry) lines.push(headScriptTag(entry, dir, astro));
+        continue;
+      }
+    }
+    lines.push(tag);
+  }
+  return lines.join("\n");
+};
 
-const withHeadInline = (doc: string, block: string): string => {
-  if (block === "") return doc;
-  return /<\/head\s*>/i.test(doc) ? doc.replace(/<\/head\s*>/i, () => `${block}\n</head>`) : doc;
+const withRehostHead = (doc: string, head: string): string => {
+  if (head === "") return doc;
+  const { start, end } = headBounds(doc);
+  if (end <= start) return doc;
+  return `${doc.slice(0, start)}\n${head}\n${doc.slice(end)}`;
 };
 
 // One ordered block at the end of the shell (the single loader for this page).
@@ -1253,14 +1328,14 @@ export function emitAstro(split: Split, outDir: string, name: string): EmitResul
     }
     rehost.sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
     const loader = rehost.scripts.map(astroRehostLoaderTag).join("\n");
-    const head = headScriptTags(rehost.headScripts, "scripts", true).join("\n");
+    const head = rehostHeadReplay(rehost, "scripts", true);
     add(
       "src/pages/index.astro",
       `---
 // Generated by awwwards-build-project — native shell, real sections, one ordered loader.
 ${imports.join("\n")}
 ---
-${withLoader(withHeadInline(rehost.shell, head), loader)}`,
+${withLoader(withRehostHead(rehost.shell, head), loader)}`,
     );
     rehost.sections.forEach((s, i) => {
       const { content, risky } = astroSection(s, i);
@@ -1428,7 +1503,10 @@ export default {
       .join("\n");
     add(
       "index.html",
-      withLoader(withHeadInline(inlineShell(rehost), headScriptTags(rehost.headScripts, "src/scripts", false).join("\n")), loader),
+      withLoader(
+        withRehostHead(inlineShell(rehost), rehostHeadReplay(rehost, "src/scripts", false)),
+        loader,
+      ),
     );
     return { files, warnings };
   }
