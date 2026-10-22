@@ -3,11 +3,13 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  FULL_BODY_WARNING,
   buildProject,
   copyAssets,
   emitAstro,
   emitVite,
   extractScripts,
+  isLocalRef,
   parseBuildArgs,
   parseRebuildSections,
   splitBuild,
@@ -299,6 +301,7 @@ describe("root-relative rehost: styles.css + vendor scripts in strict order", ()
     expect(split.sections.detected).toBe("generic");
     expect(split.assetRefs).toEqual([
       "styles.css",
+      "vendor/head.js",
       "vendor/gsap.min.js",
       "vendor/ScrollTrigger.min.js",
       "app.js",
@@ -326,19 +329,24 @@ describe("root-relative rehost: styles.css + vendor scripts in strict order", ()
     expect(index).toContain("prefers-reduced-motion");
   });
 
-  it("astro: link in head, vendor scripts as is:inline in one ordered block", () => {
+  it("astro: local head script gets is:inline; link + scripts keep source order", () => {
     const index = byPath(astroByName(sample3()))["src/pages/index.astro"] ?? "";
-    const [css, gsap, st, app] = order(index, [
+    const [boot, css, head, gsap, st, app] = order(index, [
+      "prefers-reduced-motion",
       'href="styles.css"',
+      'is:inline src="vendor/head.js"',
       'is:inline src="vendor/gsap.min.js"',
       'is:inline src="vendor/ScrollTrigger.min.js"',
       'is:inline src="app.js"',
     ]);
-    expect(css).toBeGreaterThan(-1);
-    expect(gsap).toBeGreaterThan(css);
+    expect(boot).toBeGreaterThan(-1);
+    expect(css).toBeGreaterThan(boot);
+    expect(head).toBeGreaterThan(css);
+    expect(gsap).toBeGreaterThan(head);
     expect(st).toBeGreaterThan(gsap);
     expect(app).toBeGreaterThan(st);
     expect(index).toMatch(/<script is:inline>\s*if\(matchMedia/);
+    expect(index).not.toContain('<script src="vendor/head.js"');
   });
 
   it("buildProject copies root css/js, vendor order files and css/js-referenced assets", async () => {
@@ -351,7 +359,7 @@ describe("root-relative rehost: styles.css + vendor scripts in strict order", ()
         if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
         expect(res.warnings).toEqual([]);
         const base = target === "vite" ? out : join(out, "public");
-        for (const ref of ["styles.css", "app.js", "vendor/gsap.min.js", "vendor/ScrollTrigger.min.js"]) {
+        for (const ref of ["styles.css", "app.js", "vendor/head.js", "vendor/gsap.min.js", "vendor/ScrollTrigger.min.js"]) {
           expect(existsSync(join(base, ref))).toBe(true);
         }
         // transitive deps: @font-face url() in css, new Audio() in js
@@ -361,6 +369,111 @@ describe("root-relative rehost: styles.css + vendor scripts in strict order", ()
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("review round: body fallback + head order + asset riders", () => {
+  const bodyPage = `<!doctype html><html><head><title>x</title></head><body><h1>Hi</h1><p>Copy</p></body></html>`;
+
+  it("B2: h1/p-only body becomes one full-body section with a warning (all targets)", async () => {
+    const split = splitBuild(bodyPage);
+    expect(split.sections.detected).toBe("generic");
+    expect(split.sections.sections).toHaveLength(1);
+    expect(split.warnings).toEqual([FULL_BODY_WARNING]);
+    expect(byPath(viteByName(bodyPage))["index.html"]).toContain("<h1>Hi</h1><p>Copy</p>");
+    expect(byPath(astroByName(bodyPage))["src/components/Section01.astro"]).toContain("<h1>Hi</h1>");
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-b2-"));
+    try {
+      const out = join(dir, "next");
+      writeFileSync(join(dir, "page.html"), bodyPage);
+      const ok = await buildProject({ html: join(dir, "page.html"), target: "next", out });
+      if ("error" in ok) throw new Error(ok.error);
+      expect(ok.warnings).toEqual([FULL_BODY_WARNING]);
+      const section = readFileSync(join(out, "components", "Section01.tsx"), "utf8");
+      expect(section).toContain("Hi");
+      expect(section).toContain("Copy");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("B2: inter-root text nodes force the full-body fallback and are kept", () => {
+    const html = `<body><div class="hero">A</div> stray words <div class="foot">B</div><script>window.tail=1</script></body>`;
+    const split = splitBuild(html);
+    expect(split.sections.sections).toHaveLength(1);
+    expect(split.warnings).toEqual([FULL_BODY_WARNING]);
+    expect(byPath(viteByName(html))["index.html"]).toContain("stray words");
+  });
+
+  it("R1: inline-script-only asset refs copy when present and warn when missing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-r1-"));
+    try {
+      mkdirSync(join(dir, "assets"), { recursive: true });
+      writeFileSync(join(dir, "assets", "clip.mp3"), "clip");
+      const html = `<body><script>new Audio("assets/clip.mp3"); new Audio("assets/nope.mp3");</script></body>`;
+      const out = join(dir, "out");
+      const res = await copyAssets(html, dir, out);
+      expect(res.copied).toContain("assets/clip.mp3");
+      expect(res.missing).toContain("assets/nope.mp3");
+      expect(readFileSync(join(out, "assets", "clip.mp3"), "utf8")).toBe("clip");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("R2: .. and extensionless css deps surface as missing instead of silent skip", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-r2-"));
+    try {
+      writeFileSync(join(dir, "styles.css"), `@font-face{src:url(../fonts/x.woff2)}a{background:url(fonts/y)}`);
+      const html = `<html><head><link rel="stylesheet" href="styles.css"></head><body><div>x</div></body></html>`;
+      const res = await copyAssets(html, dir, join(dir, "out"));
+      expect(res.missing).toContain("../fonts/x.woff2");
+      expect(res.missing).toContain("fonts/y");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("R3: missing </head> falls back to <body>; tail script never duplicates", () => {
+    const frag = `<div>x</div><script>window.tail=1</script>`;
+    const split = splitBuild(frag);
+    expect(split.scripts.headInlineJs).toEqual([]);
+    expect(split.scripts.bodyScripts).toHaveLength(1);
+    const index = byPath(viteByName(frag))["index.html"] ?? "";
+    expect(index.split("window.tail").length - 1).toBe(1);
+  });
+
+  it("R4: isLocalRef rejects Windows-style roots and protocol-relative refs", () => {
+    expect(isLocalRef("assets/x.png")).toBe(true);
+    expect(isLocalRef("\\\\server\\share\\x.png")).toBe(false);
+    expect(isLocalRef("\\assets\\x.png")).toBe(false);
+    expect(isLocalRef("//cdn/x.png")).toBe(false);
+  });
+
+  it("R5: body-level stylesheet links stay in the body, head links extract once", () => {
+    const html = `<html><head><link rel="stylesheet" href="head.css"></head><body><link rel="stylesheet" href="body.css"><div>hi</div></body></html>`;
+    expect(splitStyles(html).headLinks).toEqual(['<link rel="stylesheet" href="head.css">']);
+    const index = byPath(viteByName(html))["index.html"] ?? "";
+    expect(index.split('href="body.css"').length - 1).toBe(1);
+    expect(index.split('href="head.css"').length - 1).toBe(1);
+    const head = index.slice(0, index.indexOf("</head>"));
+    expect(head).toContain("head.css");
+    expect(head).not.toContain("body.css");
+    const astro = byPath(astroByName(html))["src/pages/index.astro"] ?? "";
+    const astroSection = byPath(astroByName(html))["src/components/Section01.astro"] ?? "";
+    expect(astroSection).toContain('href="body.css"');
+    expect(astro.slice(0, astro.indexOf("</head>"))).not.toContain("body.css");
+  });
+
+  it("R6: head tags preserve source interleave (inline before external)", () => {
+    const html = `<html><head><script>window.boot=1</script><link rel="stylesheet" href="s.css"><script src="https://cdn.test/x.js"></script></head><body><div>x</div></body></html>`;
+    const split = splitBuild(html);
+    expect(split.headTags.map((t) => t.kind)).toEqual(["inline", "style", "external"]);
+    const index = byPath(astroByName(html))["src/pages/index.astro"] ?? "";
+    const [boot, css, ext] = ["window.boot=1", 'href="s.css"', "https://cdn.test/x.js"].map((n) => index.indexOf(n));
+    expect(boot).toBeGreaterThan(-1);
+    expect(css).toBeGreaterThan(boot);
+    expect(ext).toBeGreaterThan(css);
   });
 });
 

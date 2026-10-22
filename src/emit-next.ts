@@ -404,11 +404,13 @@ export function emitNext(split: Split, outDir: string, name: string): { files: S
   const generic = split.sections.detected === "generic";
   const hasCdns = split.scripts.cdns.length > 0;
   const attributed = attributeBlocks(split);
-  const headTags = [
-    ...split.scripts.headExternal.map(rewriteLocalUrlTag),
-    ...split.styles.headLinks.map((t) => jsxSelfClose(rewriteLocalUrlTag(t))),
-    ...split.scripts.headInlineJs.map(jsxInlineScript),
-  ];
+  const headTags = split.headTags.map((t) =>
+    t.kind === "inline"
+      ? jsxInlineScript(t.js)
+      : t.kind === "style"
+        ? jsxSelfClose(rewriteLocalUrlTag(t.tag))
+        : rewriteLocalUrlTag(t.tag),
+  );
   // Generic: every loose body script (external + inline) stays raw at body end.
   // Section-nested scripts already ship inside the raw section HTML, so they
   // are not in bodyScripts (no double execution). Rebuild keeps externals only.

@@ -336,9 +336,10 @@ gsap.timeline({ scrollTrigger: { trigger: ".c-999", start: "top 85%" } })
     const f = byPath(files);
     const layout = f["app/layout.tsx"] ?? "";
     expect(layout).toContain('<link rel="stylesheet" href="/styles.css" />');
-    const [css, gsap, st, app] = ['href="/styles.css"', '<script src="/vendor/gsap.min.js">', '<script src="/vendor/ScrollTrigger.min.js">', '<script src="/app.js">'].map((n) => layout.indexOf(n));
+    const [css, head, gsap, st, app] = ['href="/styles.css"', '<script src="/vendor/head.js">', '<script src="/vendor/gsap.min.js">', '<script src="/vendor/ScrollTrigger.min.js">', '<script src="/app.js">'].map((n) => layout.indexOf(n));
     expect(css).toBeGreaterThan(-1);
-    expect(gsap).toBeGreaterThan(css);
+    expect(head).toBeGreaterThan(css);
+    expect(gsap).toBeGreaterThan(head);
     expect(st).toBeGreaterThan(gsap);
     expect(app).toBeGreaterThan(st);
     expect(layout).toContain("prefers-reduced-motion");
