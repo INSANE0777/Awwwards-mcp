@@ -193,6 +193,25 @@ describe("copyAssets", () => {
     }
   });
 
+  it("copies social-card meta images, ignoring ordinary meta copy", async () => {
+    const src = mkdtempSync(join(tmpdir(), "awwwards-bp-src-"));
+    const out = mkdtempSync(join(tmpdir(), "awwwards-bp-out-"));
+    try {
+      mkdirSync(join(src, "assets"));
+      writeFileSync(join(src, "assets", "og.jpg"), Buffer.from([255, 216, 255]));
+      const html =
+        '<meta property="og:image" content="./assets/og.jpg">' +
+        '<meta name="description" content="shipping assets/team.png">' +
+        '<meta name="twitter:image" content="./assets/og.jpg">';
+      const result = await copyAssets(html, src, out, { into: "public" });
+      expect(result.copied).toEqual(["./assets/og.jpg"]);
+      expect(existsSync(join(out, "public", "assets", "og.jpg"))).toBe(true);
+    } finally {
+      rmSync(src, { recursive: true, force: true });
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
   it("missing sources land in missing[]; traversal refs are refused outright", async () => {
     const src = mkdtempSync(join(tmpdir(), "awwwards-bp-src-"));
     const out = mkdtempSync(join(tmpdir(), "awwwards-bp-out-"));
