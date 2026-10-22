@@ -288,6 +288,8 @@ const parseRules = (css: string): string[] => {
 // @import must precede every rule; a captured file may have one after a rule
 // (invalid CSS) or an inline chunk may bring one in after earlier page rules.
 const CSS_IMPORT_AT = /@import\s+(?:url\(\s*(["']?)[^)"']+\1\s*\)|"[^"]*"|'[^']*')\s*[^;]*;/gi;
+const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
+const stripCssComments = (css: string): string => css.replace(CSS_COMMENT, "");
 
 const hoistCssImports = (css: string): { css: string; hoisted: string[] } => {
   const matches = [...css.matchAll(CSS_IMPORT_AT)];
@@ -302,7 +304,9 @@ const hoistCssImports = (css: string): { css: string; hoisted: string[] } => {
 };
 
 export function splitStyles(html: string, classNames: string[] = autoSectionClasses(html)): SplitStyles {
-  const allCss = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n");
+  const allCss = stripCssComments(
+    [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n"),
+  );
   const rootRe = /:root\s*\{[^{}]*\}/g;
   const tokens = [...allCss.matchAll(rootRe)].map((m) => m[0]);
   const hoistedCss = hoistCssImports(allCss.replace(rootRe, ""));
@@ -952,6 +956,25 @@ const resolveProjectRef = (fromDir: string, ref: string): string | null => {
 
 const escapeStyleClose = (css: string): string => css.replace(/<\/style/gi, "<\\/style");
 
+const wrapCssImport = (child: string, condition: string): string => {
+  let rest = condition.trim();
+  let out = child;
+  const layer = /^layer(?:\(\s*([^)]*)\s*\))?\s*/i.exec(rest);
+  let layerName: string | null = null;
+  if (layer) {
+    layerName = (layer[1] ?? "").trim();
+    rest = rest.slice(layer[0].length);
+  }
+  const supports = /^supports\(\s*([\s\S]*?)\)\s*/i.exec(rest);
+  if (supports) {
+    out = `@supports (${(supports[1] ?? "").trim()}) { ${out} }`;
+    rest = rest.slice(supports[0].length);
+  }
+  if (layerName !== null) out = `@layer${layerName ? ` ${layerName}` : ""} { ${out} }`;
+  if (rest !== "") out = `@media ${rest} { ${out} }`;
+  return out;
+};
+
 // Folds local @imports depth-first (max depth 3, cycle-guarded), rebases every
 // url() to the project root, and hoists late imports. Remote imports stay at
 // the top; missing/unsafe local imports are dropped with a warning.
@@ -963,16 +986,17 @@ const foldCssText = async (
   seen: Set<string>,
   warnings: string[],
 ): Promise<string> => {
+  const clean = stripCssComments(source);
   const dir = dirname(rel);
-  const firstBrace = source.indexOf("{");
+  const firstBrace = clean.indexOf("{");
   const head: string[] = [];
-  for (const m of source.matchAll(CSS_IMPORT_ONE)) {
+  for (const m of clean.matchAll(CSS_IMPORT_ONE)) {
     const raw = m[0];
     if (firstBrace !== -1 && (m.index ?? 0) > firstBrace) {
       warnings.push(`late CSS @import hoisted: ${raw.trim()} (from ${rel})`);
     }
     const ref = m[2] ?? m[4] ?? "";
-    const media = (m[5] ?? "").trim();
+    const condition = m[5] ?? "";
     if (ref.includes("\\")) {
       warnings.push(`CSS @import unsafe path dropped: ${ref} (from ${rel})`);
       continue;
@@ -1005,9 +1029,9 @@ const foldCssText = async (
     seen.add(childAbs);
     const child = await foldCssText(childSource, target, childAbs, depth + 1, seen, warnings);
     seen.delete(childAbs);
-    head.push(media && !/^(?:layer|supports)\b/i.test(media) ? `@media ${media} { ${child} }` : child);
+    head.push(wrapCssImport(child, condition));
   }
-  const rest = rebaseCssUrls(source.replace(CSS_IMPORT_ONE, ""), dir, "");
+  const rest = rebaseCssUrls(clean.replace(CSS_IMPORT_ONE, ""), dir, "");
   return [...head, rest].filter(Boolean).join("\n");
 };
 
@@ -1018,9 +1042,10 @@ const foldCssText = async (
 const inlineLocalStyles = async (
   html: string,
   srcDir: string,
-): Promise<{ html: string; folded: string[]; warnings: string[] }> => {
+): Promise<{ html: string; folded: string[]; warnings: string[]; changed: boolean }> => {
   const folded: string[] = [];
   const warnings: string[] = [];
+  let changed = false;
   const parts: string[] = [];
   let last = 0;
   for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
@@ -1030,17 +1055,16 @@ const inlineLocalStyles = async (
     const media = attr(tag, "media").trim();
     if (media !== "" && media.toLowerCase() !== "all") continue;
     const href = attr(tag, "href");
-    if (href.includes("\\") || href.includes("..")) {
+    if (!isLocalRef(href)) continue;
+    if (href.includes("\\") || href.split(/[?#]/)[0]?.includes("..") === true) {
       warnings.push(`stylesheet not folded (unsafe path): ${href}`);
+      parts.push(html.slice(last, m.index));
+      last = (m.index ?? 0) + tag.length;
+      changed = true;
       continue;
     }
-    if (!isLocalRef(href)) continue;
     const rel = href.split(/[?#]/)[0] ?? "";
     if (rel === "") continue;
-    if (rel.includes("..")) {
-      warnings.push(`stylesheet not folded (unsafe path): ${href}`);
-      continue;
-    }
     const abs = resolve(srcDir, rel);
     let source: string;
     try {
@@ -1053,10 +1077,33 @@ const inlineLocalStyles = async (
     parts.push(`<style data-folded="${rel}">\n${escapeStyleClose(css)}\n</style>`);
     last = (m.index ?? 0) + tag.length;
     folded.push(href);
+    changed = true;
   }
-  if (folded.length === 0) return { html, folded, warnings };
-  parts.push(html.slice(last));
-  return { html: parts.join(""), folded, warnings };
+  let out = changed ? parts.join("") + html.slice(last) : html;
+
+  // Inline <style>@import "x.css" — fold it too, otherwise the hoisted import
+  // points at a file that is never copied (404).
+  const styles = [...out.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)];
+  const styleParts: string[] = [];
+  let styleLast = 0;
+  let styleChanged = false;
+  for (const m of styles) {
+    if (/\bdata-folded=/i.test(m[1] ?? "")) continue;
+    const body = m[2] ?? "";
+    // New regex per test: the shared global would leak lastIndex between styles.
+    if (!new RegExp(CSS_IMPORT_ONE.source, "i").test(stripCssComments(body))) continue;
+    const css = await foldCssText(body, "inline.css", resolve(srcDir, "inline.css"), 0, new Set(), warnings);
+    styleParts.push(out.slice(styleLast, m.index));
+    styleParts.push(`<style${m[1] ?? ""}>${escapeStyleClose(css)}</style>`);
+    styleLast = (m.index ?? 0) + m[0].length;
+    styleChanged = true;
+  }
+  if (styleChanged) {
+    styleParts.push(out.slice(styleLast));
+    out = styleParts.join("");
+    changed = true;
+  }
+  return { html: out, folded, warnings, changed };
 };
 
 const sectionsBodyHtml = (split: Split): string => (split.sections.sections ?? []).map((s) => s.text).join("\n");
@@ -1471,12 +1518,14 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   let split = splitBuild(html);
   let foldedCss: string[] = [];
   let cssWarnings: string[] = [];
+  let assetHtml = html;
   if (split.rehost) {
     const inlined = await inlineLocalStyles(html, dirname(src));
-    if (inlined.folded.length > 0) {
-      foldedCss = inlined.folded;
+    if (inlined.changed) {
       split = splitBuild(inlined.html);
+      assetHtml = inlined.html;
     }
+    foldedCss = inlined.folded;
     cssWarnings = inlined.warnings;
   }
   const emitted =
@@ -1495,7 +1544,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
       : [...split.rehost.headScripts, ...split.rehost.scripts].filter(
           (s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external" && s.local,
         );
-  const { missing } = await copyAssets(html, dirname(src), outDir, {
+  const { missing } = await copyAssets(assetHtml, dirname(src), outDir, {
     ...(args.target === "vite" ? {} : { into: "public" }),
     ...(rehostScripts.length || foldedCss.length ? { skip: [...foldedCss, ...rehostScripts.map((s) => s.src)] } : {}),
   });

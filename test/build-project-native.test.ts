@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProject, emitAstro, emitVite, splitBuild, splitRehost } from "../src/build-project.js";
@@ -142,6 +143,98 @@ describe("next: native rehost tree", () => {
     // Next owns charset/viewport; captured copies are deduped
     expect(layout).not.toContain("<meta charset");
     expect(layout).not.toContain('name="viewport"');
+  });
+
+  it("head tags go through ATTR_MAP and type-check under a strict JSX stub", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-headjsx-"));
+    try {
+      const src = join(dir, "site");
+      mkdirSync(src);
+      writeFileSync(
+        join(src, "index.html"),
+        `<!doctype html><html><head>
+<link rel="preconnect" href="https://fonts.test" crossorigin>
+<link rel="preload" as="font" href="https://fonts.test/f.woff2" type="font/woff2" crossorigin fetchpriority="high">
+<script src="https://cdn.test/a.js" integrity="sha384-x" crossorigin="anonymous" defer referrerpolicy="no-referrer" nomodule></script>
+<script nonce="abc" id="boot">window.__boot = 1;</script>
+</head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(src, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      const out = join(dir, "out");
+      const layout = readFileSync(join(out, "app", "layout.tsx"), "utf8");
+      expect(layout).toContain("crossOrigin");
+      expect(layout).toContain('referrerPolicy="no-referrer"');
+      expect(layout).toContain("noModule");
+      expect(layout).toContain('fetchPriority="high"');
+      expect(layout).not.toContain("crossorigin");
+      expect(layout).not.toContain("referrerpolicy");
+      expect(layout).not.toContain("nomodule");
+      expect(layout).not.toContain("fetchpriority");
+
+      // Strict JSX stub: only real props exist, no permissive index signature.
+      writeFileSync(join(out, "components", "SiteScripts.tsx"), "export default function SiteScripts() {\n  return null;\n}\n");
+      writeFileSync(join(out, "react.d.ts"), 'declare module "react" {\n  export type ReactNode = unknown;\n}\n');
+      writeFileSync(
+        join(out, "jsx.d.ts"),
+        `declare namespace JSX {
+  interface Element {}
+  interface IntrinsicElements {
+    html: { lang?: string; children?: unknown };
+    head: { children?: unknown };
+    body: { children?: unknown };
+    main: { id?: string; children?: unknown };
+    section: { id?: string; className?: string; children?: unknown };
+    title: { children?: unknown };
+    link: { rel?: string; href?: string; type?: string; as?: string; crossOrigin?: string; fetchPriority?: string };
+    meta: { name?: string; content?: string; property?: string; charSet?: string };
+    script: {
+      src?: string;
+      integrity?: string;
+      crossOrigin?: string;
+      defer?: boolean;
+      async?: boolean;
+      referrerPolicy?: string;
+      noModule?: boolean;
+      type?: string;
+      nonce?: string;
+      id?: string;
+      dangerouslySetInnerHTML?: { __html: string };
+      children?: unknown;
+    };
+  }
+}
+`,
+      );
+      writeFileSync(
+        join(out, "tsconfig.check.json"),
+        JSON.stringify({
+          compilerOptions: {
+            target: "ES2017",
+            lib: ["esnext"],
+            strict: true,
+            noEmit: true,
+            jsx: "preserve",
+            module: "esnext",
+            moduleResolution: "bundler",
+            types: [],
+          },
+          include: ["app/**/*.tsx", "components/**/*.tsx", "react.d.ts", "jsx.d.ts"],
+        }),
+      );
+      try {
+        execFileSync(
+          process.execPath,
+          [join(process.cwd(), "node_modules", "typescript", "bin", "tsc"), "-p", join(out, "tsconfig.check.json")],
+          { stdio: "pipe", encoding: "utf8" },
+        );
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string };
+        throw new Error(`strict tsc failed:\n${e.stdout ?? ""}${e.stderr ?? ""}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("one SiteScripts loader appends body scripts in captured order; head boot stays in head", () => {
@@ -493,13 +586,19 @@ describe("buildProject: local stylesheet folding + css url rebasing", () => {
       writeFileSync(join(dir, "secret.css"), ".secret { color: red; }\n");
       writeFileSync(
         join(site, "index.html"),
-        `<!doctype html><html><head><link rel="stylesheet" href="../secret.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+        `<!doctype html><html><head>
+<link rel="stylesheet" href="../secret.css">
+<link rel="stylesheet" href="https://cdn.test/../remote.css">
+</head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
       );
       const res = await buildProject({ html: join(site, "index.html"), target: "next", out: join(site, "out") });
       if ("error" in res) throw new Error(res.error);
       expect(res.warnings.some((w) => w.includes("unsafe path"))).toBe(true);
+      expect(res.warnings.some((w) => w.includes("https://cdn.test/../remote.css"))).toBe(false);
       const layout = readFileSync(join(site, "out", "app", "layout.tsx"), "utf8");
       expect(layout).not.toContain("secret { color: red");
+      expect(layout).not.toContain("secret.css");
+      expect(layout).toContain("https://cdn.test/../remote.css");
       expect(existsSync(join(site, "out", "public", "secret.css"))).toBe(false);
 
       writeFileSync(join(site, "a.css"), '.x { content: "</style>"; }\n');
@@ -588,6 +687,74 @@ describe("buildProject: local stylesheet folding + css url rebasing", () => {
       const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
       expect(site).toContain("body { margin: 0; }");
       expect(site).not.toContain("gone.css");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not resurrect an @import inside a CSS comment", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-csscomment-"));
+    try {
+      writeFileSync(join(dir, "b.css"), ".b { color: blue; }\n");
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head><style>/* @import "b.css"; */\n.x { color: red; }</style></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings).toEqual([]);
+      const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
+      expect(site).toContain(".x { color: red; }");
+      expect(site).not.toContain(".b { color: blue; }");
+      expect(site).not.toContain("@import");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves @import layer()/supports() semantics", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-csscond-"));
+    try {
+      writeFileSync(join(dir, "b.css"), ".b { display: grid; }\n");
+      writeFileSync(
+        join(dir, "a.css"),
+        '@import "b.css" layer(base) supports(display: grid);\n.a { color: red; }\n',
+      );
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="a.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings).toEqual([]);
+      const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
+      expect(site).toContain("@layer base");
+      expect(site).toContain("@supports (display: grid)");
+      expect(site.indexOf("@layer base")).toBeLessThan(site.indexOf("@supports (display: grid)"));
+      expect(site.indexOf("@supports (display: grid)")).toBeLessThan(site.indexOf(".b { display: grid; }"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("folds an inline <style>@import and copies its assets", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-cssinline-"));
+    try {
+      mkdirSync(join(dir, "images"));
+      writeFileSync(join(dir, "images", "b.png"), "b");
+      writeFileSync(join(dir, "b.css"), ".b { background: url(images/b.png); }\n");
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head><style>@import "b.css";\n.x { color: red; }</style></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings).toEqual([]);
+      const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
+      expect(site).toContain(".b { background: url(/images/b.png); }");
+      expect(site).toContain(".x { color: red; }");
+      expect(existsSync(join(dir, "out", "public", "images", "b.png"))).toBe(true);
+      expect(site).not.toContain("@import");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

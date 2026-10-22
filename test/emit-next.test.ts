@@ -88,6 +88,13 @@ describe("htmlToJsx: style attr (kit ports)", () => {
     expect(htmlToJsx('<div style="color: red">x</div>')).not.toContain("as React.CSSProperties");
   });
 
+  it("maps head-tag attributes React types as camelCase strings", () => {
+    expect(htmlToJsx('<meta charset="utf-8">')).toContain('charSet="utf-8"');
+    expect(htmlToJsx('<link rel="preconnect" crossorigin>')).toContain('crossOrigin="anonymous"');
+    expect(htmlToJsx('<script nomodule fetchpriority="high"></script>')).toContain("noModule");
+    expect(htmlToJsx('<script nomodule fetchpriority="high"></script>')).toContain('fetchPriority="high"');
+  });
+
   it("uses the first colon only (url values with colons survive)", () => {
     expect(htmlToJsx('<span style="color: red"></span>')).toBe('<span style={{ color: "red" }}></span>');
   });

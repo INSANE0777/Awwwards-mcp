@@ -31,9 +31,11 @@ const ATTR_MAP = new Map(Object.entries({
   "colspan": "colSpan",
   "contenteditable": "contentEditable",
   "crossorigin": "crossOrigin",
+  "charset": "charSet",
   "datetime": "dateTime",
   "dominant-baseline": "dominantBaseline",
   "enctype": "encType",
+  "fetchpriority": "fetchPriority",
   "fill-opacity": "fillOpacity",
   "fill-rule": "fillRule",
   "font-family": "fontFamily",
@@ -41,10 +43,13 @@ const ATTR_MAP = new Map(Object.entries({
   "font-weight": "fontWeight",
   "for": "htmlFor",
   "http-equiv": "httpEquiv",
+  "imagesizes": "imageSizes",
+  "imagesrcset": "imageSrcSet",
   "inputmode": "inputMode",
   "letter-spacing": "letterSpacing",
   "maxlength": "maxLength",
   "minlength": "minLength",
+  "nomodule": "noModule",
   "novalidate": "noValidate",
   "playsinline": "playsInline",
   "readonly": "readOnly",
@@ -129,7 +134,11 @@ const styleToObject = (css: string): { body: string; custom: boolean } => {
 // className / data-* / aria-* / unknown attrs pass through unchanged.
 const convertAttr = (attr: string): string => {
   const m = attr.match(/^([^\s=]+)(\s*=\s*)("[^"]*"|'[^']*')$/);
-  if (!m) return ATTR_MAP.get(attr.toLowerCase()) ?? attr; // bare attr (`defer`, `playsinline`)
+  if (!m) {
+    // Bare HTML crossorigin means "anonymous"; React types it as a string.
+    if (attr.toLowerCase() === "crossorigin") return 'crossOrigin="anonymous"';
+    return ATTR_MAP.get(attr.toLowerCase()) ?? attr; // bare attr (`defer`, `playsinline`)
+  }
   const key = (m[1] ?? "").toLowerCase();
   const eq = m[2] ?? "";
   const value = m[3] ?? "";
@@ -293,19 +302,19 @@ const rehostHeadLines = (shell: string, name: string): string[] => {
     if (/^<meta/i.test(tag)) {
       // Next owns charset/viewport; carrying captured copies duplicates them.
       if (/\bcharset\s*=/i.test(tag) || /\bname\s*=\s*["']?viewport/i.test(tag)) continue;
-      lines.push(jsxSelfClose(tag));
+      lines.push(jsxSelfClose(htmlToJsx(tag)));
       continue;
     }
     if (/^<link/i.test(tag)) {
       if (/rel\s*=\s*["']?stylesheet/i.test(tag)) continue;
-      lines.push(jsxSelfClose(rewriteLocalUrlTag(tag)));
+      lines.push(jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(tag))));
       continue;
     }
     const open = /^<script\b[^>]*>/i.exec(tag)?.[0] ?? "";
     const type = headAttr(open, "type").toLowerCase();
     if (JS_SCRIPT_TYPES.has(type)) continue; // executable head scripts handled by headScripts
     const body = /^<script\b[^>]*>([\s\S]*?)<\/script\s*>$/i.exec(tag)?.[1] ?? "";
-    lines.push(jsxRawScript(open, body));
+    lines.push(jsxRawScript(htmlToJsx(open), body));
   }
   if (!hasTitle) lines.unshift(htmlToJsx(`<title>${escapeHtmlText(name)}</title>`));
   return lines;
@@ -317,9 +326,9 @@ const rehostHeadLines = (shell: string, name: string): string[] => {
 const headScriptJsx = (entry: LoaderScript): string => {
   if (entry.kind === "external") {
     const url = entry.local ? `/scripts/${scriptFile(entry.src)}` : entry.src;
-    return rewriteLocalUrlTag(entry.tag.replace(/(\bsrc\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s>]+)/i, `$1"${url}"`));
+    return htmlToJsx(rewriteLocalUrlTag(entry.tag.replace(/(\bsrc\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s>]+)/i, `$1"${url}"`)));
   }
-  return jsxRawScript(`<script${entry.attrs ? ` ${entry.attrs}` : ""}>`, entry.js);
+  return jsxRawScript(htmlToJsx(`<script${entry.attrs ? ` ${entry.attrs}` : ""}>`), entry.js);
 };
 
 // Rehost layout: document head metadata + head scripts in captured order, one
@@ -632,7 +641,7 @@ export function emitNext(split: Split, outDir: string, name: string): EmitResult
     t.kind === "inline"
       ? jsxInlineScript(t.js)
       : t.kind === "style"
-        ? jsxSelfClose(rewriteLocalUrlTag(t.tag))
+        ? jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(t.tag)))
         : rewriteLocalUrlTag(t.tag),
   );
   // Generic: every loose body script (external + inline) stays raw at body end.
@@ -697,7 +706,7 @@ export function emitNext(split: Split, outDir: string, name: string): EmitResult
     }
     const styleLinks = split.headTags
       .filter((t) => t.kind === "style")
-      .map((t) => jsxSelfClose(rewriteLocalUrlTag(t.tag)));
+      .map((t) => jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(t.tag))));
     add("app/layout.tsx", rehostLayout([...rehostHeadLines(rehost.shell, name), ...styleLinks], cssImports, rehost.headScripts));
     add("app/page.tsx", rehostPage(rehost));
     rehost.sections.forEach((s, i) => {
