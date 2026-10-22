@@ -183,6 +183,26 @@ describe("buildGsapStub", () => {
       expect(html).not.toContain('.to(".hero"');
     });
 
+    // D2 grab-bag: superseding a pinned census row must not silently unpin —
+    // the measured scrub timeline inherits pin:true.
+    it("carries pin:true onto the measured scrub timeline when the superseded census row was pinned", () => {
+      const html = buildGsapStub(
+        null,
+        census([anim({ selector: ".hero", scrub: true, pin: true })], { scrubCurves: [curve()] }),
+      );
+      // the census timeline was superseded (guessed tween gone)…
+      expect(html).not.toContain('.from(".hero"');
+      expect((html.match(/gsap\.timeline/g) ?? []).length).toBe(1);
+      // …but the measured config still pins the section.
+      expect(html).toContain('start: "top 80%", scrub: true, pin: true');
+      // an unpinned curve carries no pin flag
+      const unpinned = buildGsapStub(
+        null,
+        census([anim({ selector: ".hero", scrub: true })], { scrubCurves: [curve()] }),
+      );
+      expect(unpinned).not.toContain("pin: true");
+    });
+
     it("is byte-identical when scrubCurves is absent or empty", () => {
       const pack = census([anim()]);
       expect(buildGsapStub(null, pack)).not.toContain("measured scrub curve");

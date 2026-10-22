@@ -125,7 +125,7 @@ export type StackFn = (
 // analyze_bundle: fetches a page + its script chunks (bounded), greps keywords.
 export type BundleFn = (
   url: string,
-  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean },
+  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean },
 ) => Promise<BundleReport | { error: string }>;
 
 // build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
@@ -192,6 +192,9 @@ export function compactSiteDetails(d: SiteDetails): Record<string, unknown> {
   return {
     slug: d.slug,
     title: d.title,
+    // D2: description restored to the compact diet at ≤500 chars — rebuild
+    // prompts read the prose; the lists stay counts.
+    description: d.description ? d.description.slice(0, 500) : null,
     liveUrl: d.liveUrl,
     nominee: d.nominee,
     score: d.score,
@@ -335,8 +338,9 @@ export interface Handlers {
     keywords?: string[];
     maxChunks?: number;
     walkChunks?: boolean;
+    edges?: boolean;
   }): Promise<ToolResponse>;
-  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
+  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
     selector?: string;
@@ -1257,23 +1261,26 @@ export function createHandlers(deps: {
     keywords?: string[];
     maxChunks?: number;
     walkChunks?: boolean;
+    edges?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: bundle-forensics is only touched when the tool actually runs.
       const capture =
         deps.bundleFn ??
-        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean }) =>
+        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean }) =>
           import("./bundle-forensics.js").then((m) =>
             m.captureBundleForensics(url, {
               keywords: opts?.keywords,
               maxChunks: opts?.maxChunks,
               walkChunks: opts?.walkChunks,
+              edges: opts?.edges,
             }),
           ));
       const result = await capture(args.url, {
         keywords: args.keywords,
         maxChunks: args.maxChunks,
         walkChunks: args.walkChunks,
+        edges: args.edges,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };
@@ -1287,6 +1294,7 @@ export function createHandlers(deps: {
     referenceUrl: string;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    domDiff?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1297,12 +1305,14 @@ export function createHandlers(deps: {
           referenceUrl: string;
           waitStrategy?: WaitStrategy;
           viewport?: ViewportName;
+          domDiff?: boolean;
         }) => import("./verify-build.js").then((m) => m.verifyBuild(verifyArgs)));
       const result = await verify({
         buildUrl: args.buildUrl,
         referenceUrl: args.referenceUrl,
         waitStrategy: args.waitStrategy,
         viewport: args.viewport,
+        domDiff: args.domDiff,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };

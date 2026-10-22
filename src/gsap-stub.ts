@@ -128,7 +128,18 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
       };
     });
   const measuredSels = new Set(measured.filter((m) => m.tos.length > 0).map((m) => m.selector));
-
+  // D2 rider: a PINNED census row superseded by its measured scrub curve must
+  // still end up pinned — the measured timeline replaces the census one, so
+  // it inherits the flag (otherwise the stub silently unpins the section).
+  const supersededPins = new Set(
+    anims
+      .filter(
+        (a) =>
+          a && a.scrub === true && a.pin === true &&
+          typeof a.selector === "string" && measuredSels.has(a.selector),
+      )
+      .map((a) => a.selector as string),
+  );
   // Camera keys: synthesized from pose-grid scroll ratios (not raw captured
   // camera coords — PoseSnapshot has no x/y/z): a gentle dolly-in mapped over
   // scroll progress. Optional s.x/s.y/s.z snapshot overrides win when present.
@@ -193,7 +204,9 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
       const body = m.tos.length
         ? m.tos.map((tf) => `.to(${jsStr(m.selector)}, { transform: ${jsStr(tf)} })`).join("\n    ") + ";"
         : `.from(${jsStr(m.selector)}, { opacity: 0, y: 40 });`;
-      const tl = `gsap.timeline({ scrollTrigger: { trigger: ${jsStr(m.selector)}, start: "top 80%", scrub: true } })`;
+      const st = [`trigger: ${jsStr(m.selector)}`, `start: "top 80%"`, `scrub: true`];
+      if (supersededPins.has(m.selector)) st.push(`pin: true`);
+      const tl = `gsap.timeline({ scrollTrigger: { ${st.join(", ")} } })`;
       return `${note}\n  ${tl}\n    ${body}`;
     });
   const measuredBlock = measuredLines.length ? "\n\n" + measuredLines.join("\n\n") : "";

@@ -292,6 +292,8 @@ server.tool(
     maxChunks: z.number().int().min(1).max(100).optional().describe("default 40"),
     walkChunks: z.boolean().optional()
       .describe("after the first pass, follow quoted same-origin .js refs inside fetched chunks and fetch up to 20 newly discovered ones (same budgets; adds seconds)"),
+    edges: z.boolean().default(false)
+      .describe("static import graph over captured chunks"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_bundle(args))
@@ -307,6 +309,8 @@ server.tool(
     // would shadow the orchestrator's networkidle scroll-census default.
     waitStrategy: z.enum(["load", "networkidle"]).optional(),
     viewport: viewportSchema,
+    domDiff: z.boolean().default(false)
+      .describe("body-subtree structural diff between reference and build"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.verify_build(args)),

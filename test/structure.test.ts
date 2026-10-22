@@ -148,6 +148,34 @@ describe("splitCollapsedBands", () => {
     expect(messy).toEqual(sorted);
     expect(sorted.map((b) => b.offsetTop)).toEqual([0, 500, 1500]);
   });
+
+  // D2 residual gate: a giant with exactly ONE valid landmark now splits ONCE
+  // into two parts (previously needed ≥2 in-range marks and stayed whole).
+  it("splits a giant with a single landmark once into two bands (residual gate, was ≥2)", () => {
+    const subs = splitCollapsedBands([pageBand()], [2000]);
+    expect(subs.map((b) => b.offsetTop)).toEqual([0, 2000]);
+    expect(subs.map((b) => b.height)).toEqual([2000, 4000]); // remainder absorbed by the tail
+    expect(subs.reduce((n, b) => n + b.height, 0)).toBe(6000);
+    // Sub 0 keeps the parent identity; the tail sub is anonymous.
+    expect(subs.map((b) => b.label)).toEqual([".hero", ""]);
+    expect(subs.map((b) => b.tag)).toEqual(["section", "section"]);
+    expect(subs.map((b) => b.index)).toEqual([0, 1]);
+  });
+
+  it("single landmark inside the 200px edge clamp still cannot split", () => {
+    expect(splitCollapsedBands([pageBand({ height: 3000 })], [150])).toHaveLength(1);
+    expect(splitCollapsedBands([pageBand({ height: 3000 })], [2900])).toHaveLength(1);
+  });
+});
+
+// D2 grab-bag: the scan snippet's landmark collection now also records
+// <section>/<article>/[role=main] rect tops. No fake-document executor in
+// this suite, so the contract is source-locked (house pattern).
+it("SCAN_SNIPPET collects section/article/[role=main] landmark tops, bounded at 12 (source-lock)", () => {
+  const src = String(SCAN_SNIPPET);
+  expect(src).toContain(`querySelectorAll("section, article, [role=main]")`);
+  expect(src).toContain("< 12"); // the new contributor's cap
+  expect(src).toContain("querySelectorAll"); // runs inside the landmark try-block
 });
 
 describe("analyzePageStructure", () => {

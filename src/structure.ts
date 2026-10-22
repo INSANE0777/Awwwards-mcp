@@ -132,6 +132,21 @@ export const SCAN_SNIPPET = function (): ScanResult {
       for (const child of el.children) walkLandmarks(child, depth + 1);
     }
     walkLandmarks(doc.body, 0);
+    // D2 residual densify: <section>/<article>/[role=main] rect tops join the
+    // landmarks — a giant band holding exactly ONE structural element is the
+    // class that used to stay whole (the splitter required several in-range
+    // marks). Capped at 12 so heading landmarks stay dominant in the
+    // combined ≤200 list; same dedupe+sort as everything else below.
+    const secTops: number[] = [];
+    try {
+      const secs = doc.querySelectorAll("section, article, [role=main]");
+      for (let i = 0; i < secs.length && secTops.length < 12; i++) {
+        try {
+          secTops.push(Math.round(secs[i].getBoundingClientRect().top + g.scrollY));
+        } catch {}
+      }
+    } catch {}
+    for (let i = 0; i < secTops.length; i++) tops.push(secTops[i]);
     const unique = [...new Set(tops)];
     unique.sort(function (a: number, b: number): number { return a - b; });
     landmarks = unique.slice(0, 200);
@@ -215,17 +230,20 @@ export function collapseBands(cands: RawBand[], totalHeight: number, maxBands = 
 
 // PURE: band-split v2 — subdivides collapsed giant bands at landmark tops so
 // a 20,000px background run stops reading as one band. A band only splits
-// when it is a real giant (height ≥ 3000px) with ≥ 2 landmarks inside its
-// range; landmarks within 200px of either edge are skipped so no sub-band is
-// born under the 200px floor the merge rule enforces anyway. Sub-band
-// heights are the deltas between cuts, and a delta < 200px merges into the
-// previous sub-band (that landmark sits too close to its neighbor to stand
-// alone); the last sub takes the remainder, so sub heights always sum to the
-// parent height. Sub 0 keeps the parent's tag/label/bg/textStart; later subs
-// keep tag/bg but take empty label/textStart — the parent's label and text
-// describe the giant's top, not where those subs begin. The maxBands guard
-// SKIPS the whole split instead of truncating: dropping sub-bands mid-split
-// would fabricate coverage the landmarks disprove.
+// when it is a real giant (height ≥ 3000px) with at least one in-range
+// landmark that stands ≥ 200px from both edges (no sub-band born under the
+// 200px floor the merge rule enforces anyway). Several valid cuts subdivide
+// at all of them; a single valid cut — the residual giants whose only mark
+// is one section/article/[role=main] top (scan now records those) — splits
+// ONCE into two parts. Sub-band heights are the deltas between cuts, and a
+// delta < 200px merges into the previous sub-band (that landmark sits too
+// close to its neighbor to stand alone); the last sub takes the remainder,
+// so sub heights always sum to the parent height. Sub 0 keeps the parent's
+// tag/label/bg/textStart; later subs keep tag/bg but take empty
+// label/textStart — the parent's label and text describe the giant's top,
+// not where those subs begin. The maxBands guard SKIPS the whole split
+// instead of truncating: dropping sub-bands mid-split would fabricate
+// coverage the landmarks disprove.
 export function splitCollapsedBands(bands: PageBand[], landmarks: number[], maxBands = 60): PageBand[] {
   const marks = [...new Set(landmarks.filter(Number.isFinite))].sort((a, b) => a - b);
   if (!marks.length) return bands; // no landmarks: byte-identical passthrough
@@ -236,7 +254,7 @@ export function splitCollapsedBands(bands: PageBand[], landmarks: number[], maxB
     const inRange = marks.filter((lm) => lm > top && lm < bottom);
     const validCuts = inRange.filter((lm) => lm - top >= 200 && bottom - lm >= 200);
     const heights: number[] = [];
-    if (band.height >= 3000 && inRange.length >= 2 && validCuts.length) {
+    if (band.height >= 3000 && validCuts.length) {
       let prev = top;
       for (const cut of [...validCuts, bottom]) {
         const delta = cut - prev;
