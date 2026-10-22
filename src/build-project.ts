@@ -1,0 +1,572 @@
+// build_project core (v1.12, local-only): a single-file exact rebuild (the
+// kit's full-page-exact.html shape) -> runnable Vite/Astro project files.
+// The builder converts, never invents: section markup, css and timelines ship
+// verbatim; no {{slot:*}} marker exists anywhere in this flow. Only asset
+// paths move: css url()s are re-based to their new home (src/styles vs
+// project root); markup bytes are never touched.
+//
+// Emitters are PURE (files arrays) so trees stay byte-deterministic and
+// testable offline; disk writing + the CLI loop are Task-3 wiring. The outDir
+// params exist for that wiring's call symmetry and are deliberately unused
+// here. Exit-code law lives in parseBuildArgs: 0 ok / 2 bad args (returned as
+// {error}) / 3 io (thrown upstream) — the Task-3 bin mirrors verify-cli's
+// mapping. No console.* in this module: all user-visible output is returned.
+
+import { copyFile, mkdir } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+
+export interface RebuildSection {
+  tag: string;
+  className: string; // first class token of the root ("" when classless); rebuild roots are `c-N`
+  startTag: string; // verbatim opening tag
+  innerHtml: string; // verbatim between opening and closing tag
+  closeTag: string; // verbatim closing tag
+  text: string; // startTag + innerHtml + closeTag — the whole element
+}
+
+export interface ParsedSections {
+  sections: RebuildSection[] | null;
+  detected: "rebuild" | "generic";
+}
+
+export interface SplitStyles {
+  tokensCss: string; // verbatim :root block(s), "" when none
+  headLinks: string[]; // verbatim <link rel=stylesheet> tags (font services ship; content urls never)
+  perSection: Map<string, string>; // className -> rules whose selectors mention it (class-safe match)
+  sharedCss: string; // all other top-level rules, incl. shared @media guards
+}
+
+export interface TimelineBlock {
+  className: string; // section class the block animates ("" when unattributable)
+  js: string; // comment + timeline, lines trimmed
+}
+
+export interface ExtractedScripts {
+  cdns: string[]; // verbatim gsap/ScrollTrigger <script src> tags — other remote scripts never ship
+  inlineJs: string; // all JS-typed inline <script> bodies, trim-joined
+  timelineBlocks: TimelineBlock[];
+}
+
+export interface ScaffoldFile {
+  path: string;
+  content: string;
+}
+
+export interface Split {
+  html: string;
+  sections: ParsedSections;
+  styles: SplitStyles;
+  scripts: ExtractedScripts;
+  assetRefs: string[]; // unique ./assets/* refs in document order
+}
+
+const GENERIC_TAGS = new Set(["section", "header", "footer", "main"]);
+const REBUILD_ROOT_CLASS = /^c-\d+$/;
+const CDN_SRC = /(gsap|scrolltrigger)/i;
+const JS_TYPES = new Set([
+  "",
+  "module",
+  "text/javascript",
+  "application/javascript",
+  "text/ecmascript",
+  "application/ecmascript",
+]);
+const VOID_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input",
+  "link", "meta", "param", "source", "track", "wbr",
+]);
+
+// Class-safe mention: ".c-12" must not bucket onto section ".c-1".
+const mentions = (selector: string, cls: string): boolean =>
+  new RegExp(`(?:^|[^\\w-])${cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(selector);
+
+const attr = (startTag: string, name: string): string => {
+  const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(startTag);
+  return m ? (m[1] ?? m[2] ?? m[3] ?? "") : "";
+};
+
+// Index of the `>` that closes the tag opened at `start` (quote-aware so
+// attribute values containing ">" cannot truncate it).
+const tagEnd = (html: string, start: number): number => {
+  let q: string | null = null;
+  for (let i = start + 1; i < html.length; i++) {
+    const c = html[i];
+    if (q !== null) {
+      if (c === q) q = null;
+    } else if (c === '"' || c === "'") {
+      q = c;
+    } else if (c === ">") {
+      return i;
+    }
+  }
+  return -1;
+};
+
+// Index of the matching close for the element opened before `from`, or -1.
+// Depth-counts the same tag; comments and script bodies are skipped whole so
+// commented-out markup or inline JS can never fake a close.
+const findClose = (html: string, from: number, tag: string): number => {
+  const re = new RegExp(`<!--|<script\\b|</script\\s*>|<${tag}(?=[\\s/>])|</${tag}\\s*>`, "gi");
+  re.lastIndex = from;
+  let depth = 1;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const t = m[0].toLowerCase();
+    if (t === "<!--") {
+      const j = html.indexOf("-->", m.index + 4);
+      if (j === -1) return -1;
+      re.lastIndex = j + 3;
+    } else if (t.startsWith("<script")) {
+      const sc = /<\/script\s*>/gi;
+      sc.lastIndex = m.index;
+      const end = sc.exec(html);
+      if (!end) return -1;
+      re.lastIndex = end.index + end[0].length;
+    } else if (t.startsWith("</")) {
+      depth -= 1;
+      if (depth === 0) return m.index;
+    } else {
+      depth += 1;
+    }
+  }
+  return -1;
+};
+
+const walkTopLevel = (body: string): RebuildSection[] => {
+  const roots: RebuildSection[] = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body.startsWith("<!--", i)) {
+      const j = body.indexOf("-->", i + 4);
+      i = j === -1 ? body.length : j + 3;
+      continue;
+    }
+    if (body[i] !== "<") {
+      i += 1;
+      continue;
+    }
+    const m = /^<([a-zA-Z][a-zA-Z0-9-]*)(?=[\s/>])/.exec(body.slice(i, i + 60));
+    if (!m) {
+      i += 1;
+      continue;
+    }
+    const tag = m[1].toLowerCase();
+    const gt = tagEnd(body, i);
+    if (gt === -1) break;
+    const start = i;
+    const startTag = body.slice(start, gt + 1);
+    i = gt + 1;
+    if (VOID_TAGS.has(tag) || /\/\s*>$/.test(startTag)) continue;
+    const close = findClose(body, i, tag);
+    if (close === -1) continue; // unterminated container: skip the tag, keep scanning
+    const closeEnd = body.indexOf(">", close) + 1;
+    roots.push({
+      tag,
+      className: attr(startTag, "class").trim().split(/\s+/)[0] ?? "",
+      startTag,
+      innerHtml: body.slice(gt + 1, close),
+      closeTag: body.slice(close, closeEnd),
+      text: body.slice(start, closeEnd),
+    });
+    i = closeEnd;
+  }
+  return roots;
+};
+
+// Primary shape: the kit's rebuild output, whose TOP-LEVEL body children are
+// the per-band roots <tag class="c-N"> — div roots included (real captures
+// emit section AND div band roots; keying on the c-N class, not the tag,
+// keeps every band). Fallback: top-level section/header/footer/main tags.
+export function parseRebuildSections(html: string): ParsedSections {
+  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
+  const roots = walkTopLevel(body);
+  const rebuild = roots.filter((r) => r.className !== "" && REBUILD_ROOT_CLASS.test(r.className));
+  const generic = roots.filter((r) => GENERIC_TAGS.has(r.tag));
+  const chosen = rebuild.length ? rebuild : generic;
+  return {
+    sections: chosen.length ? chosen : null,
+    detected: rebuild.length ? "rebuild" : "generic",
+  };
+}
+
+const autoSectionClasses = (html: string): string[] =>
+  parseRebuildSections(html).sections?.map((s) => s.className) ?? [];
+
+// Top-level rule split by brace depth; comments are skipped whole (their
+// braces must not split rules) and nested at-rule bodies (the reduced-motion
+// guard) stay inside one rule.
+const parseRules = (css: string): string[] => {
+  const rules: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < css.length; i++) {
+    if (css.startsWith("/*", i)) {
+      const j = css.indexOf("*/", i + 2);
+      i = j === -1 ? css.length : j + 1;
+      continue;
+    }
+    const ch = css[i];
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0) {
+        const rule = css.slice(start, i + 1).trim();
+        if (rule) rules.push(rule);
+        start = i + 1;
+      }
+    }
+  }
+  return rules;
+};
+
+export function splitStyles(html: string, classNames: string[] = autoSectionClasses(html)): SplitStyles {
+  const allCss = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n");
+  const rootRe = /:root\s*\{[^{}]*\}/g;
+  const tokens = [...allCss.matchAll(rootRe)].map((m) => m[0]);
+  const rest = allCss.replace(rootRe, "");
+  const headLinks: string[] = [];
+  for (const m of html.matchAll(/<link\s[^>]*rel\s*=\s*["']?stylesheet["']?[^>]*>/gi)) {
+    if (!headLinks.includes(m[0])) headLinks.push(m[0]);
+  }
+  const buckets = new Map<string, string[]>();
+  const shared: string[] = [];
+  for (const rule of parseRules(rest)) {
+    const selector = rule.slice(0, Math.max(0, rule.indexOf("{")));
+    const owner = classNames.find((cls) => cls !== "" && mentions(selector, cls));
+    if (owner) {
+      const bucket = buckets.get(owner) ?? [];
+      bucket.push(rule);
+      buckets.set(owner, bucket);
+    } else {
+      shared.push(rule);
+    }
+  }
+  const perSection = new Map<string, string>();
+  for (const [cls, bucket] of buckets) perSection.set(cls, bucket.join("\n"));
+  return {
+    tokensCss: tokens.join("\n"),
+    headLinks,
+    perSection,
+    sharedCss: shared.join("\n"),
+  };
+}
+
+// Rebuild-shape anim block: a `// captured anim` / `// motion-dna sample`
+// comment line anchors one gsap.timeline(...) whose final call is `.from(...);`
+// — the same terminating shape the kit emits, so the block boundary is exact.
+const TIMELINE_BLOCK_RE = /\/\/ (?:captured anim|motion-dna sample)[^\n]*\n[\s\S]*?\.from\([^;]*\);/g;
+
+const collectTimelineBlocks = (js: string): TimelineBlock[] =>
+  [...js.matchAll(TIMELINE_BLOCK_RE)].map((m) => ({
+    className: /\.c-\d+/.exec(m[0])?.[0].slice(1) ?? "",
+    js: m[0]
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .join("\n"),
+  }));
+
+export function extractScripts(html: string): ExtractedScripts {
+  const cdns: string[] = [];
+  const inline: string[] = [];
+  for (const m of html.matchAll(/(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)/gi)) {
+    const src = attr(m[1], "src");
+    if (src !== "") {
+      // Only gsap-family remote scripts ship (product law: no other source scripts)
+      if (CDN_SRC.test(src)) cdns.push(m[1] + m[2] + m[3]);
+      continue;
+    }
+    // importmap/ld+json modules are data, not page JS
+    if (!JS_TYPES.has(attr(m[1], "type").toLowerCase().trim())) continue;
+    inline.push(m[2].trim());
+  }
+  const timelineBlocks = inline.flatMap(collectTimelineBlocks);
+  return { cdns, inlineJs: inline.join("\n\n"), timelineBlocks };
+}
+
+// ./assets/* refs in markup (src/href) and css (url()). Refs containing ".."
+// are refused at collect time so copies can never climb out of the output dir.
+const ASSET_REF_RE = /(?:\b(?:src|href)\s*=\s*["'](\.\/assets\/[^"']+)["'])|(?:url\(\s*["']?(\.\/assets\/[^)"'\s]+)["']?\s*\))/gi;
+
+const collectAssetRefs = (html: string): string[] => {
+  const seen = new Set<string>();
+  for (const m of html.matchAll(ASSET_REF_RE)) {
+    const ref = m[1] ?? m[2];
+    if (ref && !ref.includes("..")) seen.add(ref);
+  }
+  return [...seen];
+};
+
+export interface CopyAssetsResult {
+  copied: string[];
+  missing: string[];
+}
+
+// Copies every ./assets/* ref into <outDir>/<into>/ keeping the `assets/<name>`
+// shape (root-level for vite/next, public/assets for astro). A missing source
+// is a warning (missing[]), never a hard failure — one stray ref must not kill
+// an otherwise-valid build.
+export async function copyAssets(html: string, srcDir: string, outDir: string, opts: { into?: string } = {}): Promise<CopyAssetsResult> {
+  const base = join(resolve(outDir), opts.into ?? "assets");
+  const copied: string[] = [];
+  const missing: string[] = [];
+  for (const ref of collectAssetRefs(html)) {
+    const to = join(base, ref.replace(/^\.\/assets\//, ""));
+    const from = resolve(srcDir, ref);
+    try {
+      await mkdir(dirname(to), { recursive: true });
+      await copyFile(from, to);
+      copied.push(ref);
+    } catch {
+      missing.push(ref);
+    }
+  }
+  return { copied, missing };
+}
+
+export function splitBuild(html: string): Split {
+  return {
+    html,
+    sections: parseRebuildSections(html),
+    styles: splitStyles(html),
+    scripts: extractScripts(html),
+    assetRefs: collectAssetRefs(html),
+  };
+}
+
+export interface BuildProjectArgs {
+  html: string;
+  target: "vite" | "astro" | "next";
+  out: string;
+  name?: string;
+}
+
+export const BUILD_ARGS_USAGE = "usage: awwwards-build-project <html> --target vite|astro|next --out <dir> [--name pkg]";
+
+// Pure arg model for the (Task-3) bin: parse here, map exit codes there.
+export function parseBuildArgs(argv: string[]): BuildProjectArgs | { error: string } {
+  const positional: string[] = [];
+  const flags = new Map<string, string>();
+  for (let i = 0; i < argv.length; i++) {
+    const inline = /^(--target|--out|--name)=(.*)$/.exec(argv[i]);
+    if (inline) {
+      flags.set((inline[1] ?? "").slice(2), inline[2] ?? "");
+      continue;
+    }
+    if (argv[i] === "--target" || argv[i] === "--out" || argv[i] === "--name") {
+      if (i + 1 >= argv.length) return { error: BUILD_ARGS_USAGE };
+      flags.set(argv[i].slice(2), argv[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
+    positional.push(argv[i]);
+  }
+  const target = flags.get("target");
+  const out = flags.get("out");
+  if (positional.length !== 1 || !target || !out) return { error: BUILD_ARGS_USAGE };
+  if (target !== "vite" && target !== "astro" && target !== "next") return { error: BUILD_ARGS_USAGE };
+  const name = flags.get("name");
+  return { html: positional[0] ?? "", target, out, ...(name ? { name } : {}) };
+}
+
+const packageName = (name: string): string =>
+  name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-._]+|[-._]+$/g, "") || "rebuild-site";
+
+const indent = (text: string, n: number): string =>
+  text
+    .split("\n")
+    .map((l) => (l ? " ".repeat(n) + l : l))
+    .join("\n");
+
+// css ships into src/styles/, so ./assets url()s re-base (vite ../../assets,
+// astro /assets); quoted and bare url() forms both covered.
+const cssTo = (css: string, assetsBase: string): string => {
+  const out = css.replace(/url\(\s*(["']?)\.\/assets\//g, `url($1${assetsBase}`);
+  return out.endsWith("\n") ? out : out + "\n";
+};
+
+const sectionsBodyHtml = (split: Split): string => (split.sections.sections ?? []).map((s) => s.text).join("\n");
+
+const j = (obj: object): string => JSON.stringify(obj, null, 2) + "\n";
+
+// Anim blocks land with their section: exact root-class match first, else the
+// ONE section whose subtree mentions the class (kit renumbering makes a class
+// name at most one section). Ambiguous blocks fall back to the page-level
+// script so no captured timeline is ever dropped.
+const attributeBlocks = (split: Split): { perSection: Map<string, string[]>; pageLevel: string[] } => {
+  const sections = split.sections.sections ?? [];
+  const classSet = new Set(sections.map((s) => s.className));
+  const perSection = new Map<string, string[]>();
+  const pageLevel: string[] = [];
+  for (const b of split.scripts.timelineBlocks) {
+    let target = classSet.has(b.className) ? b.className : undefined;
+    if (!target && b.className !== "") {
+      const hits = sections.filter((s) => mentions(s.text, b.className));
+      target = hits.length === 1 ? hits[0]?.className : undefined;
+    }
+    if (target !== undefined) {
+      const list = perSection.get(target) ?? [];
+      list.push(b.js);
+      perSection.set(target, list);
+    } else {
+      pageLevel.push(b.js);
+    }
+  }
+  return { perSection, pageLevel };
+};
+
+// Mirrors the kit's astroSection script shape: bundle-safe module, CDN globals,
+// reduced-motion guard identical to the source rebuild.
+const timelineScript = (blocks: string[]): string =>
+  `<script>
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    gsap.registerPlugin(ScrollTrigger);
+${blocks.map((b) => indent(b, 4)).join("\n\n")}
+    ScrollTrigger.refresh();
+  }
+</script>
+`;
+
+const nn = (i: number): string => `Section${String(i + 1).padStart(2, "0")}`;
+
+export function emitAstro(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
+  void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
+  const files: ScaffoldFile[] = [];
+  const add = (path: string, content: string) => files.push({ path, content });
+  const sections = split.sections.sections ?? [];
+  const attributed = attributeBlocks(split);
+  const cssBase = "/assets/"; // astro serves public/assets at the site root
+
+  add(
+    "package.json",
+    j({
+      name: packageName(name),
+      private: true,
+      version: "0.1.0",
+      type: "module",
+      scripts: { dev: "astro dev", build: "astro build", preview: "astro preview" },
+      dependencies: { astro: "^5" },
+    }),
+  );
+  add("astro.config.mjs", 'import { defineConfig } from "astro/config";\n\nexport default defineConfig({});\n');
+
+  const imports: string[] = [];
+  if (split.styles.tokensCss) add("src/styles/tokens.css", cssTo(split.styles.tokensCss, cssBase));
+  if (split.styles.tokensCss) imports.push('import "../styles/tokens.css";');
+  if (split.styles.sharedCss) add("src/styles/shared.css", cssTo(split.styles.sharedCss, cssBase));
+  if (split.styles.sharedCss) imports.push('import "../styles/shared.css";');
+  sections.forEach((s, i) => {
+    const css = split.styles.perSection.get(s.className) ?? "";
+    if (css === "") return;
+    add(`src/styles/section-${i + 1}.css`, cssTo(css, cssBase));
+    imports.push(`import "../styles/section-${i + 1}.css";`);
+  });
+
+  const headTags = [...split.scripts.cdns, ...split.styles.headLinks];
+  const pageLevelScript =
+    split.sections.detected === "generic"
+      ? split.scripts.inlineJs
+        ? `\n<script>\n${split.scripts.inlineJs}\n</script>\n`
+        : ""
+      : attributed.pageLevel.length
+        ? `\n${timelineScript(attributed.pageLevel)}`
+        : "";
+  add(
+    "src/pages/index.astro",
+    `---
+// Generated by awwwards-build-project — exact rebuild, real content, no slots.
+${imports.join("\n")}
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${name}</title>
+${headTags.map((t) => indent(t, 4)).join("\n")}
+  </head>
+  <body>
+${sections.map((_, i) => `    <${nn(i)} />`).join("\n")}
+${pageLevelScript}  </body>
+</html>
+`,
+  );
+
+  // Component content starts with the section's own start tag, so a `---` line
+  // can never sit adjacent to the frontmatter fence — no escaping needed.
+  sections.forEach((s, i) => {
+    const blocks = attributed.perSection.get(s.className) ?? [];
+    add(
+      `src/components/${nn(i)}.astro`,
+      `---
+// ${nn(i)} — exact rebuild of root .${s.className || "(classless)"}; markup verbatim, no slots.
+---
+${s.text}
+${blocks.length ? timelineScript(blocks) : ""}`,
+    );
+  });
+  return { files };
+}
+
+export function emitVite(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
+  void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
+  const files: ScaffoldFile[] = [];
+  const add = (path: string, content: string) => files.push({ path, content });
+  const sections = split.sections.sections ?? [];
+  const cssBase = "../../assets/"; // css lives in src/styles/; assets at the project root
+
+  add(
+    "package.json",
+    j({
+      name: packageName(name),
+      private: true,
+      version: "0.1.0",
+      type: "module",
+      scripts: { dev: "vite", build: "vite build", preview: "vite preview" },
+      devDependencies: { vite: "^7" },
+    }),
+  );
+  // ./assets refs sit next to index.html: dev serves them from the root and
+  // `vite build` rewrites+emits html/css asset refs itself — no copy plugin.
+  add("vite.config.js", '// relative base keeps the built dist openable from any path\nexport default {\n  base: "./",\n};\n');
+
+  add(
+    "index.html",
+    `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${name}</title>
+${[...split.scripts.cdns, ...split.styles.headLinks].join("\n")}
+</head>
+<body>
+${sectionsBodyHtml(split)}
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
+`,
+  );
+
+  const imports: string[] = [];
+  if (split.styles.tokensCss) {
+    add("src/styles/tokens.css", cssTo(split.styles.tokensCss, cssBase));
+    imports.push('import "./styles/tokens.css";');
+  }
+  if (split.styles.sharedCss) {
+    add("src/styles/shared.css", cssTo(split.styles.sharedCss, cssBase));
+    imports.push('import "./styles/shared.css";');
+  }
+  sections.forEach((s, i) => {
+    const css = split.styles.perSection.get(s.className) ?? "";
+    if (css === "") return;
+    add(`src/styles/section-${i + 1}.css`, cssTo(css, cssBase));
+    imports.push(`import "./styles/section-${i + 1}.css";`);
+  });
+  // Plan: no js split for vite — the rebuild inline script (register + REDUCED
+  // guard + all timelines) ships whole in the module, loaded deferred so the
+  // CDN classic scripts have already run.
+  const js = imports.length || split.scripts.inlineJs ? `${imports.join("\n")}\n${split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : ""}` : "";
+  add("src/main.js", js);
+  return { files };
+}
