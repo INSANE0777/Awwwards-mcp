@@ -35,7 +35,7 @@ describe("splitRehost: content container -> ordered sections + chrome shell", ()
   it("collects loader scripts in captured order; head inline stays in head; styles/scripts leave the shell", () => {
     const rehost = splitRehost(sample4());
     if (!rehost) throw new Error("expected rehost split");
-    expect(rehost.headInline.map((s) => s.js)).toEqual([
+    expect(rehost.headScripts.map((s) => (s.kind === "inline" ? s.js : s.src))).toEqual([
       'if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("rm");',
     ]);
     expect(rehost.scripts.map((s) => (s.kind === "inline" ? "inline" : s.src))).toEqual([
@@ -70,14 +70,14 @@ describe("splitRehost: content container -> ordered sections + chrome shell", ()
     expect(wrapped?.sections).toHaveLength(2);
   });
 
-  it("keeps CDN externals in captured document order", () => {
+  it("keeps head + body scripts in captured order, split by location", () => {
     const html = `<!doctype html><html><head><script src="https://cdn.test/gsap.min.js"></script><script>window.boot=1</script></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main><script src="app.js"></script></body></html>`;
     const split = splitRehost(html);
-    expect(split?.headInline.map((s) => s.js)).toEqual(["window.boot=1"]);
-    expect(split?.scripts.map((s) => (s.kind === "inline" ? "inline" : s.src))).toEqual([
+    expect(split?.headScripts.map((s) => (s.kind === "inline" ? s.js : s.src))).toEqual([
       "https://cdn.test/gsap.min.js",
-      "app.js",
+      "window.boot=1",
     ]);
+    expect(split?.scripts.map((s) => (s.kind === "inline" ? "inline" : s.src))).toEqual(["app.js"]);
   });
 
   it("matches role=main exactly (main-navigation is not a content container)", () => {
@@ -139,6 +139,9 @@ describe("next: native rehost tree", () => {
     expect(layout).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />');
     expect(layout).toContain('<script type="application/ld+json" dangerouslySetInnerHTML={{ __html:');
     expect(layout).toContain("@type");
+    // Next owns charset/viewport; captured copies are deduped
+    expect(layout).not.toContain("<meta charset");
+    expect(layout).not.toContain('name="viewport"');
   });
 
   it("one SiteScripts loader appends body scripts in captured order; head boot stays in head", () => {
@@ -166,7 +169,9 @@ describe("next: native rehost tree", () => {
   it("StrictMode remount + navigation re-run: DOM-driven loader, no module guard, module type kept", async () => {
     const loader = f["components/SiteScripts.tsx"] ?? "";
     expect(loader).not.toContain("let started");
-    const block = loader.slice(loader.indexOf("// --- site-loader:start"), loader.indexOf("// --- site-loader:end"));
+    const block = loader
+      .slice(loader.indexOf("// --- site-loader:start"), loader.indexOf("// --- site-loader:end"))
+      .replace(/const SCRIPTS: Array<\{[^}]*\}> =/, "const SCRIPTS =");
     const mount = new Function("document", `${block}\nreturn mountSiteScripts();`) as (doc: unknown) => () => void;
 
     type FakeScript = {
@@ -207,7 +212,7 @@ describe("next: native rehost tree", () => {
           };
           return el;
         },
-        querySelectorAll: () => scripts,
+        querySelectorAll: () => scripts.slice(),
       };
       return { document, scripts };
     };
@@ -251,10 +256,12 @@ describe("next: native rehost tree", () => {
     const moduleHtml = `<!doctype html><html><body><main id="main"><section id="a">A</section><section id="b">B</section></main><script type="module">window.__m = 1;</script></body></html>`;
     const moduleLoader = byPath(emitNext(splitBuild(moduleHtml), "unused", "x").files)["components/SiteScripts.tsx"] ?? "";
     expect(moduleLoader).toContain('type: "module"');
-    const moduleBlock = moduleLoader.slice(
-      moduleLoader.indexOf("// --- site-loader:start"),
-      moduleLoader.indexOf("// --- site-loader:end"),
-    );
+    const moduleBlock = moduleLoader
+      .slice(
+        moduleLoader.indexOf("// --- site-loader:start"),
+        moduleLoader.indexOf("// --- site-loader:end"),
+      )
+      .replace(/const SCRIPTS: Array<\{[^}]*\}> =/, "const SCRIPTS =");
     const moduleMount = new Function("document", `${moduleBlock}\nreturn mountSiteScripts();`) as (
       doc: unknown,
     ) => () => void;
@@ -263,6 +270,13 @@ describe("next: native rehost tree", () => {
     await drive(moduleDoc, 1);
     expect(moduleDoc.scripts[0]?.type).toBe("module");
     moduleCleanup();
+  });
+
+  it("emits a typed SCRIPTS array even when the page has zero scripts", () => {
+    const html = `<!doctype html><html><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`;
+    const loader = byPath(emitNext(splitBuild(html), "unused", "x").files)["components/SiteScripts.tsx"] ?? "";
+    expect(loader).toContain("const SCRIPTS: Array<{ src: string; js: string; type: string }> = [");
+    expect(loader).not.toContain("const added");
   });
 
   it("tokens.css + site.css imported once from the layout; ordered css kept", () => {
@@ -364,6 +378,62 @@ describe("vite: native rehost tree", () => {
   });
 });
 
+describe("head scripts keep captured order in <head> (not the loader)", () => {
+  const html = `<!doctype html><html><head>
+<script src="https://cdn.test/gsap.min.js"></script>
+<script nonce="abc" id="boot">gsap.registerPlugin(ScrollTrigger);</script>
+</head><body>
+<main id="main"><section id="a">A</section><section id="b">B</section></main>
+<script src="app.js"></script>
+<script>window.__tail = 1;</script>
+</body></html>`;
+  const headOrder = (text: string): number[] =>
+    order(text, ["https://cdn.test/gsap.min.js", "gsap.registerPlugin(ScrollTrigger);"]);
+  const assertHead = (text: string) => {
+    const [cdn, inline] = headOrder(text);
+    expect(cdn).toBeGreaterThan(-1);
+    expect(inline).toBeGreaterThan(cdn);
+    expect(inline).toBeLessThan(text.indexOf("</head>"));
+  };
+
+  it("next: layout head cdn -> inline; SiteScripts only body scripts", () => {
+    const f = byPath(emitNext(splitBuild(html), "unused", "x").files);
+    const layout = f["app/layout.tsx"] ?? "";
+    assertHead(layout);
+    expect(layout).toContain('nonce="abc"');
+    expect(layout).toContain('id="boot"');
+    const loader = f["components/SiteScripts.tsx"] ?? "";
+    expect(loader).not.toContain("gsap.registerPlugin");
+    expect(loader).not.toContain("cdn.test");
+    expect(order(loader, ["/scripts/app.js", "__tail"])).toEqual([
+      loader.indexOf("/scripts/app.js"),
+      loader.indexOf("__tail"),
+    ].sort((a, b) => a - b));
+  });
+
+  it("astro: head is:inline cdn -> inline; body loader unchanged", () => {
+    const page = byPath(emitAstro(splitBuild(html), "unused", "x").files)["src/pages/index.astro"] ?? "";
+    assertHead(page);
+    expect(page).toContain('nonce="abc"');
+    expect(page).toContain('id="boot"');
+    expect(order(page, ['/scripts/app.js', "__tail"])).toEqual([
+      page.indexOf("/scripts/app.js"),
+      page.indexOf("__tail"),
+    ].sort((a, b) => a - b));
+  });
+
+  it("vite: head cdn -> inline; body loader unchanged", () => {
+    const index = byPath(emitVite(splitBuild(html), "unused", "x").files)["index.html"] ?? "";
+    assertHead(index);
+    expect(index).toContain('nonce="abc"');
+    expect(index).toContain('id="boot"');
+    expect(order(index, ['/src/scripts/app.js', "__tail"])).toEqual([
+      index.indexOf("/src/scripts/app.js"),
+      index.indexOf("__tail"),
+    ].sort((a, b) => a - b));
+  });
+});
+
 describe("buildProject: local stylesheet folding + css url rebasing", () => {
   it("folds local links in source order, extracts :root, drops the link, rebases urls", async () => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-cssfold-"));
@@ -411,6 +481,113 @@ describe("buildProject: local stylesheet folding + css url rebasing", () => {
         expect(existsSync(join(publicRoot, "a.css"))).toBe(false);
         expect(existsSync(join(publicRoot, "b.css"))).toBe(false);
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("refuses ../ stylesheet folds and neutralizes </style in embedded CSS", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-csssafe-"));
+    try {
+      const site = join(dir, "site");
+      mkdirSync(site);
+      writeFileSync(join(dir, "secret.css"), ".secret { color: red; }\n");
+      writeFileSync(
+        join(site, "index.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="../secret.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(site, "index.html"), target: "next", out: join(site, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings.some((w) => w.includes("unsafe path"))).toBe(true);
+      const layout = readFileSync(join(site, "out", "app", "layout.tsx"), "utf8");
+      expect(layout).not.toContain("secret { color: red");
+      expect(existsSync(join(site, "out", "public", "secret.css"))).toBe(false);
+
+      writeFileSync(join(site, "a.css"), '.x { content: "</style>"; }\n');
+      writeFileSync(
+        join(site, "safe.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="a.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const safe = await buildProject({ html: join(site, "safe.html"), target: "next", out: join(site, "safe-out") });
+      if ("error" in safe) throw new Error(safe.error);
+      const siteCss = readFileSync(join(site, "safe-out", "styles", "site.css"), "utf8");
+      expect(siteCss).toContain("<\\/style");
+      expect(siteCss).not.toContain("</style");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("folds nested local @imports once and guards cycles", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-cssimport-"));
+    try {
+      writeFileSync(join(dir, "a.css"), '@import "b.css";\n.a { color: red; }\n');
+      writeFileSync(join(dir, "b.css"), '@import "c.css";\n.b { color: blue; }\n');
+      writeFileSync(join(dir, "c.css"), ".c { color: green; }\n");
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="a.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings).toEqual([]);
+      const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
+      expect(site.split(".c { color: green; }").length - 1).toBe(1);
+      expect(site.split(".b { color: blue; }").length - 1).toBe(1);
+      expect(site.split(".a { color: red; }").length - 1).toBe(1);
+      expect(site.indexOf(".c {")).toBeLessThan(site.indexOf(".b {"));
+      expect(site.indexOf(".b {")).toBeLessThan(site.indexOf(".a {"));
+
+      writeFileSync(join(dir, "cyc-a.css"), '@import "cyc-b.css";\n.cyc-a { color: red; }\n');
+      writeFileSync(join(dir, "cyc-b.css"), '@import "cyc-a.css";\n.cyc-b { color: blue; }\n');
+      writeFileSync(
+        join(dir, "cycle.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="cyc-a.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const cycle = await buildProject({ html: join(dir, "cycle.html"), target: "next", out: join(dir, "cycle-out") });
+      if ("error" in cycle) throw new Error(cycle.error);
+      expect(cycle.warnings.some((w) => w.includes("cycle"))).toBe(true);
+      const cycleCss = readFileSync(join(dir, "cycle-out", "styles", "site.css"), "utf8");
+      expect(cycleCss.split(".cyc-a {").length - 1).toBe(1);
+      expect(cycleCss.split(".cyc-b {").length - 1).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hoists a late local @import to the top with a warning", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-csslate-"));
+    try {
+      writeFileSync(join(dir, "a.css"), 'body { margin: 0; }\n@import "b.css";\n');
+      writeFileSync(join(dir, "b.css"), ".b { color: blue; }\n");
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="a.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings.some((w) => w.includes("late CSS @import hoisted"))).toBe(true);
+      const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
+      expect(site.indexOf(".b {")).toBeGreaterThan(-1);
+      expect(site.indexOf(".b {")).toBeLessThan(site.indexOf("body {"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns and drops a missing local @import", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-cssmiss-"));
+    try {
+      writeFileSync(join(dir, "a.css"), '@import "gone.css";\nbody { margin: 0; }\n');
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head><link rel="stylesheet" href="a.css"></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      const res = await buildProject({ html: join(dir, "index.html"), target: "next", out: join(dir, "out") });
+      if ("error" in res) throw new Error(res.error);
+      expect(res.warnings.some((w) => w.includes("not found") && w.includes("gone.css"))).toBe(true);
+      const site = readFileSync(join(dir, "out", "styles", "site.css"), "utf8");
+      expect(site).toContain("body { margin: 0; }");
+      expect(site).not.toContain("gone.css");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

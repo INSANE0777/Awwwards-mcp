@@ -13,7 +13,7 @@
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
 import { attributeBlocks, bodyBounds, cssTo, headBounds, nn, packageName, scriptFile } from "./build-project.js";
-import type { BodyScript, EmitResult, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
+import type { BodyScript, EmitResult, LoaderScript, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
 
 // Dashed HTML/SVG attrs → JSX camelCase. Dashed-but-unlisted (data-*, aria-*,
 // unknown) stays as-is; class is a plain rename; style is special-cased in
@@ -273,9 +273,6 @@ const escapeHtmlText = (text: string): string =>
 const jsxRawScript = (open: string, body: string): string =>
   `${open.replace(/\s*\/?>$/, "")} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(body).replace(/</g, "\\u003c")} }} />`;
 
-const jsxInlineScriptTyped = (js: string, type: string): string =>
-  `<script${type && type !== "text/javascript" ? ` type="${type}"` : ""} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(js).replace(/</g, "\\u003c")} }} />`;
-
 // Document head carried into layout.tsx: captured title (fallback --name),
 // meta/og/favicon links, and non-JS data scripts (ld+json/importmap). Local
 // stylesheets were folded before the split; remote ones are added by the
@@ -294,6 +291,8 @@ const rehostHeadLines = (shell: string, name: string): string[] => {
       continue;
     }
     if (/^<meta/i.test(tag)) {
+      // Next owns charset/viewport; carrying captured copies duplicates them.
+      if (/\bcharset\s*=/i.test(tag) || /\bname\s*=\s*["']?viewport/i.test(tag)) continue;
       lines.push(jsxSelfClose(tag));
       continue;
     }
@@ -304,7 +303,7 @@ const rehostHeadLines = (shell: string, name: string): string[] => {
     }
     const open = /^<script\b[^>]*>/i.exec(tag)?.[0] ?? "";
     const type = headAttr(open, "type").toLowerCase();
-    if (JS_SCRIPT_TYPES.has(type)) continue; // inline -> headInline; external -> loader
+    if (JS_SCRIPT_TYPES.has(type)) continue; // executable head scripts handled by headScripts
     const body = /^<script\b[^>]*>([\s\S]*?)<\/script\s*>$/i.exec(tag)?.[1] ?? "";
     lines.push(jsxRawScript(open, body));
   }
@@ -312,9 +311,20 @@ const rehostHeadLines = (shell: string, name: string): string[] => {
   return lines;
 };
 
-// Rehost layout: document head metadata + pre-paint inline scripts, one client
-// loader for body/external page scripts (see SiteScripts).
-const rehostLayout = (headLines: string[], cssImports: string[], headInline: Array<{ js: string; type: string }>): string =>
+// Head scripts render as raw SSR tags in captured order. External head scripts
+// keep their attributes and point at public/scripts; inline head scripts keep
+// nonce/id/type through their captured attribute string.
+const headScriptJsx = (entry: LoaderScript): string => {
+  if (entry.kind === "external") {
+    const url = entry.local ? `/scripts/${scriptFile(entry.src)}` : entry.src;
+    return rewriteLocalUrlTag(entry.tag.replace(/(\bsrc\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s>]+)/i, `$1"${url}"`));
+  }
+  return jsxRawScript(`<script${entry.attrs ? ` ${entry.attrs}` : ""}>`, entry.js);
+};
+
+// Rehost layout: document head metadata + head scripts in captured order, one
+// client loader for body scripts (see SiteScripts).
+const rehostLayout = (headLines: string[], cssImports: string[], headScripts: LoaderScript[]): string =>
   `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
 import SiteScripts from "../components/SiteScripts";
 
@@ -323,7 +333,7 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <head>${layoutHeadTags([...headLines, ...headInline.map((s) => jsxInlineScriptTyped(s.js, s.type))])}</head>
+      <head>${layoutHeadTags([...headLines, ...headScripts.map(headScriptJsx)])}</head>
       <body>
         {children}
         <SiteScripts />
@@ -411,7 +421,7 @@ import { useEffect } from "react";
 // Captured page scripts in source order. Classic scripts must run as side
 // effects from their original globals; ESM imports would change their scope.
 // --- site-loader:start
-const SCRIPTS = [
+const SCRIPTS: Array<{ src: string; js: string; type: string }> = [
 ${entries}
 ];
 
@@ -421,7 +431,6 @@ function mountSiteScripts() {
   for (const el of document.querySelectorAll("script[data-site-scripts]")) el.remove();
 
   let cancelled = false;
-  const added = Array.from(document.querySelectorAll("script[data-site-scripts]"));
 
   (async () => {
     for (const entry of SCRIPTS) {
@@ -439,7 +448,6 @@ function mountSiteScripts() {
           el.textContent = entry.js;
         }
         document.body.appendChild(el);
-        added.push(el);
         if (entry.src === "") resolve(undefined);
       });
     }
@@ -447,7 +455,7 @@ function mountSiteScripts() {
 
   return () => {
     cancelled = true;
-    for (const el of added) el.remove();
+    for (const el of document.querySelectorAll("script[data-site-scripts]")) el.remove();
   };
 }
 // --- site-loader:end
@@ -690,7 +698,7 @@ export function emitNext(split: Split, outDir: string, name: string): EmitResult
     const styleLinks = split.headTags
       .filter((t) => t.kind === "style")
       .map((t) => jsxSelfClose(rewriteLocalUrlTag(t.tag)));
-    add("app/layout.tsx", rehostLayout([...rehostHeadLines(rehost.shell, name), ...styleLinks], cssImports, rehost.headInline));
+    add("app/layout.tsx", rehostLayout([...rehostHeadLines(rehost.shell, name), ...styleLinks], cssImports, rehost.headScripts));
     add("app/page.tsx", rehostPage(rehost));
     rehost.sections.forEach((s, i) => {
       const section = rehostSection(s, i);

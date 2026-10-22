@@ -40,28 +40,24 @@ export interface SplitStyles {
   perSection: Map<string, string>; // className -> rules whose selectors mention it (class-safe match)
   sharedCss: string; // all other top-level rules, incl. shared @media guards
   siteCss: string; // every non-:root rule in original source order (rehost cascade-safe home)
+  hoistedImports: string[]; // @import rules that appeared after a rule and were moved to the top
 }
 
 export type LoaderScript =
   | { kind: "external"; src: string; local: boolean; tag: string; type: string }
-  | { kind: "inline"; js: string; type: string };
-
-export interface InlineScript {
-  js: string;
-  type: string; // "" for classic scripts
-}
+  | { kind: "inline"; js: string; type: string; attrs: string };
 
 // Native generic shape: the document keeps its chrome, its content container's
 // id/section children become components, and page JS moves to one ordered
 // loader (classic scripts keep their captured order instead of becoming ESM).
-// Head inline scripts stay in <head> so pre-paint bootstraps do not wait for
-// hydration.
+// Head scripts keep their exact captured sequence and stay in <head>; body
+// scripts go to the loader.
 export interface RehostSplit {
   shell: string; // whole document with section nodes replaced by <SectionNN /> markers
   container: string; // tag#id label of the content container (e.g. main#main)
   sections: RebuildSection[];
-  scripts: LoaderScript[]; // ordered loader entries (head inline scripts excluded)
-  headInline: InlineScript[]; // <head> inline JS, emitted raw in place
+  headScripts: LoaderScript[]; // <head> scripts in source order (external + inline)
+  scripts: LoaderScript[]; // body scripts in source order
 }
 
 export interface TimelineBlock {
@@ -289,11 +285,28 @@ const parseRules = (css: string): string[] => {
   return rules;
 };
 
+// @import must precede every rule; a captured file may have one after a rule
+// (invalid CSS) or an inline chunk may bring one in after earlier page rules.
+const CSS_IMPORT_AT = /@import\s+(?:url\(\s*(["']?)[^)"']+\1\s*\)|"[^"]*"|'[^']*')\s*[^;]*;/gi;
+
+const hoistCssImports = (css: string): { css: string; hoisted: string[] } => {
+  const matches = [...css.matchAll(CSS_IMPORT_AT)];
+  if (matches.length === 0) return { css, hoisted: [] };
+  const firstBrace = css.indexOf("{");
+  const hoisted = matches
+    .filter((m) => firstBrace !== -1 && (m.index ?? 0) > firstBrace)
+    .map((m) => m[0]);
+  const imports = matches.map((m) => m[0]);
+  const rest = css.replace(CSS_IMPORT_AT, "").trim();
+  return { css: [...imports, rest].filter(Boolean).join("\n"), hoisted };
+};
+
 export function splitStyles(html: string, classNames: string[] = autoSectionClasses(html)): SplitStyles {
   const allCss = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n");
   const rootRe = /:root\s*\{[^{}]*\}/g;
   const tokens = [...allCss.matchAll(rootRe)].map((m) => m[0]);
-  const rest = allCss.replace(rootRe, "");
+  const hoistedCss = hoistCssImports(allCss.replace(rootRe, ""));
+  const rest = hoistedCss.css;
   const headLinks: string[] = [];
   const { start: hStart, end: hEnd } = headBounds(html);
   const headHtml = hEnd > hStart ? html.slice(hStart, hEnd) : "";
@@ -302,7 +315,8 @@ export function splitStyles(html: string, classNames: string[] = autoSectionClas
   }
   const buckets = new Map<string, string[]>();
   const shared: string[] = [];
-  for (const rule of parseRules(rest)) {
+  const rulesText = rest.replace(CSS_IMPORT_AT, "");
+  for (const rule of parseRules(rulesText)) {
     const selector = rule.slice(0, Math.max(0, rule.indexOf("{")));
     const owner = classNames.find((cls) => cls !== "" && mentions(selector, cls));
     if (owner) {
@@ -315,12 +329,14 @@ export function splitStyles(html: string, classNames: string[] = autoSectionClas
   }
   const perSection = new Map<string, string>();
   for (const [cls, bucket] of buckets) perSection.set(cls, bucket.join("\n"));
+  const imports = rest.match(CSS_IMPORT_AT) ?? [];
   return {
     tokensCss: tokens.join("\n"),
     headLinks,
     perSection,
-    sharedCss: shared.join("\n"),
+    sharedCss: [...imports, shared.join("\n")].filter(Boolean).join("\n"),
     siteCss: rest.trim(),
+    hoistedImports: hoistedCss.hoisted,
   };
 }
 
@@ -631,7 +647,10 @@ const collectScriptEntries = (html: string): Array<LoaderScript & { head: boolea
     const type = attr(open, "type").toLowerCase().trim();
     if (!JS_TYPES.has(type)) continue;
     const js = (m[2] ?? "").trim();
-    if (js !== "") scripts.push({ kind: "inline", js, type, head });
+    if (js !== "") {
+      const attrs = open.replace(/^<script\b/i, "").replace(/>$/, "").trim();
+      scripts.push({ kind: "inline", js, type, attrs, head });
+    }
   }
   return scripts;
 };
@@ -735,15 +754,13 @@ export function splitRehost(html: string): RehostSplit | null {
   const shell = stripShellAssets(html.slice(0, container.start) + rehosted + html.slice(container.end));
 
   const entries = collectScriptEntries(html);
-  const headInline: InlineScript[] = entries
-    .filter((s): s is Extract<LoaderScript, { kind: "inline" }> & { head: true } => s.kind === "inline" && s.head)
-    .map((s) => ({ js: s.js, type: s.type }));
+  const stripHead = ({ head: _head, ...entry }: LoaderScript & { head: boolean }): LoaderScript => entry;
   return {
     shell,
     container: container.label,
     sections,
-    scripts: entries.filter((s) => !(s.kind === "inline" && s.head)).map(({ head: _head, ...rest }) => rest),
-    headInline,
+    headScripts: entries.filter((s) => s.head).map(stripHead),
+    scripts: entries.filter((s) => !s.head).map(stripHead),
   };
 }
 
@@ -812,13 +829,18 @@ export function splitBuild(html: string): Split {
     : scripts.bodyScripts.filter((b) =>
         b.kind === "external" ? !roots.some((s) => s.text.includes(b.tag)) : !roots.some((s) => s.text.includes(b.js)),
       );
+  const styles = splitStyles(html, fallback ? [] : parsedRoots.map((s) => s.className));
+  const warnings = fallback ? [FULL_BODY_WARNING] : [];
+  if (styles.hoistedImports.length > 0) {
+    warnings.push(`${styles.hoistedImports.length} late CSS @import rule(s) hoisted to the top of site.css`);
+  }
   return {
     html,
     sections,
-    styles: splitStyles(html, fallback ? [] : parsedRoots.map((s) => s.className)),
+    styles,
     scripts,
     headTags: collectHeadTags(html),
-    warnings: fallback ? [FULL_BODY_WARNING] : [],
+    warnings,
     assetRefs: collectAssetRefs(html),
     rehost,
   };
@@ -902,12 +924,103 @@ export const cssTo = (css: string, base: string, fromDir = ""): string => {
   return out.endsWith("\n") ? out : out + "\n";
 };
 
+// @import forms: string and url(), with an optional media condition.
+const CSS_IMPORT_ONE = /@import\s+(?:url\(\s*(["']?)([^)"']+)\1\s*\)|(["'])([^"']+)\3)\s*([^;]*);/gi;
+
+// Resolves a local css ref against a project-relative directory. Returns null
+// when it is remote/absolute or would climb out of the project root — the same
+// policy copyAssets applies.
+const resolveProjectRef = (fromDir: string, ref: string): string | null => {
+  if (!isLocalRef(ref) || ref.includes("\\")) return null;
+  const cut = ref.search(/[?#]/);
+  const path = cut === -1 ? ref : ref.slice(0, cut);
+  const tail = cut === -1 ? "" : ref.slice(cut);
+  if (path === "") return null;
+  const parts = fromDir === "" || fromDir === "." ? [] : fromDir.split("/");
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  const resolved = parts.join("/");
+  return resolved === "" ? null : resolved + tail;
+};
+
+const escapeStyleClose = (css: string): string => css.replace(/<\/style/gi, "<\\/style");
+
+// Folds local @imports depth-first (max depth 3, cycle-guarded), rebases every
+// url() to the project root, and hoists late imports. Remote imports stay at
+// the top; missing/unsafe local imports are dropped with a warning.
+const foldCssText = async (
+  source: string,
+  rel: string,
+  abs: string,
+  depth: number,
+  seen: Set<string>,
+  warnings: string[],
+): Promise<string> => {
+  const dir = dirname(rel);
+  const firstBrace = source.indexOf("{");
+  const head: string[] = [];
+  for (const m of source.matchAll(CSS_IMPORT_ONE)) {
+    const raw = m[0];
+    if (firstBrace !== -1 && (m.index ?? 0) > firstBrace) {
+      warnings.push(`late CSS @import hoisted: ${raw.trim()} (from ${rel})`);
+    }
+    const ref = m[2] ?? m[4] ?? "";
+    const media = (m[5] ?? "").trim();
+    if (ref.includes("\\")) {
+      warnings.push(`CSS @import unsafe path dropped: ${ref} (from ${rel})`);
+      continue;
+    }
+    if (!isLocalRef(ref)) {
+      head.push(raw);
+      continue;
+    }
+    const target = resolveProjectRef(dir, ref);
+    if (target === null) {
+      warnings.push(`CSS @import path escapes the project: ${ref} (from ${rel})`);
+      continue;
+    }
+    if (depth >= 3) {
+      warnings.push(`CSS @import depth limit reached: ${ref} (from ${rel})`);
+      continue;
+    }
+    const childAbs = resolve(dirname(abs), ref.split(/[?#]/)[0] ?? "");
+    if (seen.has(childAbs)) {
+      warnings.push(`CSS @import cycle skipped: ${ref} (from ${rel})`);
+      continue;
+    }
+    let childSource: string;
+    try {
+      childSource = await readFile(childAbs, "utf8");
+    } catch {
+      warnings.push(`CSS @import not found: ${ref} (from ${rel})`);
+      continue;
+    }
+    seen.add(childAbs);
+    const child = await foldCssText(childSource, target, childAbs, depth + 1, seen, warnings);
+    seen.delete(childAbs);
+    head.push(media && !/^(?:layer|supports)\b/i.test(media) ? `@media ${media} { ${child} }` : child);
+  }
+  const rest = rebaseCssUrls(source.replace(CSS_IMPORT_ONE, ""), dir, "");
+  return [...head, rest].filter(Boolean).join("\n");
+};
+
 // Native rehost: local stylesheet links become inline <style> at their exact
 // source position, so tokens/site keep one order; the link is then dropped.
-// Remote stylesheets keep their link. CSS urls are rebased to the project root
+// Remote stylesheets keep their link. CSS urls and @imports are resolved
 // before injection (the file's own directory is the original base).
-const inlineLocalStyles = async (html: string, srcDir: string): Promise<{ html: string; folded: string[] }> => {
+const inlineLocalStyles = async (
+  html: string,
+  srcDir: string,
+): Promise<{ html: string; folded: string[]; warnings: string[] }> => {
   const folded: string[] = [];
+  const warnings: string[] = [];
   const parts: string[] = [];
   let last = 0;
   for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
@@ -917,23 +1030,33 @@ const inlineLocalStyles = async (html: string, srcDir: string): Promise<{ html: 
     const media = attr(tag, "media").trim();
     if (media !== "" && media.toLowerCase() !== "all") continue;
     const href = attr(tag, "href");
+    if (href.includes("\\") || href.includes("..")) {
+      warnings.push(`stylesheet not folded (unsafe path): ${href}`);
+      continue;
+    }
     if (!isLocalRef(href)) continue;
     const rel = href.split(/[?#]/)[0] ?? "";
     if (rel === "") continue;
-    let css: string;
+    if (rel.includes("..")) {
+      warnings.push(`stylesheet not folded (unsafe path): ${href}`);
+      continue;
+    }
+    const abs = resolve(srcDir, rel);
+    let source: string;
     try {
-      css = await readFile(resolve(srcDir, rel), "utf8");
+      source = await readFile(abs, "utf8");
     } catch {
       continue; // copyAssets reports the missing file; the link stays
     }
+    const css = await foldCssText(source, rel, abs, 0, new Set([abs]), warnings);
     parts.push(html.slice(last, m.index));
-    parts.push(`<style data-folded="${rel}">\n${rebaseCssUrls(css, dirname(rel), "")}\n</style>`);
+    parts.push(`<style data-folded="${rel}">\n${escapeStyleClose(css)}\n</style>`);
     last = (m.index ?? 0) + tag.length;
     folded.push(href);
   }
-  if (folded.length === 0) return { html, folded };
+  if (folded.length === 0) return { html, folded, warnings };
   parts.push(html.slice(last));
-  return { html: parts.join(""), folded };
+  return { html: parts.join(""), folded, warnings };
 };
 
 const sectionsBodyHtml = (split: Split): string => (split.sections.sections ?? []).map((s) => s.text).join("\n");
@@ -1006,10 +1129,19 @@ const astroRehostLoaderTag = (entry: LoaderScript): string =>
     ? `<script is:inline${scriptTypeAttr(entry.type)}>${entry.js}</script>`
     : astroInlineTags(withSrc(entry.tag, rehostScriptUrl(entry, "scripts")));
 
-// Pre-paint head inline scripts go back into <head> raw: they must not wait
-// for hydration, and Astro must not bundle them (is:inline).
-const headInlineTags = (scripts: InlineScript[], astro: boolean): string[] =>
-  scripts.map((s) => `<script${astro ? " is:inline" : ""}${scriptTypeAttr(s.type)}>${s.js}</script>`);
+// Head scripts keep their captured sequence and full attributes (nonce, id,
+// defer/async, type): pre-paint scripts must not wait for hydration/Bundling.
+const headScriptTag = (entry: LoaderScript, dir: string, astro: boolean): string => {
+  if (entry.kind === "external") {
+    const tag = withSrc(entry.tag, rehostScriptUrl(entry, dir));
+    return astro ? astroInlineTags(tag) : tag;
+  }
+  const attrs = entry.attrs === "" ? "" : ` ${entry.attrs}`;
+  return astro ? `<script is:inline${attrs}>${entry.js}</script>` : `<script${attrs}>${entry.js}</script>`;
+};
+
+const headScriptTags = (scripts: LoaderScript[], dir: string, astro: boolean): string[] =>
+  scripts.map((s) => headScriptTag(s, dir, astro));
 
 const withHeadInline = (doc: string, block: string): string => {
   if (block === "") return doc;
@@ -1074,7 +1206,7 @@ export function emitAstro(split: Split, outDir: string, name: string): EmitResul
     }
     rehost.sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
     const loader = rehost.scripts.map(astroRehostLoaderTag).join("\n");
-    const head = headInlineTags(rehost.headInline, true).join("\n");
+    const head = headScriptTags(rehost.headScripts, "scripts", true).join("\n");
     add(
       "src/pages/index.astro",
       `---
@@ -1249,7 +1381,7 @@ export default {
       .join("\n");
     add(
       "index.html",
-      withLoader(withHeadInline(inlineShell(rehost), headInlineTags(rehost.headInline, false).join("\n")), loader),
+      withLoader(withHeadInline(inlineShell(rehost), headScriptTags(rehost.headScripts, "src/scripts", false).join("\n")), loader),
     );
     return { files, warnings };
   }
@@ -1338,12 +1470,14 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   // :root extraction and site.css order see the stylesheet body in source place.
   let split = splitBuild(html);
   let foldedCss: string[] = [];
+  let cssWarnings: string[] = [];
   if (split.rehost) {
     const inlined = await inlineLocalStyles(html, dirname(src));
     if (inlined.folded.length > 0) {
       foldedCss = inlined.folded;
       split = splitBuild(inlined.html);
     }
+    cssWarnings = inlined.warnings;
   }
   const emitted =
     args.target === "vite"
@@ -1356,7 +1490,11 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   // root — matching each emitter's css re-basing and local link/script hrefs.
   const outDir = resolve(args.out);
   const rehostScripts =
-    split.rehost?.scripts.filter((s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external" && s.local) ?? [];
+    split.rehost === null
+      ? []
+      : [...split.rehost.headScripts, ...split.rehost.scripts].filter(
+          (s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external" && s.local,
+        );
   const { missing } = await copyAssets(html, dirname(src), outDir, {
     ...(args.target === "vite" ? {} : { into: "public" }),
     ...(rehostScripts.length || foldedCss.length ? { skip: [...foldedCss, ...rehostScripts.map((s) => s.src)] } : {}),
@@ -1394,6 +1532,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     warnings: [
       ...split.warnings,
       ...emitted.warnings,
+      ...cssWarnings,
       ...missing.map((ref) => `asset not found: ${ref}`),
       ...missingScripts.map((ref) => `asset not found: ${ref}`),
     ],
