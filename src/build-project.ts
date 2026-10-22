@@ -515,6 +515,10 @@ export const collectHeadTags = (html: string): HeadTag[] => {
 const ASSET_REF_RE =
   /<(?:link|script|img|image|source|video|audio|track|a)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["'][^>]*>|url\(\s*["']?([^)"'\s]+)["']?\s*\)/gi;
 
+// Social cards are the only meta values that are assets; keys are allowlisted.
+const META_IMAGE_RE =
+  /<meta\b[^>]*\b(?:property|name)\s*=\s*["'](?:og:image(?::url)?|twitter:image(?::src)?)["'][^>]*>/gi;
+
 const ASSET_EXT =
   /\.(?:css|js|mjs|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|m4a|jpg|jpeg|png|webp|avif|gif|svg|pdf|json)$/i;
 const TEXT_ASSET = /\.(?:css|js|mjs)$/i;
@@ -532,14 +536,17 @@ const isAssetRef = (ref: string): boolean =>
 const collectAssetRefs = (html: string): string[] => {
   const seen = new Set<string>();
   const refs: string[] = [];
-  for (const m of html.matchAll(ASSET_REF_RE)) {
-    const ref = m[1] ?? m[2];
-    if (!ref || ref.includes("..") || !isLocalRef(ref) || !isAssetRef(ref)) continue;
+  const push = (ref: string | undefined): void => {
+    if (!ref || ref.includes("..") || !isLocalRef(ref) || !isAssetRef(ref)) return;
     const key = ref.replace(/^\.\//, "");
-    if (seen.has(key)) continue;
+    if (seen.has(key)) return;
     seen.add(key);
     refs.push(ref);
-  }
+  };
+  for (const m of html.matchAll(ASSET_REF_RE)) push(m[1] ?? m[2]);
+  // Social-card tags carry their URL in content=, not src/href. Allowlist the
+  // keys so a description mentioning "assets/x.png" is never copied.
+  for (const m of html.matchAll(META_IMAGE_RE)) push(attr(m[0], "content"));
   return refs;
 };
 
@@ -1458,7 +1465,7 @@ export function emitVite(split: Split, outDir: string, name: string): EmitResult
   // into dist so those src paths still resolve after build.
   add(
     "vite.config.js",
-    `import { cpSync, readdirSync } from "node:fs";
+    `import { cpSync, existsSync, readdirSync } from "node:fs";
 
 const PROJECT = new Set(["index.html", "package.json", "package-lock.json", "node_modules", "src", "dist", "public", "vite.config.js"]);
 
@@ -1472,6 +1479,9 @@ export default {
           if (PROJECT.has(name) || name.startsWith(".")) continue;
           cpSync(name, \`dist/\${name}\`, { recursive: true });
         }
+        // Classic rehost scripts keep their captured /src/scripts URLs, which
+        // vite does not emit because they are not module entries.
+        if (existsSync("src/scripts")) cpSync("src/scripts", "dist/src/scripts", { recursive: true });
       },
     },
   ],

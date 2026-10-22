@@ -500,6 +500,8 @@ describe("vite: native rehost tree", () => {
     expect(js).toContain('import "./styles/site.css";');
     expect(js).not.toContain("__order");
     expect(f["src/styles/site.css"]).not.toContain(":root");
+    // built copy: the captured /src/scripts URLs must resolve from dist
+    expect(f["vite.config.js"]).toContain('cpSync("src/scripts", "dist/src/scripts"');
   });
 });
 
