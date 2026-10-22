@@ -713,12 +713,37 @@ const stripShellAssets = (html: string): string =>
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
     .replace(SCRIPT_RE, (full: string, open: string) => (attr(open, "src") !== "" || JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full));
 
-// `--authored` drops every executable page script (originals and CDN loader
-// tags) but keeps non-JS data scripts (ld+json/importmap) — they are metadata.
+// `--authored` keeps the page's third-party animation libraries (remote/CDN
+// tags and local vendor bundles the skeletons import) plus head inline boot
+// scripts; site logic (app.js etc.) and body inline scripts are dropped.
+const VENDOR_MOTION_LIB =
+  /(?:^|\/)vendor\/(?:gsap|scrolltrigger|lenis|split-type|circletype|lottie)[^/]*\.js$/i;
+
+export const isVendorMotionLibrary = (src: string): boolean =>
+  VENDOR_MOTION_LIB.test((src.split(/[?#]/)[0] ?? "").replace(/\\/g, "/"));
+
+export const keepAuthoredExternalScript = (src: string, local: boolean): boolean =>
+  !local || isVendorMotionLibrary(src);
+
+export const keepAuthoredBodyScript = (
+  entry: { kind: "external"; src: string; local: boolean } | { kind: "inline" },
+): boolean => entry.kind === "external" && keepAuthoredExternalScript(entry.src, entry.local);
+
+export const keepAuthoredHeadScript = (entry: LoaderScript): boolean =>
+  entry.kind === "inline" || keepAuthoredExternalScript(entry.src, entry.local);
+
+export const keepAuthoredHeadTag = (tag: HeadTag): boolean =>
+  tag.kind !== "external" ||
+  keepAuthoredExternalScript(attr(tag.tag, "src"), isLocalRef(attr(tag.tag, "src")));
+
 export const stripExecutableScripts = (html: string): string =>
   html.replace(SCRIPT_RE, (full: string, open: string) => {
-    if (attr(open, "src") !== "" || JS_TYPES.has(attr(open, "type").toLowerCase().trim())) return "";
-    return full;
+    const src = attr(open, "src");
+    if (src === "") {
+      // body inline JS is site logic; data scripts (ld+json/importmap) are metadata
+      return JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full;
+    }
+    return keepAuthoredExternalScript(src, isLocalRef(src)) ? full : "";
   });
 
 interface RehostContainer {
@@ -1291,7 +1316,7 @@ const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean, auth
       if (JS_TYPES.has(attr(open, "type").toLowerCase())) {
         const entry = rehost.headScripts[scriptIndex];
         scriptIndex += 1;
-        if (!authored && entry) lines.push(headScriptTag(entry, dir, astro));
+        if (entry && (!authored || keepAuthoredHeadScript(entry))) lines.push(headScriptTag(entry, dir, astro));
         continue;
       }
     }
@@ -1377,7 +1402,8 @@ export function emitAstro(split: Split, outDir: string, name: string, motion?: M
       imports.push('import "../styles/site.css";');
     }
     rehost.sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
-    const loader = authored ? "" : rehost.scripts.map(astroRehostLoaderTag).join("\n");
+    const bodyScripts = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
+    const loader = bodyScripts.map(astroRehostLoaderTag).join("\n");
     const head = rehostHeadReplay(rehost, "scripts", true, authored);
     add(
       "src/pages/index.astro",
@@ -1419,12 +1445,12 @@ ${authored ? astroMotionScript(i) : ""}`,
 
   const generic = split.sections.detected === "generic";
   const headTags = split.headTags
-    .filter((t) => (authored ? t.kind === "style" : generic || t.kind !== "inline"))
+    .filter((t) => (authored ? keepAuthoredHeadTag(t) : generic || t.kind !== "inline"))
     .map((t) =>
       t.kind === "inline" ? `<script is:inline>\n${t.js}\n</script>` : astroInlineTags(t.tag),
     );
   const bodyTags = (authored
-    ? []
+    ? split.scripts.bodyScripts.filter(keepAuthoredBodyScript)
     : generic
       ? split.scripts.bodyScripts
       : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external"))
@@ -1558,8 +1584,9 @@ export default {
     }
     const motionMain = authored ? 'import { initAnimations } from "./animations/registry.js";\n\ninitAnimations();\n' : "";
     add("src/main.js", imports.length ? `${imports.join("\n")}\n${motionMain}` : motionMain);
+    const bodyScripts = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
     const loader = [
-      authored ? "" : rehost.scripts.map((s) => rehostLoaderTag(s, "src/scripts")).join("\n"),
+      bodyScripts.map((s) => rehostLoaderTag(s, "src/scripts")).join("\n"),
       '<script type="module" src="/src/main.js"></script>',
     ]
       .filter(Boolean)
@@ -1580,16 +1607,15 @@ export default {
   const rawBody = generic ? bodyInner(split.html).trim() : sectionsBodyHtml(split);
   const body = authored ? stripExecutableScripts(rawBody) : rawBody;
   const headTags = split.headTags
-    .filter((t) => (authored ? t.kind === "style" : generic || t.kind !== "inline"))
+    .filter((t) => (authored ? keepAuthoredHeadTag(t) : generic || t.kind !== "inline"))
     .map((t) => (t.kind === "inline" ? `<script>\n${t.js}\n</script>` : t.tag));
-  const bodyTags = authored
+  const bodyTags = generic
     ? ""
-    : generic
-      ? ""
-      : split.scripts.bodyScripts
-          .filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external")
-          .map((b) => b.tag)
-          .join("\n");
+    : (authored
+        ? split.scripts.bodyScripts.filter(keepAuthoredBodyScript)
+        : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external"))
+        .map((b) => (b.kind === "external" ? b.tag : ""))
+        .join("\n");
   add(
     "index.html",
     `<!doctype html>
@@ -1714,7 +1740,10 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
       : [...split.rehost.headScripts, ...split.rehost.scripts].filter(
           (s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external",
         );
-  const rehostScripts = authored ? [] : legacyScripts.filter((s) => s.local);
+  const keptScripts = authored
+    ? legacyScripts.filter((s) => keepAuthoredExternalScript(s.src, s.local))
+    : legacyScripts;
+  const rehostScripts = keptScripts.filter((s) => s.local);
   const skipRefs = [
     ...foldedCss,
     ...(authored ? legacyScripts.map((s) => s.src) : rehostScripts.map((s) => s.src)),

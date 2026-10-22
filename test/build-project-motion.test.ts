@@ -222,14 +222,24 @@ describe("motion skeletons", () => {
 });
 
 describe("--authored", () => {
-  it("drops every legacy script ref and wires the skeletons per target", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "awwwards-n2-authored-"));
+  const LIBS = [
+    "vendor/gsap.min.js",
+    "vendor/ScrollTrigger.min.js",
+    "vendor/lenis.min.js",
+    "vendor/split-type.min.js",
+    "vendor/CircleType.min.js",
+    "vendor/lottie.min.js",
+  ];
+  const order = (text: string, needles: string[]): number[] => needles.map((n) => text.indexOf(n));
+
+  it("keeps the head boot + animation libraries, drops site logic", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-n2-authored-libs-"));
     try {
       const trees: Record<string, Record<string, string>> = {};
       for (const target of ["vite", "astro", "next"] as const) {
         const out = join(dir, target);
         const res = await buildProject({
-          html: join(FIXTURES, "sample4.html"),
+          html: join(FIXTURES, "sample5.html"),
           target,
           out,
           motion: join(FIXTURES, "census.json"),
@@ -238,35 +248,68 @@ describe("--authored", () => {
         if ("error" in res) throw new Error(res.error);
         trees[target] = readTree(out);
       }
-      const legacy = ["app.js", "vendor/gsap.min.js", "__order", "SiteScripts", "data-site-scripts", "is:inline"];
+
+      // (a) head inline boot survives pre-paint, after the remote head script.
+      const heads: Record<string, string> = {
+        next: trees.next?.["app/layout.tsx"] ?? "",
+        astro: trees.astro?.["src/pages/index.astro"] ?? "",
+        vite: trees.vite?.["index.html"] ?? "",
+      };
+      for (const [target, head] of Object.entries(heads)) {
+        expect(`${target}:${/classList\.add\(\\?"rm\\?"\)/.test(head)}`).toBe(`${target}:true`);
+        expect(head.indexOf("https://cdn.test/extra.js")).toBeGreaterThan(-1);
+        expect(head.indexOf("https://cdn.test/extra.js")).toBeLessThan(head.indexOf("classList.add"));
+        expect(head.indexOf("classList.add")).toBeLessThan(head.indexOf("</head>"));
+      }
+
+      // (b) animation libraries keep their file + ordered reference.
+      const nextLoader = trees.next?.["components/SiteScripts.tsx"] ?? "";
+      expect(nextLoader.indexOf("/scripts/vendor/gsap.min.js")).toBeLessThan(nextLoader.indexOf("/scripts/vendor/ScrollTrigger.min.js"));
+      expect(nextLoader.indexOf("/scripts/vendor/ScrollTrigger.min.js")).toBeLessThan(nextLoader.indexOf("/scripts/vendor/lenis.min.js"));
+      for (const lib of LIBS) expect(nextLoader).toContain(`/scripts/${lib}`);
+
+      const viteIndex = trees.vite?.["index.html"] ?? "";
+      const viteOrder = order(viteIndex, LIBS.map((lib) => `/src/scripts/${lib}`));
+      expect(viteOrder.every((at) => at > -1)).toBe(true);
+      expect(viteOrder).toEqual([...viteOrder].sort((a, b) => a - b));
+      const astroIndex = trees.astro?.["src/pages/index.astro"] ?? "";
+      const astroOrder = order(astroIndex, LIBS.map((lib) => `is:inline src="/scripts/${lib}"`));
+      expect(astroOrder.every((at) => at > -1)).toBe(true);
+      expect(astroOrder).toEqual([...astroOrder].sort((a, b) => a - b));
+
+      for (const [root, scriptRoot] of [
+        [join(dir, "next"), join("public", "scripts")],
+        [join(dir, "astro"), join("public", "scripts")],
+        [join(dir, "vite"), join("src", "scripts")],
+      ] as const) {
+        for (const lib of LIBS) expect(existsSync(join(root, scriptRoot, lib))).toBe(true);
+        expect(existsSync(join(root, scriptRoot, "app.js"))).toBe(false);
+        expect(existsSync(join(root, scriptRoot, "neu-ix.js"))).toBe(false);
+      }
+
+      // Site logic is gone from every emitted file (vendor bundles are opaque
+      // libraries and may contain arbitrary strings).
       for (const [target, tree] of Object.entries(trees)) {
         for (const [path, text] of Object.entries(tree)) {
-          for (const needle of legacy) {
-            if (text.includes(needle)) {
-              throw new Error(`${target}/${path} still references legacy script source: ${needle}`);
-            }
+          if (path.includes("/vendor/")) continue;
+          for (const needle of ["app.js", "neu-ix.js", "NEU_IX", "__order", "nativeTail"]) {
+            if (text.includes(needle)) throw new Error(`${target}/${path} still references site logic: ${needle}`);
           }
         }
       }
-      expect(existsSync(join(dir, "next", "components", "SiteScripts.tsx"))).toBe(false);
-      expect(existsSync(join(dir, "next", "public", "scripts"))).toBe(false);
-      expect(existsSync(join(dir, "astro", "public", "scripts"))).toBe(false);
-      expect(existsSync(join(dir, "vite", "src", "scripts"))).toBe(false);
 
+      expect(trees.next?.["app/layout.tsx"]).toContain("<SiteScripts />");
       expect(trees.next?.["app/layout.tsx"]).toContain("<MotionRoot />");
-      expect(trees.next?.["app/layout.tsx"]).toContain('import MotionRoot from "../components/MotionRoot";');
       expect(trees.next?.["components/MotionRoot.tsx"]).toContain("useSection01Motion();");
       expect(trees.vite?.["src/main.js"]).toContain("initAnimations();");
-      expect(trees.vite?.["index.html"]).not.toContain('src="/src/scripts/');
       expect(trees.astro?.["src/components/Section01.astro"]).toContain('from "../animations/section01.js"');
       expect(trees.astro?.["src/components/Section01.astro"]).toContain("initSection01();");
-      expect(trees.astro?.["src/pages/index.astro"]).not.toContain("is:inline");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("wires nothing when the manifest has no measured triggers", async () => {
+  it("keeps vendor loaders even without measured triggers; MotionRoot stays absent", async () => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-n2-authored-dom-"));
     try {
       const res = await buildProject({
@@ -277,9 +320,12 @@ describe("--authored", () => {
       });
       if ("error" in res) throw new Error(res.error);
       const tree = readTree(join(dir, "next"));
-      expect(tree["app/layout.tsx"]).not.toContain("SiteScripts");
+      expect(tree["app/layout.tsx"]).toContain("<SiteScripts />");
+      expect(tree["app/layout.tsx"]).toContain("classList.add");
       expect(tree["app/layout.tsx"]).not.toContain("MotionRoot");
       expect(tree["components/MotionRoot.tsx"]).toBeUndefined();
+      expect(tree["components/SiteScripts.tsx"]).toContain("/scripts/vendor/gsap.min.js");
+      expect(tree["components/SiteScripts.tsx"]).not.toContain("app.js");
       expect(JSON.parse(tree["motion.manifest.json"] ?? "{}").measured).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -462,8 +508,10 @@ declare namespace JSX {
 `,
     };
     for (const [path, content] of Object.entries(tree)) {
+      if (path === "components/SiteScripts.tsx") continue; // unchanged pre-N2 loader; DOM-faked in native tests
       if (/\.tsx?$/.test(path)) checkFiles[`/${path}`] = content;
     }
+    checkFiles["/components/SiteScripts.tsx"] = "export default function SiteScripts() {\n  return null;\n}\n";
     const options: ts.CompilerOptions = {
       target: ts.ScriptTarget.ES2017,
       strict: true,

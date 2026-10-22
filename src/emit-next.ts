@@ -12,7 +12,18 @@
 // that dependency behind it. Import cycle with build-project.ts is
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
-import { attributeBlocks, bodyBounds, cssTo, nn, packageName, scriptFile, stripExecutableScripts } from "./build-project.js";
+import {
+  attributeBlocks,
+  bodyBounds,
+  cssTo,
+  keepAuthoredBodyScript,
+  keepAuthoredHeadScript,
+  keepAuthoredHeadTag,
+  nn,
+  packageName,
+  scriptFile,
+  stripExecutableScripts,
+} from "./build-project.js";
 import type { BodyScript, EmitResult, LoaderScript, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
 import { buildMotionManifest, motionManifestJson, type MotionEmitOptions } from "./motion-manifest.js";
 import { motionHasTriggers, nextMotionSkeletons } from "./motion-skeletons.js";
@@ -321,7 +332,7 @@ const rehostHeadLines = (rehost: RehostSplit, name: string, authored: boolean): 
     if (JS_SCRIPT_TYPES.has(type)) {
       const entry = rehost.headScripts[scriptIndex];
       scriptIndex += 1;
-      if (!authored && entry) lines.push(headScriptJsx(entry));
+      if (entry && (!authored || keepAuthoredHeadScript(entry))) lines.push(headScriptJsx(entry));
       continue;
     }
     const body = /^<script\b[^>]*>([\s\S]*?)<\/script\s*>$/i.exec(tag)?.[1] ?? "";
@@ -347,10 +358,9 @@ const headScriptJsx = (entry: LoaderScript): string => {
 // shortcut: <html lang> and <body> attributes are not carried (hardcoded en /
 // bare body) — Next-only gap; vite/astro keep them. Wire document attrs when a
 // non-en or themed rehost shows up.
-const rehostLayout = (headLines: string[], cssImports: string[], authored: boolean, motion: boolean): string => {
-  const component = authored ? (motion ? "MotionRoot" : "") : "SiteScripts";
-  const componentImport = component ? `import ${component} from "../components/${component}";` : "";
-  const componentTag = component ? `\n        <${component} />` : "";
+const rehostLayout = (headLines: string[], cssImports: string[], components: string[]): string => {
+  const componentImport = components.map((c) => `import ${c} from "../components/${c}";`).join("\n");
+  const componentTag = components.map((c) => `\n        <${c} />`).join("");
   return `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
 ${componentImport ? `${componentImport}\n\n` : ""}export default function RootLayout({
   children,
@@ -432,8 +442,8 @@ const rehostSection = (s: RebuildSection, i: number, authored: boolean): { conte
   };
 };
 
-const siteScripts = (rehost: RehostSplit): string => {
-  const entries = rehost.scripts
+const siteScripts = (scripts: LoaderScript[]): string => {
+  const entries = scripts
     .map((entry) =>
       entry.kind === "inline"
         ? `  { src: "", js: ${JSON.stringify(entry.js)}, type: ${JSON.stringify(entry.type)} },`
@@ -661,7 +671,7 @@ export function emitNext(split: Split, outDir: string, name: string, motion?: Mo
   const hasCdns = split.scripts.cdns.length > 0;
   const attributed = attributeBlocks(split);
   const headTags = split.headTags
-    .filter((t) => (authored ? t.kind === "style" : true))
+    .filter((t) => (authored ? keepAuthoredHeadTag(t) : true))
     .map((t) =>
       t.kind === "inline"
         ? jsxInlineScript(t.js)
@@ -673,7 +683,7 @@ export function emitNext(split: Split, outDir: string, name: string, motion?: Mo
   // Section-nested scripts already ship inside the raw section HTML, so they
   // are not in bodyScripts (no double execution). Rebuild keeps externals only.
   const bodyScripts = authored
-    ? []
+    ? split.scripts.bodyScripts.filter(keepAuthoredBodyScript)
     : generic
       ? split.scripts.bodyScripts
       : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external");
@@ -732,14 +742,18 @@ export function emitNext(split: Split, outDir: string, name: string, motion?: Mo
       add("styles/site.css", cssTo(split.styles.siteCss, "/"));
       cssImports.push('import "../styles/site.css";');
     }
-    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name, authored), cssImports, authored, motionRoot));
+    const authoredBody = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
+    const components = authored
+      ? [...(authoredBody.length > 0 ? ["SiteScripts"] : []), ...(motionRoot ? ["MotionRoot"] : [])]
+      : ["SiteScripts"];
+    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name, authored), cssImports, components));
     add("app/page.tsx", rehostPage(rehost));
     rehost.sections.forEach((s, i) => {
       const section = rehostSection(s, i, authored);
       if (section.warning) warnings.push(section.warning);
       add(`components/${nn(i)}.tsx`, section.content);
     });
-    if (!authored) add("components/SiteScripts.tsx", siteScripts(rehost));
+    if (!authored || authoredBody.length > 0) add("components/SiteScripts.tsx", siteScripts(authoredBody));
     return { files, warnings };
   }
 
