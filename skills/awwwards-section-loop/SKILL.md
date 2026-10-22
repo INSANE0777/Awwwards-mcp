@@ -148,6 +148,9 @@ not by re-opening sections unless a band regressed.
 - `build_gsap_stub` - turns the captured censuses into a runnable
   GSAP+ScrollTrigger stub (durations, easings, scrub/pin, camera from
   `capture_pose_3d`, reduced-motion guard) — step 2's motion wiring, generated.
+- `build_project` — build → convert: once a band/page rebuild file is finished
+  as a single local `.html`, turn it into a runnable Vite/Astro/Next project
+  (sections as components, wired timelines); pair with `verify_build`'s gate.
 - `analyze_bundle` - mechanism recovery (step 2 escape hatch): when a
   section's effect can't be explained from the census evidence, grep the
   section site's script bundle for mechanism keywords; the censuses say

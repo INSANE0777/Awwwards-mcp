@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
+  buildProject,
   copyAssets,
   emitAstro,
   emitVite,
@@ -144,13 +145,18 @@ describe("extractScripts", () => {
   it("inline script captured whole; blocks anchored with the right classes; refresh() tail not swallowed", () => {
     const scripts = extractScripts(sample());
     expect(scripts.inlineJs).toContain("const REDUCED =");
-    expect(scripts.timelineBlocks).toHaveLength(2);
+    expect(scripts.timelineBlocks).toHaveLength(3);
     expect(scripts.timelineBlocks[0]?.className).toBe("c-13");
     expect(scripts.timelineBlocks[0]?.js).toContain('gsap.timeline({ scrollTrigger: { trigger: ".c-13"');
     expect(scripts.timelineBlocks[0]?.js).toContain('.from(".c-13", { opacity: 0, y: 40 });');
     expect(scripts.timelineBlocks[1]?.className).toBe("c-23");
     expect(scripts.timelineBlocks[1]?.js).not.toContain("ScrollTrigger.refresh()");
     expect(scripts.timelineBlocks[1]?.js).not.toContain("REDUCED");
+    // R1: a function-typed end string and a `;`-bearing onStart callback inside
+    // .from( args survive — the block is never silently dropped
+    expect(scripts.timelineBlocks[2]?.className).toBe("c-24");
+    expect(scripts.timelineBlocks[2]?.js).toContain('end: "function(){ return getMax(); }"');
+    expect(scripts.timelineBlocks[2]?.js).toContain("onStart: () => { void 0; }");
   });
 
   it("non-JS script types (importmap, ld+json) never enter inlineJs", () => {
@@ -262,7 +268,8 @@ describe("emitVite", () => {
     expect(index).toContain('<script type="module" src="/src/main.js"></script>');
     expect(index).toContain('src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"');
     expect(index).toContain('href="https://fonts.googleapis.com/css2?family=Demo+Local&display=swap"');
-    expect(index).not.toContain("{{slot:");
+    // R3: the zero-slot assertion spans the whole emitted tree, not just index.html
+    expect(JSON.stringify(files)).not.toContain("{{slot:");
   });
 
   it("main.js imports every css file then ships the inline script whole", () => {
@@ -345,11 +352,33 @@ describe("emitAstro", () => {
     expect(s2).toContain("ScrollTrigger.refresh();");
     const s3 = f["src/components/Section03.astro"] ?? "";
     expect(s3).toContain('trigger: ".c-23"');
+    // R1 regression: the `;`-bearing .from block (fixture sample 2) lands in its
+    // section whole — function end string and onStart callback intact
+    expect(s3).toContain("end: \"function(){ return getMax(); }\"");
+    expect(s3).toContain("onStart: () => { void 0; }");
     expect(files.filter((x) => x.content.includes('.from(".c-13"')).map((x) => x.path)).toEqual([
       "src/components/Section02.astro",
     ]);
     const s1 = f["src/components/Section01.astro"] ?? "";
     expect(s1).not.toContain("<script>");
+  });
+
+  it("R2: brace/backtick content ships via <Fragment set:html> as an escaped string, not raw interpolation", () => {
+    const braces = `<!doctype html><html><body>
+<section class="c-30"><p class="c-31">Price: {from} 99\` up</p></section>
+<section class="c-40"><p class="c-41">plain copy</p></section>
+</body></html>`;
+    const f2 = byPath(astroByName(braces));
+    const risky = f2["src/components/Section01.astro"] ?? "";
+    expect(risky).toContain("<Fragment set:html=");
+    // raw interpolation is gone: the quoted attr form only exists escaped inside
+    // the string literal (quotes escaped, braces and backtick verbatim)
+    expect(risky).not.toContain('<p class="c-31">');
+    expect(risky).toContain("<p class=\\\"c-31\\\">Price: {from} 99` up</p>");
+    expect(risky).toContain("set:html string (astro would parse { as an expression)");
+    const plain = f2["src/components/Section02.astro"] ?? "";
+    expect(plain).toContain('<p class="c-41">plain copy</p>');
+    expect(plain).not.toContain("Fragment");
   });
 
   it("css re-based to /assets/ for the public dir; package.json is astro-shaped", () => {
@@ -393,5 +422,49 @@ if (!REDUCED) {
     const f3 = byPath(astroByName(orphan));
     expect(f3["src/pages/index.astro"]).toContain('.from(".c-999"');
     expect(f3["src/components/Section01.astro"]).not.toContain(".from(");
+  });
+});
+
+describe("buildProject core (bin + MCP handler both call this)", () => {
+  it("reads html, writes the tree, copies assets, reports {outDir, target, files, warnings}", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-run-"));
+    try {
+      const html = '<!doctype html><html><body><section class="c-1"><img class="c-2" src="./assets/pic.png"></section></body></html>';
+      const src = join(dir, "site.html");
+      writeFileSync(src, html);
+      mkdirSync(join(dir, "assets"));
+      writeFileSync(join(dir, "assets", "pic.png"), Buffer.from([1, 2, 3]));
+      const out = join(dir, "proj");
+      const result = await buildProject({ html: src, target: "vite", out });
+      expect(result).toMatchObject({ target: "vite" });
+      if ("error" in result) throw new Error(`unexpected error: ${result.error}`);
+      expect(resolve(result.outDir)).toBe(resolve(out));
+      expect(result.files).toContain("index.html");
+      expect(result.warnings).toEqual([]);
+      expect(existsSync(join(out, "index.html"))).toBe(true);
+      expect(existsSync(join(out, "src", "main.js"))).toBe(true);
+      expect([...readFileSync(join(out, "assets", "pic.png"))]).toEqual([1, 2, 3]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("missing html returns {error} (never throws); next target scaffolds app/ + public/assets", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-out2-"));
+    try {
+      const err = await buildProject({ html: join(dir, "nope.html"), target: "astro", out: join(dir, "p") });
+      expect(err).toHaveProperty("error");
+      expect((err as { error: string }).error).toContain("cannot read");
+      const htmlPath = join(dir, "site.html");
+      writeFileSync(htmlPath, '<!doctype html><html><body><section class="c-1"><p>x</p></section></body></html>');
+      const res = await buildProject({ html: htmlPath, target: "next", out: join(dir, "nx") });
+      expect(res).toHaveProperty("files");
+      if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+      expect(res.files).toContain("app/page.tsx");
+      expect(res.files).toContain("components/Section01.tsx");
+      expect(existsSync(join(dir, "nx", "app", "page.tsx"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

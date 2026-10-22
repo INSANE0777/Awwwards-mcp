@@ -61,6 +61,10 @@ if (!REDUCED) {
   // motion-dna sample 1: section .c-23 animates as a unit
   gsap.timeline({ scrollTrigger: { trigger: ".c-23", start: "top 85%", end: "bottom top" }, defaults: { duration: 0.7, ease: "power1.out" } })
     .from(".c-23", { opacity: 0, y: 40 });
+
+  // motion-dna sample 2: .c-24 scrubs; the captured end is a function string
+  gsap.timeline({ scrollTrigger: { trigger: ".c-24", start: "top 80%", end: "function(){ return getMax(); }", scrub: true }, defaults: { duration: 0.8, ease: "power2.out" } })
+    .from(".c-24", { opacity: 0, y: 40, onStart: () => { void 0; } });
   ScrollTrigger.refresh();
 } else {
   // static first frame: no tweens created, content renders in its final state

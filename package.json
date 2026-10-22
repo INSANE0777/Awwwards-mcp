@@ -7,7 +7,8 @@
   "bin": {
     "awwwards-mcp": "dist/cli.js",
     "awwwards-index": "dist/index-cli.js",
-    "awwwards-verify": "dist/verify-cli.js"
+    "awwwards-verify": "dist/verify-cli.js",
+    "awwwards-build-project": "dist/build-project-cli.js"
   },
   "files": [
     "dist",

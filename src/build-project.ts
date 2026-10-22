@@ -12,8 +12,12 @@
 // {error}) / 3 io (thrown upstream) — the Task-3 bin mirrors verify-cli's
 // mapping. No console.* in this module: all user-visible output is returned.
 
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+// Call-time-only cycle (house precedent: capture.ts/structure.ts) — the
+// vite/next emit dispatch below and emit-next's cssTo/nn/attributeBlocks both
+// resolve at invocation, never at module eval.
+import { emitNext } from "./emit-next.js";
 
 export interface RebuildSection {
   tag: string;
@@ -253,18 +257,56 @@ export function splitStyles(html: string, classNames: string[] = autoSectionClas
 
 // Rebuild-shape anim block: a `// captured anim` / `// motion-dna sample`
 // comment line anchors one gsap.timeline(...) whose final call is `.from(...);`
-// — the same terminating shape the kit emits, so the block boundary is exact.
-const TIMELINE_BLOCK_RE = /\/\/ (?:captured anim|motion-dna sample)[^\n]*\n[\s\S]*?\.from\([^;]*\);/g;
+// — the same terminating shape the kit emits. The `.from(` args are walked
+// with a quote-aware balanced-paren scan, not a `[^;]*` regex: real captions
+// carry semicolon-bearing callbacks (`onStart: () => { mark(); }`) and
+// function-typed scrollTrigger ends (`end: "function(){ return x; }"`), and a
+// semicolon-terminated pattern would silently drop the whole block (no
+// component wiring, no page-level fallback).
+const TIMELINE_BLOCK_RE = /\/\/ (?:captured anim|motion-dna sample)[^\n]*\n/g;
 
-const collectTimelineBlocks = (js: string): TimelineBlock[] =>
-  [...js.matchAll(TIMELINE_BLOCK_RE)].map((m) => ({
-    className: /\.c-\d+/.exec(m[0])?.[0].slice(1) ?? "",
-    js: m[0]
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .join("\n"),
-  }));
+// Index just past the `;` that terminates the first `.from(...)` at/after
+// `from`, or -1 when parens never balance (generator output always ends the
+// final call with `;`, so a missing `;` stays a non-block).
+const fromCallEnd = (js: string, from: number): number => {
+  const open = js.indexOf(".from(", from);
+  if (open === -1) return -1;
+  let depth = 1;
+  let q: string | null = null;
+  for (let i = open + 6; i < js.length; i++) {
+    const c = js[i];
+    if (q !== null) {
+      if (c === "\\") i += 1;
+      else if (c === q) q = null;
+    } else if (c === '"' || c === "'" || c === "`") {
+      q = c;
+    } else if (c === "(") {
+      depth += 1;
+    } else if (c === ")") {
+      depth -= 1;
+      if (depth === 0) return js[i + 1] === ";" ? i + 2 : -1;
+    }
+  }
+  return -1;
+};
+
+const collectTimelineBlocks = (js: string): TimelineBlock[] => {
+  const blocks: TimelineBlock[] = [];
+  for (const m of js.matchAll(TIMELINE_BLOCK_RE)) {
+    const end = fromCallEnd(js, m.index + m[0].length);
+    if (end === -1) continue;
+    const text = js.slice(m.index, end);
+    blocks.push({
+      className: /\.c-\d+/.exec(text)?.[0].slice(1) ?? "",
+      js: text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .join("\n"),
+    });
+  }
+  return blocks;
+};
 
 export function extractScripts(html: string): ExtractedScripts {
   const cdns: string[] = [];
@@ -369,7 +411,7 @@ export function parseBuildArgs(argv: string[]): BuildProjectArgs | { error: stri
   return { html: positional[0] ?? "", target, out, ...(name ? { name } : {}) };
 }
 
-const packageName = (name: string): string =>
+export const packageName = (name: string): string =>
   name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-._]+|[-._]+$/g, "") || "rebuild-site";
 
 const indent = (text: string, n: number): string =>
@@ -379,8 +421,8 @@ const indent = (text: string, n: number): string =>
     .join("\n");
 
 // css ships into src/styles/, so ./assets url()s re-base (vite ../../assets,
-// astro /assets); quoted and bare url() forms both covered.
-const cssTo = (css: string, assetsBase: string): string => {
+// astro /assets, next /assets); quoted and bare url() forms both covered.
+export const cssTo = (css: string, assetsBase: string): string => {
   const out = css.replace(/url\(\s*(["']?)\.\/assets\//g, `url($1${assetsBase}`);
   return out.endsWith("\n") ? out : out + "\n";
 };
@@ -393,7 +435,7 @@ const j = (obj: object): string => JSON.stringify(obj, null, 2) + "\n";
 // ONE section whose subtree mentions the class (kit renumbering makes a class
 // name at most one section). Ambiguous blocks fall back to the page-level
 // script so no captured timeline is ever dropped.
-const attributeBlocks = (split: Split): { perSection: Map<string, string[]>; pageLevel: string[] } => {
+export const attributeBlocks = (split: Split): { perSection: Map<string, string[]>; pageLevel: string[] } => {
   const sections = split.sections.sections ?? [];
   const classSet = new Set(sections.map((s) => s.className));
   const perSection = new Map<string, string[]>();
@@ -427,7 +469,7 @@ ${blocks.map((b) => indent(b, 4)).join("\n\n")}
 </script>
 `;
 
-const nn = (i: number): string => `Section${String(i + 1).padStart(2, "0")}`;
+export const nn = (i: number): string => `Section${String(i + 1).padStart(2, "0")}`;
 
 export function emitAstro(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
   void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
@@ -492,16 +534,23 @@ ${pageLevelScript}  </body>
 `,
   );
 
-  // Component content starts with the section's own start tag, so a `---` line
-  // can never sit adjacent to the frontmatter fence — no escaping needed.
+  // Astro parses `{` in template text as an expression start, and real copy
+  // can carry literal braces — risky sections ship via <Fragment set:html>
+  // with the verbatim markup packed into an escaped string literal instead of
+  // raw interpolation. The raw path keeps its old guarantee: content starts
+  // with the section's own start tag, so a `---` line can never sit adjacent
+  // to the frontmatter fence.
+  const braceRisk = /[{`]/;
   sections.forEach((s, i) => {
     const blocks = attributed.perSection.get(s.className) ?? [];
+    const risky = braceRisk.test(s.innerHtml);
+    const content = risky ? `<Fragment set:html=${JSON.stringify(s.text)} />` : s.text;
     add(
       `src/components/${nn(i)}.astro`,
       `---
-// ${nn(i)} — exact rebuild of root .${s.className || "(classless)"}; markup verbatim, no slots.
+// ${nn(i)} — exact rebuild of root .${s.className || "(classless)"}; markup verbatim, no slots.${risky ? "\n// braces present: content ships as a set:html string (astro would parse { as an expression)" : ""}
 ---
-${s.text}
+${content}
 ${blocks.length ? timelineScript(blocks) : ""}`,
     );
   });
@@ -569,4 +618,56 @@ ${sectionsBodyHtml(split)}
   const js = imports.length || split.scripts.inlineJs ? `${imports.join("\n")}\n${split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : ""}` : "";
   add("src/main.js", js);
   return { files };
+}
+
+export interface BuildProjectResult {
+  outDir: string;
+  target: "vite" | "astro" | "next";
+  files: string[];
+  warnings: string[];
+}
+
+// The full-build contract shared by the bin and the MCP handler dep slot.
+export type BuildProjectFn = (args: BuildProjectArgs) => Promise<BuildProjectResult | { error: string }>;
+
+// Full local build used by BOTH the bin (build-project-cli.ts) and the MCP
+// handler: read the html, split, emit, copy assets, write files. Returns
+// values only — never throws — so callers stay in control of exit codes and
+// error shapes.
+export async function buildProject(args: BuildProjectArgs): Promise<BuildProjectResult | { error: string }> {
+  const src = resolve(args.html);
+  let html: string;
+  try {
+    html = await readFile(src, "utf8");
+  } catch (err) {
+    return { error: `cannot read ${src}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const name = args.name ?? "rebuild-site";
+  const split = splitBuild(html);
+  const emitted =
+    args.target === "vite"
+      ? emitVite(split, args.out, name)
+      : args.target === "astro"
+        ? emitAstro(split, args.out, name)
+        : emitNext(split, args.out, name);
+  // assets per target: vite keeps ./assets next to index.html (project root:
+  // dev-served, and `vite build` rewrites refs); astro and next serve public/
+  // (public/assets at the site root) — matching each emitter's css re-basing.
+  const outDir = resolve(args.out);
+  const { missing } = await copyAssets(html, dirname(src), outDir, args.target === "vite" ? {} : { into: "public/assets" });
+  try {
+    for (const f of emitted.files) {
+      const to = join(outDir, f.path);
+      await mkdir(dirname(to), { recursive: true });
+      await writeFile(to, f.content, "utf8");
+    }
+  } catch (err) {
+    return { error: `cannot write project to ${outDir}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  return {
+    outDir,
+    target: args.target,
+    files: emitted.files.map((f) => f.path),
+    warnings: missing.map((ref) => `asset not found: ${ref}`),
+  };
 }
