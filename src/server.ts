@@ -192,6 +192,9 @@ export function compactSiteDetails(d: SiteDetails): Record<string, unknown> {
   return {
     slug: d.slug,
     title: d.title,
+    // D2: description restored to the compact diet at ≤500 chars — rebuild
+    // prompts read the prose; the lists stay counts.
+    description: d.description ? d.description.slice(0, 500) : null,
     liveUrl: d.liveUrl,
     nominee: d.nominee,
     score: d.score,
@@ -337,7 +340,7 @@ export interface Handlers {
     walkChunks?: boolean;
     edges?: boolean;
   }): Promise<ToolResponse>;
-  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
+  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
     selector?: string;
@@ -1291,6 +1294,7 @@ export function createHandlers(deps: {
     referenceUrl: string;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    domDiff?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1301,12 +1305,14 @@ export function createHandlers(deps: {
           referenceUrl: string;
           waitStrategy?: WaitStrategy;
           viewport?: ViewportName;
+          domDiff?: boolean;
         }) => import("./verify-build.js").then((m) => m.verifyBuild(verifyArgs)));
       const result = await verify({
         buildUrl: args.buildUrl,
         referenceUrl: args.referenceUrl,
         waitStrategy: args.waitStrategy,
         viewport: args.viewport,
+        domDiff: args.domDiff,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };

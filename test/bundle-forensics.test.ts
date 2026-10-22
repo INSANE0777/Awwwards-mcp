@@ -545,6 +545,30 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, LONG]);
     expect(rep.warnings).toEqual([]);
   });
+
+  // D2 grab-bag: the token floor killed "vendor.min.js" because its last
+  // token is the 3-char "min" — a ".min.js" ending is now an alternative
+  // acceptance branch, while non-min junk keeps needing the floor.
+  it("walk regex: .min.js endings are accepted, ../b.js junk still rejected", async () => {
+    const VENDOR = `${pageOrigin}/vendor.min.js`;
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: `var v = "./vendor.min.js"; var j = "../b.js"; var j2 = "fake.min.js.txt";`,
+      [VENDOR]: "var vendor=1;",
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(calls).toEqual([PAGE, A_JS, VENDOR]); // vendor discovered, junk never fetched
+    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, VENDOR]);
+    expect(rep.warnings).toEqual([]);
+  });
 });
 
 describe("extractEdges (D1: static import edges)", () => {

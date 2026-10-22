@@ -309,6 +309,8 @@ server.tool(
     // would shadow the orchestrator's networkidle scroll-census default.
     waitStrategy: z.enum(["load", "networkidle"]).optional(),
     viewport: viewportSchema,
+    domDiff: z.boolean().default(false)
+      .describe("body-subtree structural diff between reference and build"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.verify_build(args)),

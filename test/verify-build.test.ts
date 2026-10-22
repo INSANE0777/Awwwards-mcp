@@ -7,13 +7,15 @@ import {
   compareBands,
   verdictFrom,
   verifyBuild,
+  diffComponentTrees,
   compactScrollCensus,
   compactHoverCensus,
 } from "../src/verify-build.js";
-import type { BandRow, MotionCensusInput } from "../src/verify-build.js";
+import type { BandRow, MotionCensusInput, DomDiffResult } from "../src/verify-build.js";
 import type { PageStructure } from "../src/structure.js";
 import type { ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
+import type { ComponentPack, ComponentNode } from "../src/component.js";
 
 const base = (p: Partial<MotionCensusInput>): MotionCensusInput => ({
   counts: {
@@ -436,6 +438,193 @@ describe("verifyBuild orchestrator", () => {
     const src = readFileSync(join(__dirname, "..", "src", "verify-build.ts"), "utf8");
     expect(src).toContain("15997");
     expect(src).toContain("addScriptToEvaluateOnNewDocument");
+  });
+
+  // D2: opt-in domDiff. The component scans (selector "body", maxNodes 1200)
+  // run on both urls; the evidence line is appended only when on.
+  describe("domDiff (D2, opt-in)", () => {
+    const domNode = (
+      tag: string,
+      children: ComponentNode[] = [],
+      rect = { x: 0, y: 0, w: 100, h: 50 },
+    ): ComponentNode => ({ tag, classes: [], rect, styles: {}, children });
+    const refTree = (): ComponentNode =>
+      domNode("body", [domNode("header"), domNode("section", [domNode("p")])]);
+    const domPack = (root: ComponentNode, over: Partial<ComponentPack> = {}): ComponentPack => ({
+      id: "component-pack-v1",
+      url: "https://x.test",
+      selector: "body",
+      capturedAt: 0,
+      viewport: { width: 1440, height: 900 },
+      nodeCount: 4,
+      root,
+      fonts: [],
+      colors: [],
+      ...over,
+    });
+
+    it("runs the body scan on both urls, appends the dom evidence line and the domDiff key", async () => {
+      const seen: string[] = [];
+      const report = await verifyBuild({
+        buildUrl: "https://build.test",
+        referenceUrl: "https://ref.test",
+        structureFn: async () => refStruct(),
+        scrollFn: async () => scrollCensus(),
+        hoverFn: async () => hoverCensus(),
+        componentFn: async (url) => {
+          seen.push(url);
+          // build drops the giant section → one missing skeleton path
+          if (url === "https://build.test") return domPack(domNode("body", [domNode("header")]));
+          return domPack(refTree());
+        },
+        domDiff: true,
+        ...offlineEvidence,
+      });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(seen).toEqual(["https://ref.test", "https://build.test"]);
+      // Sixth evidence slot stays untouched; the dom line is appended last.
+      expect(report.evidence).toHaveLength(7);
+      // build drops the section AND its child p → both skeleton paths missing.
+      expect(report.evidence[6]).toBe("dom: 2 missing, 0 extra, 0 rectDrift (body)");
+      expect(report.domDiff).toBeDefined();
+      expect(report.domDiff!.missing).toEqual(["body/section[0]", "body/section[0]/p[0]"]);
+      expect(report.domDiff!.incomplete).toBe(false);
+      expect(report.evidence[0]).toBe("Bands: 100/100 similarity");
+    });
+
+    it("default run never scans components and never carries the domDiff key (byte-identical)", async () => {
+      const componentFn = async (): Promise<ComponentPack> => {
+        throw new Error("componentFn must not be called without domDiff");
+      };
+      const report = await verifyBuild({
+        buildUrl: "https://build.test",
+        referenceUrl: "https://ref.test",
+        structureFn: async () => refStruct(),
+        scrollFn: async () => scrollCensus(),
+        hoverFn: async () => hoverCensus(),
+        componentFn,
+        ...offlineEvidence,
+      });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(report.evidence).toHaveLength(6);
+      expect(Object.keys(report)).not.toContain("domDiff");
+      expect(report.evidence.some((l) => l.startsWith("dom:"))).toBe(false);
+    });
+
+    it("errored/truncated scans keep the dom line but mark it (incomplete)", async () => {
+      const report = await verifyBuild({
+        buildUrl: "https://build.test",
+        referenceUrl: "https://ref.test",
+        structureFn: async () => refStruct(),
+        scrollFn: async () => scrollCensus(),
+        hoverFn: async () => hoverCensus(),
+        componentFn: async () => domPack(refTree(), { nodeCount: 1200 }), // cap hit ⇒ truncated
+        domDiff: true,
+        ...offlineEvidence,
+      });
+      expect("error" in report).toBe(false);
+      if ("error" in report) return;
+      expect(report.evidence).toHaveLength(7);
+      expect(report.evidence[6]).toBe("dom: 0 missing, 0 extra, 0 rectDrift (body) (incomplete)");
+      expect(report.domDiff!.incomplete).toBe(true);
+    });
+  });
+});
+
+describe("diffComponentTrees (D2)", () => {
+  const node = (
+    tag: string,
+    children: ComponentNode[] = [],
+    rect = { x: 0, y: 0, w: 100, h: 50 },
+  ): ComponentNode => ({ tag, classes: [], rect, styles: {}, children });
+  const pack = (root: ComponentNode, over: Partial<ComponentPack> = {}): ComponentPack => ({
+    id: "component-pack-v1",
+    url: "https://x.test",
+    selector: "body",
+    capturedAt: 0,
+    viewport: { width: 1440, height: 900 },
+    nodeCount: 0,
+    root,
+    fonts: [],
+    colors: [],
+    ...over,
+  });
+  const errPack = { error: "selector not found: body" };
+
+  it("identical trees: every list empty, not incomplete", () => {
+    const t = () => node("body", [node("header", [node("h1")]), node("section", [node("p")])]);
+    const d = diffComponentTrees(pack(t()), pack(t()));
+    expect(d.missing).toEqual([]);
+    expect(d.extra).toEqual([]);
+    expect(d.reordered).toEqual([]);
+    expect(d.rectDrift).toEqual([]);
+    expect(d.incomplete).toBe(false);
+  });
+
+  it("missing = ref-only paths, extra = build-only paths (tag+index chains)", () => {
+    const ref = pack(node("body", [node("header"), node("footer")]));
+    const build = pack(node("body", [node("header"), node("nav")]));
+    const d = diffComponentTrees(ref, build);
+    expect(d.missing).toEqual(["body/footer[0]"]);
+    expect(d.extra).toEqual(["body/nav[0]"]);
+    expect(d.incomplete).toBe(false);
+  });
+
+  it("same-tag sibling indices keep the chain stable across different-tag inserts", () => {
+    // build inserts a div BEFORE the h1: h1 keeps its h1[0] key, only the
+    // insert itself shows up as extra.
+    const ref = pack(node("body", [node("h1")]));
+    const build = pack(node("body", [node("div"), node("h1")]));
+    const d = diffComponentTrees(ref, build);
+    expect(d.missing).toEqual([]);
+    expect(d.extra).toEqual(["body/div[0]"]);
+    expect(d.reordered).toEqual([]);
+    expect(d.rectDrift).toEqual([]);
+  });
+
+  it("reordered flags common siblings whose relative order differs", () => {
+    const ref = pack(node("body", [node("header"), node("section"), node("footer")]));
+    const build = pack(node("body", [node("section"), node("header"), node("footer")]));
+    const d = diffComponentTrees(ref, build);
+    expect(d.missing).toEqual([]);
+    expect(d.extra).toEqual([]);
+    // header and section swapped; footer keeps its rank
+    expect(d.reordered.sort()).toEqual(["body/header[0]", "body/section[0]"]);
+  });
+
+  it("rectDrift above the floor only, dPx = L∞ of the four deltas (default floor 8)", () => {
+    const ref = pack(node("body", [node("h1", [], { x: 0, y: 0, w: 600, h: 80 })]));
+    const still = pack(node("body", [node("h1", [], { x: 2, y: 3, w: 604, h: 84 })]));
+    expect(diffComponentTrees(ref, still).rectDrift).toEqual([]); // max 4 ≤ 8
+    const moved = pack(node("body", [node("h1", [], { x: 0, y: 20.04, w: 600, h: 80 })]));
+    expect(diffComponentTrees(ref, moved).rectDrift).toEqual([{ path: "body/h1[0]", dPx: 20 }]);
+    // explicit floor raises the bar over the default
+    expect(diffComponentTrees(ref, moved, { rectDriftPx: 25 }).rectDrift).toEqual([]);
+  });
+
+  it("bounds every list at 40 first-wins and marks the truncation incomplete", () => {
+    const ref = pack(node("body", Array.from({ length: 45 }, (_, i) => node(`h${(i % 6) + 1}`))));
+    const build = pack(node("body"));
+    const d = diffComponentTrees(ref, build);
+    expect(d.missing).toHaveLength(40);
+    expect(d.missing[0]).toBe("body/h1[0]");
+    expect(d.incomplete).toBe(true);
+  });
+
+  it("incomplete on errored or truncated (nodeCount ≥ maxNodes) scans", () => {
+    const t = pack(node("body", [node("header")]));
+    expect(diffComponentTrees(errPack, t).incomplete).toBe(true);
+    expect(diffComponentTrees(t, errPack).incomplete).toBe(true);
+    // the errored side yields an empty skeleton → the healthy side's nodes
+    // show up there: errored build ⇒ everything missing, errored ref ⇒ extra
+    expect(diffComponentTrees(t, errPack).missing).toEqual(["body", "body/header[0]"]);
+    expect(diffComponentTrees(errPack, t).extra).toEqual(["body", "body/header[0]"]);
+    const truncated = pack(node("body"), { nodeCount: 1200 });
+    expect(diffComponentTrees(truncated, t, { maxNodes: 1200 }).incomplete).toBe(true);
+    // exactly one under the cap is NOT truncation
+    expect(diffComponentTrees(pack(node("body"), { nodeCount: 1199 }), t, { maxNodes: 1200 }).incomplete).toBe(false);
   });
 });
 

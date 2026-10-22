@@ -34,9 +34,12 @@ const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
 // still matched 1-3-char-stem junk ("../b.js", "chunk.a.js") once d087e53
 // made refs resolve chunk-relative; the token floor kills that class while
 // real chunk names ("./chunk-b.js", "862.1bd3e00c.js") pass. Quoted bodies
-// shorter than "abcd.js" (7 chars) still never match.
+// shorter than "abcd.js" (7 chars) still never match. A ".min.js" ending is
+// an alternative acceptance branch (D2): the token floor otherwise kills real
+// vendor bundles whose last token is the 3-char "min" ("vendor.min.js"); the
+// junk class doesn't end in .min.js and stays excluded.
 const WALK_CHUNK_CAP = 20;
-const WALK_REF_SRC = `["']([^"']{0,200}?[^/.]{4}\\.js)["']`;
+const WALK_REF_SRC = `["']([^"']{0,200}?[^/.]{4}\\.js|[^"']{0,200}?\\.min\\.js)["']`;
 
 // Basename sanitized to the portable set; empty → "chunk". A trailing script
 // extension is stripped so the ".js" below isn't doubled ("/a.js" → "0-a.js",

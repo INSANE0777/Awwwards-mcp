@@ -16,6 +16,7 @@ import type { HoverCensus } from "./hover-census.js";
 import type { ViewportName } from "./viewport.js";
 import type { PerfMeasurement } from "./perf-live.js";
 import type { AntiPatternFinding } from "./audit-rules.js";
+import type { ComponentPack, ComponentNode } from "./component.js";
 
 export interface MotionCensusInput {
   counts: Record<string, number>;
@@ -39,6 +40,8 @@ export interface VerifyReport {
   overall: number;
   verdict: "pass" | "warn" | "fail";
   evidence: string[];
+  /** Only present when the caller opts into domDiff (key absent otherwise). */
+  domDiff?: DomDiffResult;
 }
 
 // Fixed order = positional tr tokens ("g3" = 3 gsap-scrolltrigger anims);
@@ -168,6 +171,125 @@ export function verdictFrom(bandScore: number, motionScore: number) {
   return { overall, verdict, evidence };
 }
 
+// ---- D2: DOM-structure diff between two component captures ----
+// Bounded + honest by construction: skeleton paths are tag+index chains
+// (index = position among same-tag siblings, so inserting a different tag
+// never shifts later indices); every output list caps at 40 (first-wins in
+// DFS order); and `incomplete` is true whenever the evidence behind these
+// lists is unsound — an errored scan, a scan truncated at the maxNodes cap,
+// or a list cut at its cap. Absence of evidence proves nothing: a clean
+// diff over truncated/errored input must never read as a verified match.
+
+export interface DomDiffResult {
+  /** ref-side paths absent from the build. */
+  missing: string[];
+  /** build-side paths absent from the reference. */
+  extra: string[];
+  /** paths present in both whose relative order among common siblings differs. */
+  reordered: string[];
+  /** matched paths whose L∞ rect delta exceeds the drift floor. */
+  rectDrift: Array<{ path: string; dPx: number }>;
+  incomplete: boolean;
+}
+
+export interface DomDiffOptions {
+  /** The capture cap actually used; a pack's nodeCount ≥ cap ⇒ truncated scan. */
+  maxNodes?: number;
+  /** L∞ rect delta (px) above which a matched node counts as drifted (default 8). */
+  rectDriftPx?: number;
+}
+
+const DOM_DIFF_LIST_CAP = 40;
+
+type DomDiffInput = ComponentPack | { error: string };
+
+export function diffComponentTrees(
+  refTree: DomDiffInput,
+  buildTree: DomDiffInput,
+  opts?: DomDiffOptions,
+): DomDiffResult {
+  const cap = Math.min(2000, Math.max(50, opts?.maxNodes ?? 1200));
+  const driftFloor = opts?.rectDriftPx ?? 8;
+
+  const isErr = (t: DomDiffInput): boolean => "error" in t;
+  const truncated = (t: DomDiffInput): boolean =>
+    !isErr(t) && (t as ComponentPack).nodeCount >= cap;
+
+  // DFS pre-order skeleton (empty map for errored input, so every ref node
+  // reports missing and `incomplete` carries the caveat).
+  const skeletonize = (pack: ComponentPack): Map<string, { rect: ComponentNode["rect"]; order: number }> => {
+    const map = new Map<string, { rect: ComponentNode["rect"]; order: number }>();
+    const walk = (node: ComponentNode, path: string, order: number): void => {
+      map.set(path, { rect: node.rect, order });
+      const perTag = new Map<string, number>();
+      let ord = 0;
+      for (const child of node.children) {
+        const n = perTag.get(child.tag) ?? 0;
+        perTag.set(child.tag, n + 1);
+        walk(child, `${path}/${child.tag}[${n}]`, ord);
+        ord++;
+      }
+    };
+    walk(pack.root, pack.root.tag, 0);
+    return map;
+  };
+
+  const ref = isErr(refTree) ? new Map() : skeletonize(refTree as ComponentPack);
+  const build = isErr(buildTree) ? new Map() : skeletonize(buildTree as ComponentPack);
+  const incompleteScan = isErr(refTree) || isErr(buildTree) || truncated(refTree) || truncated(buildTree);
+
+  const parentOf = (path: string): string =>
+    path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+
+  // First-wins DFS order (Map insertion order == pre-order walk).
+  const allMissing = [...ref.keys()].filter((k) => !build.has(k));
+  const allExtra = [...build.keys()].filter((k) => !ref.has(k));
+
+  // Relative-order check per parent, over COMMON children only: ranks among
+  // the filtered sequences make this robust — inserting a new child shifts
+  // positional indices but never the common siblings' relative order.
+  const rawReordered: string[] = [];
+  const parents = new Set<string>();
+  for (const k of ref.keys()) if (build.has(k)) parents.add(parentOf(k));
+  for (const parent of parents) {
+    const rankOf = (entries: [string, { rect: ComponentNode["rect"]; order: number }][]) =>
+      new Map(entries.map(([k], i) => [k, i]));
+    const refSeq = [...ref].filter(([k]) => build.has(k) && parentOf(k) === parent);
+    const buildSeq = [...build].filter(([k]) => ref.has(k) && parentOf(k) === parent);
+    const refRank = rankOf(refSeq);
+    const buildRank = rankOf(buildSeq);
+    for (const [k, r] of refRank) {
+      if (buildRank.get(k) !== r) rawReordered.push(k);
+    }
+  }
+
+  const rawDrift: Array<{ path: string; dPx: number }> = [];
+  for (const [path, s] of ref) {
+    const b = build.get(path);
+    if (!b) continue;
+    const d = Math.max(
+      Math.abs(s.rect.x - b.rect.x),
+      Math.abs(s.rect.y - b.rect.y),
+      Math.abs(s.rect.w - b.rect.w),
+      Math.abs(s.rect.h - b.rect.h),
+    );
+    if (d > driftFloor) rawDrift.push({ path, dPx: Math.round(d * 10) / 10 });
+  }
+
+  return {
+    missing: allMissing.slice(0, DOM_DIFF_LIST_CAP),
+    extra: allExtra.slice(0, DOM_DIFF_LIST_CAP),
+    reordered: rawReordered.slice(0, DOM_DIFF_LIST_CAP),
+    rectDrift: rawDrift.slice(0, DOM_DIFF_LIST_CAP),
+    incomplete:
+      incompleteScan ||
+      allMissing.length > DOM_DIFF_LIST_CAP ||
+      allExtra.length > DOM_DIFF_LIST_CAP ||
+      rawReordered.length > DOM_DIFF_LIST_CAP ||
+      rawDrift.length > DOM_DIFF_LIST_CAP,
+  };
+}
+
 // Task 6 wiring contract: server.ts createHandlers deps get an optional
 // verifyBuildFn of this shape (peers: ScrollMapFn/HoverCensusFn in server.ts).
 export type VerifyBuildFn = (
@@ -176,6 +298,7 @@ export type VerifyBuildFn = (
     referenceUrl: string;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    domDiff?: boolean;
   },
 ) => Promise<VerifyReport | { error: string }>;
 
@@ -196,6 +319,11 @@ type VerifyPerfFn = (
 type VerifyRulesFn = (
   inputs: { html: string },
 ) => AntiPatternFinding[] | Promise<AntiPatternFinding[]>;
+// D2 dom-diff knob: same injectable-fake shape as its peers above.
+type VerifyComponentFn = (
+  url: string,
+  opts?: { selector?: string; maxNodes?: number; viewport?: ViewportName },
+) => Promise<ComponentPack | { error: string }>;
 
 const num = (v: unknown): number =>
   typeof v === "number" && Number.isFinite(v) ? v : 0;
@@ -282,10 +410,13 @@ export async function verifyBuild(
     referenceUrl: string;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    // D2 opt-in: structural body-subtree diff (evidence-only, like perf/rules).
+    domDiff?: boolean;
     // Injectable fakes for tests; lazily-imported defaults otherwise.
     structureFn?: VerifyStructureFn;
     scrollFn?: VerifyScrollFn;
     hoverFn?: VerifyHoverFn;
+    componentFn?: VerifyComponentFn;
     // Aegon-port evidence knobs (evidence-only; offline tests inject fakes).
     perfFn?: VerifyPerfFn;
     rulesFn?: VerifyRulesFn;
@@ -315,6 +446,12 @@ export async function verifyBuild(
     args.rulesFn ??
     ((inputs: { html: string }) =>
       import("./audit-rules.js").then((m) => m.scanAntiPatterns(inputs)));
+  const componentFn =
+    args.componentFn ??
+    ((url: string) =>
+      import("./component.js").then((m) =>
+        m.captureComponent(url, { selector: "body", maxNodes: 1200, viewport: args.viewport }),
+      ));
   const fetchFn = args.fetchFn ?? fetch;
   try {
     // Structure scan first: bands gate everything downstream, so a page that
@@ -373,6 +510,30 @@ export async function verifyBuild(
     const rulesLine = await rulesEvidenceLine(fetchFn, rulesFn, args.buildUrl);
     const perfLine = await perfEvidenceLine(perfFn, args.buildUrl);
 
+    // D2 opt-in dom-structure diff: a third capture pair (body subtree,
+    // selector "body" / maxNodes 1200) run on BOTH urls. Evidence-only like
+    // the perf/anti-patterns pass: the line and the payload key exist only
+    // when the caller asked for it, so the default report stays byte-identical.
+    let domLine: string | null = null;
+    let domDiff: DomDiffResult | undefined;
+    if (args.domDiff) {
+      const settled = await Promise.allSettled([
+        componentFn(args.referenceUrl),
+        componentFn(args.buildUrl),
+      ]);
+      const pack = (r: PromiseSettledResult<ComponentPack | { error: string }>): DomDiffInput =>
+        r.status === "fulfilled"
+          ? r.value
+          : { error: r.reason instanceof Error ? r.reason.message : String(r.reason) };
+      const diff = diffComponentTrees(pack(settled[0]), pack(settled[1]), { maxNodes: 1200 });
+      domDiff = diff;
+      // "(incomplete)" suffix: counts alone would read as a verified match
+      // when the scans errored/truncated (absence of evidence ≠ evidence).
+      domLine =
+        `dom: ${diff.missing.length} missing, ${diff.extra.length} extra, ${diff.rectDrift.length} rectDrift (body)` +
+        (diff.incomplete ? " (incomplete)" : "");
+    }
+
     return {
       buildUrl: args.buildUrl,
       referenceUrl: args.referenceUrl,
@@ -388,7 +549,10 @@ export async function verifyBuild(
         hoverEvidence,
         perfLine,
         rulesLine,
+        ...(domLine ? [domLine] : []),
       ],
+      // Key absent when domDiff is off — pinned by a keys-absence test.
+      ...(domDiff ? { domDiff } : {}),
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

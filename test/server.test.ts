@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import { compactSiteDetails, createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import type { ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { UnifiedMotionDna } from "../src/motion-dna.js";
@@ -11,7 +11,7 @@ import { utcDayStart } from "../src/feed.js";
 import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
-import type { ElementRecord, SiteSummary } from "../src/types.js";
+import type { ElementRecord, SiteDetails, SiteSummary } from "../src/types.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 const listingHtml = readFileSync(join(FIXTURES, "listing.html"), "utf8");
@@ -885,6 +885,35 @@ describe("get_site_elements", () => {
     const res = await h.get_site_elements({ slug: "weird" });
     expect(res.isError).toBe(true);
     expect(cache.getMeta("elements:weird", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe("compactSiteDetails (D2 grab-bag)", () => {
+  const details = (over: Partial<SiteDetails> = {}): SiteDetails => ({
+    slug: "s",
+    title: "T",
+    description: "x".repeat(600),
+    palette: ["#111111"],
+    technologies: ["WebGL"],
+    elements: [],
+    awards: [],
+    nominee: false,
+    score: 8,
+    juryDimensions: { design: 8, usability: 7, creativity: 9, content: 6 },
+    ogImage: null,
+    liveUrl: null,
+    ...over,
+  });
+
+  it("restores description to the compact diet, clamped at 500 chars (null stays null)", () => {
+    const c = compactSiteDetails(details()) as Record<string, unknown>;
+    expect(c.description).toHaveLength(500);
+    // the list→counts diet is untouched
+    expect(c.paletteCount).toBe(1);
+    expect(c.technologiesCount).toBe(1);
+    expect(c.elementsCount).toBe(0);
+    expect(compactSiteDetails(details({ description: null })).description).toBeNull();
+    expect(compactSiteDetails(details({ description: "short brief" })).description).toBe("short brief");
   });
 });
 
