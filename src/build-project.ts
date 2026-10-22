@@ -503,6 +503,9 @@ export function emitAstro(split: Split, outDir: string, name: string): { files: 
     add(`src/styles/section-${i + 1}.css`, cssTo(css, cssBase));
     imports.push(`import "../styles/section-${i + 1}.css";`);
   });
+  // astro resolves <SectionNN /> only via frontmatter imports; without these the
+  // build fails with "Section01 is not defined" at static-route render time.
+  sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
 
   const headTags = [...split.scripts.cdns, ...split.styles.headLinks];
   const pageLevelScript =

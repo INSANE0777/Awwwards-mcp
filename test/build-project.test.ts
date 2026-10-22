@@ -326,6 +326,10 @@ describe("emitAstro", () => {
     expect(index).toContain('import "../styles/tokens.css";');
     expect(index).toContain('import "../styles/shared.css";');
     expect(index).toContain('import "../styles/section-3.css";');
+    for (let i = 1; i <= 3; i++) {
+      const nn = `Section${String(i).padStart(2, "0")}`;
+      expect(index).toContain(`import ${nn} from "../components/${nn}.astro";`);
+    }
     expect(index).toContain("    <Section01 />");
     expect(index).toContain("    <Section02 />");
     expect(index).toContain("    <Section03 />");
