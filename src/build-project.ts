@@ -45,9 +45,25 @@ export interface TimelineBlock {
   js: string; // comment + timeline, lines trimmed
 }
 
+export interface ExternalScript {
+  tag: string; // verbatim <script ...>...</script>
+  src: string;
+  local: boolean; // relative local ref (no scheme, //, / or #)
+  head: boolean;
+}
+
+export type BodyScript =
+  | { kind: "external"; tag: string; src: string; local: boolean }
+  | { kind: "inline"; js: string };
+
 export interface ExtractedScripts {
-  cdns: string[]; // verbatim gsap/ScrollTrigger <script src> tags — other remote scripts never ship
+  cdns: string[]; // verbatim gsap/ScrollTrigger <script src> tags (dependency law)
+  externals: ExternalScript[]; // every external script tag, document order
   inlineJs: string; // all JS-typed inline <script> bodies, trim-joined
+  inlineBlocks: Array<{ js: string; head: boolean }>; // same bodies with placement
+  headInlineJs: string[]; // inline JS bodies that sat in <head>
+  headExternal: string[]; // external tags that sat in <head>
+  bodyScripts: BodyScript[]; // body scripts outside section roots, document order
   timelineBlocks: TimelineBlock[];
 }
 
@@ -61,12 +77,15 @@ export interface Split {
   sections: ParsedSections;
   styles: SplitStyles;
   scripts: ExtractedScripts;
-  assetRefs: string[]; // unique ./assets/* refs in document order
+  assetRefs: string[]; // unique local refs in document order
 }
 
-const GENERIC_TAGS = new Set(["section", "header", "footer", "main"]);
+// Generic rehost pages (e.g. a Webflow export) carry nav/loader/utility as
+// top-level divs. Treating only semantic tags as roots silently dropped them.
+const GENERIC_CONTAINERS = new Set(["section", "header", "footer", "main", "nav", "aside", "article", "div", "form"]);
 const REBUILD_ROOT_CLASS = /^c-\d+$/;
 const CDN_SRC = /(gsap|scrolltrigger)/i;
+const SCRIPT_RE = /(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)/gi;
 const JS_TYPES = new Set([
   "",
   "module",
@@ -184,7 +203,7 @@ export function parseRebuildSections(html: string): ParsedSections {
   const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
   const roots = walkTopLevel(body);
   const rebuild = roots.filter((r) => r.className !== "" && REBUILD_ROOT_CLASS.test(r.className));
-  const generic = roots.filter((r) => GENERIC_TAGS.has(r.tag));
+  const generic = roots.filter((r) => GENERIC_CONTAINERS.has(r.tag));
   const chosen = rebuild.length ? rebuild : generic;
   return {
     sections: chosen.length ? chosen : null,
@@ -308,35 +327,71 @@ const collectTimelineBlocks = (js: string): TimelineBlock[] => {
   return blocks;
 };
 
+// A relative local ref: no scheme, no protocol-relative, no root-absolute, no anchor.
+export const isLocalRef = (ref: string): boolean =>
+  ref !== "" && !/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/|#)/i.test(ref);
+
+const headEnd = (html: string): number => {
+  const m = /<\/head\s*>/i.exec(html);
+  return m ? m.index : -1;
+};
+
 export function extractScripts(html: string): ExtractedScripts {
   const cdns: string[] = [];
+  const externals: ExternalScript[] = [];
   const inline: string[] = [];
-  for (const m of html.matchAll(/(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)/gi)) {
-    const src = attr(m[1], "src");
+  const inlineBlocks: Array<{ js: string; head: boolean }> = [];
+  const bodyScripts: BodyScript[] = [];
+  const hEnd = headEnd(html);
+  for (const m of html.matchAll(SCRIPT_RE)) {
+    const tag = (m[1] ?? "") + (m[2] ?? "") + (m[3] ?? "");
+    const head = hEnd === -1 || (m.index ?? 0) < hEnd;
+    const src = attr(m[1] ?? "", "src");
     if (src !== "") {
-      // Only gsap-family remote scripts ship (product law: no other source scripts)
-      if (CDN_SRC.test(src)) cdns.push(m[1] + m[2] + m[3]);
+      const local = isLocalRef(src);
+      externals.push({ tag, src, local, head });
+      if (!head) bodyScripts.push({ kind: "external", tag, src, local });
+      if (CDN_SRC.test(src)) cdns.push(tag);
       continue;
     }
     // importmap/ld+json modules are data, not page JS
-    if (!JS_TYPES.has(attr(m[1], "type").toLowerCase().trim())) continue;
-    inline.push(m[2].trim());
+    if (!JS_TYPES.has(attr(m[1] ?? "", "type").toLowerCase().trim())) continue;
+    const js = (m[2] ?? "").trim();
+    inline.push(js);
+    inlineBlocks.push({ js, head });
+    if (!head) bodyScripts.push({ kind: "inline", js });
   }
   const timelineBlocks = inline.flatMap(collectTimelineBlocks);
-  return { cdns, inlineJs: inline.join("\n\n"), timelineBlocks };
+  return {
+    cdns,
+    externals,
+    inlineJs: inline.join("\n\n"),
+    inlineBlocks,
+    headInlineJs: inlineBlocks.filter((b) => b.head).map((b) => b.js),
+    headExternal: externals.filter((e) => e.head).map((e) => e.tag),
+    bodyScripts,
+    timelineBlocks,
+  };
 }
 
-// ./assets/* refs in markup (src/href) and css (url()). Refs containing ".."
-// are refused at collect time so copies can never climb out of the output dir.
-const ASSET_REF_RE = /(?:\b(?:src|href)\s*=\s*["'](\.\/assets\/[^"']+)["'])|(?:url\(\s*["']?(\.\/assets\/[^)"'\s]+)["']?\s*\))/gi;
+// Local refs in markup (asset-ish tags + url()) in document order. Remote
+// URLs, root-absolute paths and refs containing ".." never enter the list, so
+// copies can never climb out of the output dir.
+const ASSET_REF_RE =
+  /<(?:link|script|img|image|source|video|audio|track)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["'][^>]*>|url\(\s*["']?([^)"'\s]+)["']?\s*\)/gi;
 
 const collectAssetRefs = (html: string): string[] => {
   const seen = new Set<string>();
+  const refs: string[] = [];
   for (const m of html.matchAll(ASSET_REF_RE)) {
     const ref = m[1] ?? m[2];
-    if (ref && !ref.includes("..")) seen.add(ref);
+    if (!ref || ref.includes("..") || !isLocalRef(ref)) continue;
+    const key = ref.replace(/^\.\//, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push(ref);
   }
-  return [...seen];
+  return refs;
 };
 
 export interface CopyAssetsResult {
@@ -344,16 +399,15 @@ export interface CopyAssetsResult {
   missing: string[];
 }
 
-// Copies every ./assets/* ref into <outDir>/<into>/ keeping the `assets/<name>`
-// shape (root-level for vite/next, public/assets for astro). A missing source
-// is a warning (missing[]), never a hard failure — one stray ref must not kill
-// an otherwise-valid build.
+// Copies every local ref into <outDir>/<into>/<ref path>, preserving the
+// source's relative shape (assets/css/js keep resolving next to their page).
+// A missing source is a warning (missing[]), never a hard failure.
 export async function copyAssets(html: string, srcDir: string, outDir: string, opts: { into?: string } = {}): Promise<CopyAssetsResult> {
-  const base = join(resolve(outDir), opts.into ?? "assets");
+  const root = join(resolve(outDir), opts.into ?? "");
   const copied: string[] = [];
   const missing: string[] = [];
   for (const ref of collectAssetRefs(html)) {
-    const to = join(base, ref.replace(/^\.\/assets\//, ""));
+    const to = join(root, ref.replace(/^\.\//, ""));
     const from = resolve(srcDir, ref);
     try {
       await mkdir(dirname(to), { recursive: true });
@@ -366,12 +420,22 @@ export async function copyAssets(html: string, srcDir: string, outDir: string, o
   return { copied, missing };
 }
 
+const bodyInner = (html: string): string => /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
+
 export function splitBuild(html: string): Split {
+  const sections = parseRebuildSections(html);
+  const scripts = extractScripts(html);
+  // Scripts inside a section root stay in that markup; only loose body
+  // scripts are re-emitted at page level (dedupe law: never execute twice).
+  const roots = sections.sections ?? [];
+  scripts.bodyScripts = scripts.bodyScripts.filter((b) =>
+    b.kind === "external" ? !roots.some((s) => s.text.includes(b.tag)) : !roots.some((s) => s.text.includes(b.js)),
+  );
   return {
     html,
-    sections: parseRebuildSections(html),
+    sections,
     styles: splitStyles(html),
-    scripts: extractScripts(html),
+    scripts,
     assetRefs: collectAssetRefs(html),
   };
 }
@@ -469,6 +533,10 @@ ${blocks.map((b) => indent(b, 4)).join("\n\n")}
 </script>
 `;
 
+// Astro bundles every <script> in a component by default (module, deferred);
+// `is:inline` keeps captured page scripts byte-verbatim and parse-time.
+const astroInlineTags = (html: string): string => html.replace(/<script\b/gi, "<script is:inline");
+
 export const nn = (i: number): string => `Section${String(i + 1).padStart(2, "0")}`;
 
 export function emitAstro(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
@@ -507,15 +575,26 @@ export function emitAstro(split: Split, outDir: string, name: string): { files: 
   // build fails with "Section01 is not defined" at static-route render time.
   sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
 
-  const headTags = [...split.scripts.cdns, ...split.styles.headLinks];
+  const generic = split.sections.detected === "generic";
+  const headTags = [
+    ...split.scripts.headExternal,
+    ...split.styles.headLinks,
+    ...(generic ? split.scripts.headInlineJs.map((js) => `<script is:inline>\n${js}\n</script>`) : []),
+  ];
+  const bodyTags = (generic
+    ? split.scripts.bodyScripts
+    : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external"))
+    .map((b) =>
+      b.kind === "external"
+        ? b.tag.replace(/^<script\b/i, "<script is:inline")
+        : `<script is:inline>\n${b.js}\n</script>`,
+    )
+    .join("\n");
+  // Generic rehost bodies keep their inline scripts in place (section markup +
+  // loose body tags), so no whole-script copy is hoisted here. Rebuild shape
+  // keeps the kit's attributed timelines as before.
   const pageLevelScript =
-    split.sections.detected === "generic"
-      ? split.scripts.inlineJs
-        ? `\n<script>\n${split.scripts.inlineJs}\n</script>\n`
-        : ""
-      : attributed.pageLevel.length
-        ? `\n${timelineScript(attributed.pageLevel)}`
-        : "";
+    generic || attributed.pageLevel.length === 0 ? "" : `\n${timelineScript(attributed.pageLevel)}`;
   add(
     "src/pages/index.astro",
     `---
@@ -532,7 +611,7 @@ ${headTags.map((t) => indent(t, 4)).join("\n")}
   </head>
   <body>
 ${sections.map((_, i) => `    <${nn(i)} />`).join("\n")}
-${pageLevelScript}  </body>
+${bodyTags ? `${indent(bodyTags, 4)}\n` : ""}${pageLevelScript}  </body>
 </html>
 `,
   );
@@ -546,8 +625,9 @@ ${pageLevelScript}  </body>
   const braceRisk = /[{`]/;
   sections.forEach((s, i) => {
     const blocks = attributed.perSection.get(s.className) ?? [];
+    const raw = astroInlineTags(s.text);
     const risky = braceRisk.test(s.innerHtml);
-    const content = risky ? `<Fragment set:html=${JSON.stringify(s.text)} />` : s.text;
+    const content = risky ? `<Fragment set:html={${JSON.stringify(raw)}} />` : raw;
     add(
       `src/components/${nn(i)}.astro`,
       `---
@@ -565,6 +645,7 @@ export function emitVite(split: Split, outDir: string, name: string): { files: S
   const files: ScaffoldFile[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
   const sections = split.sections.sections ?? [];
+  const generic = split.sections.detected === "generic";
   const cssBase = "../../assets/"; // css lives in src/styles/; assets at the project root
 
   add(
@@ -578,10 +659,42 @@ export function emitVite(split: Split, outDir: string, name: string): { files: S
       devDependencies: { vite: "^7" },
     }),
   );
-  // ./assets refs sit next to index.html: dev serves them from the root and
-  // `vite build` rewrites+emits html/css asset refs itself — no copy plugin.
-  add("vite.config.js", '// relative base keeps the built dist openable from any path\nexport default {\n  base: "./",\n};\n');
+  // Root assets keep their verbatim refs in dev; `vite build` bundles the
+  // stylesheet link but cannot bundle classic (non-module) rehost scripts, so
+  // the plugin copies assets/ into dist where those src paths still resolve.
+  add(
+    "vite.config.js",
+    `import { cpSync, existsSync } from "node:fs";
 
+export default {
+  base: "./",
+  plugins: [
+    {
+      name: "copy-classic-assets",
+      closeBundle() {
+        if (existsSync("assets")) cpSync("assets", "dist/assets", { recursive: true });
+      },
+    },
+  ],
+};
+`,
+  );
+
+  // Generic rehost shape: the body already carries its own inline scripts,
+  // nested w-scripts and body-end CDN/local tags — ship it byte-verbatim so
+  // each runs in place once. Rebuild shape keeps the kit's section assembly.
+  const body = generic ? bodyInner(split.html).trim() : sectionsBodyHtml(split);
+  const headTags = [
+    ...split.scripts.headExternal,
+    ...split.styles.headLinks,
+    ...(generic ? split.scripts.headInlineJs.map((js) => `<script>\n${js}\n</script>`) : []),
+  ];
+  const bodyTags = generic
+    ? ""
+    : split.scripts.bodyScripts
+        .filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external")
+        .map((b) => b.tag)
+        .join("\n");
   add(
     "index.html",
     `<!doctype html>
@@ -590,11 +703,11 @@ export function emitVite(split: Split, outDir: string, name: string): { files: S
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${name}</title>
-${[...split.scripts.cdns, ...split.styles.headLinks].join("\n")}
+${headTags.join("\n")}
 </head>
 <body>
-${sectionsBodyHtml(split)}
-<script type="module" src="/src/main.js"></script>
+${body}
+${bodyTags ? `${bodyTags}\n` : ""}<script type="module" src="/src/main.js"></script>
 </body>
 </html>
 `,
@@ -617,8 +730,10 @@ ${sectionsBodyHtml(split)}
   });
   // Plan: no js split for vite — the rebuild inline script (register + REDUCED
   // guard + all timelines) ships whole in the module, loaded deferred so the
-  // CDN classic scripts have already run.
-  const js = imports.length || split.scripts.inlineJs ? `${imports.join("\n")}\n${split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : ""}` : "";
+  // CDN classic scripts have already run. Generic bodies keep their scripts in
+  // place, so main.js is css-only there.
+  const inline = !generic && split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : "";
+  const js = imports.length || inline ? `${imports.join("\n")}\n${inline}` : "";
   add("src/main.js", js);
   return { files };
 }
@@ -653,11 +768,11 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
       : args.target === "astro"
         ? emitAstro(split, args.out, name)
         : emitNext(split, args.out, name);
-  // assets per target: vite keeps ./assets next to index.html (project root:
-  // dev-served, and `vite build` rewrites refs); astro and next serve public/
-  // (public/assets at the site root) — matching each emitter's css re-basing.
+  // assets per target: vite preserves ref paths at the project root (dev-served,
+  // and `vite build` rewrites refs); astro and next serve public/ at the site
+  // root — matching each emitter's css re-basing and local link/script hrefs.
   const outDir = resolve(args.out);
-  const { missing } = await copyAssets(html, dirname(src), outDir, args.target === "vite" ? {} : { into: "public/assets" });
+  const { missing } = await copyAssets(html, dirname(src), outDir, args.target === "vite" ? {} : { into: "public" });
   try {
     for (const f of emitted.files) {
       const to = join(outDir, f.path);

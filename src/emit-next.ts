@@ -13,7 +13,7 @@
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
 import { attributeBlocks, cssTo, nn, packageName } from "./build-project.js";
-import type { ExtractedScripts, RebuildSection, ScaffoldFile, Split } from "./build-project.js";
+import type { BodyScript, RebuildSection, ScaffoldFile, Split } from "./build-project.js";
 
 // Dashed HTML/SVG attrs → JSX camelCase. Dashed-but-unlisted (data-*, aria-*,
 // unknown) stays as-is; class is a plain rename; style is special-cased in
@@ -46,6 +46,7 @@ const ATTR_MAP = new Map(Object.entries({
   "maxlength": "maxLength",
   "minlength": "minLength",
   "novalidate": "noValidate",
+  "playsinline": "playsInline",
   "readonly": "readOnly",
   "referrerpolicy": "referrerPolicy",
   "rowspan": "rowSpan",
@@ -91,8 +92,13 @@ const SVG_TAG_FIXES = new Map(Object.entries({
 // carry them, so strip to local name or map to jsxHref.
 const NAMESPACED_DROP = /^(?:xmlns|xlink|xml):/i;
 
-// kebab-case css property → camelCase style key
-const cssKeyToJsx = (k: string): string => k.trim().replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+// kebab-case css property → camelCase style key; the `-ms-` vendor prefix is
+// the one React types spell lowercase (`msTransform`, not `MsTransform`).
+const cssKeyToJsx = (k: string): string => {
+  const key = k.trim();
+  const normalized = key.toLowerCase().startsWith("-ms-") ? `ms-${key.slice(4)}` : key;
+  return normalized.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+};
 
 // React CSSProperties rejects "!important" suffixes; live inline styles carry them.
 const stripImportant = (v: string): string => v.replace(/\s*!important\s*$/i, "");
@@ -114,7 +120,7 @@ const styleToObject = (css: string): string =>
 // className / data-* / aria-* / unknown attrs pass through unchanged.
 const convertAttr = (attr: string): string => {
   const m = attr.match(/^([^\s=]+)(\s*=\s*)("[^"]*"|'[^']*')$/);
-  if (!m) return attr; // bare attr (e.g. `defer`) — nothing to rename
+  if (!m) return ATTR_MAP.get(attr.toLowerCase()) ?? attr; // bare attr (`defer`, `playsinline`)
   const key = (m[1] ?? "").toLowerCase();
   const eq = m[2] ?? "";
   const value = m[3] ?? "";
@@ -181,14 +187,74 @@ const indentBody = (body: string): string =>
     .map((l, i) => (i === 0 ? l : "  " + l))
     .join("\n");
 
-// Head stylesheet links (font services) ship verbatim in layout's head; a bare
-// `>` link close is self-closed here because JSX wants explicit self-closing.
-const layoutHeadLinks = (links: string[]): string =>
-  links.length
-    ? `\n${links.map((t) => indent(t.replace(/>$/, " />"), 8)).join("\n")}\n      `
+// Head stylesheet links / external tags ship verbatim in layout's head; void
+// links are explicitly self-closed for JSX. The old `>`→` />` rewrite turned an
+// already self-closed `<link ... />` into `<link ... / />` (D2-review M1).
+const jsxSelfClose = (tag: string): string => tag.replace(/\s*\/?>$/, " />");
+
+// Local public refs (`assets/x`, `./assets/x`) must be root-absolute in the
+// Next layout; remote URLs and already-absolute paths stay untouched.
+const rewriteLocalUrlTag = (tag: string): string =>
+  tag.replace(
+    /(\b(?:src|href)\s*=\s*["'])(?!https?:|\/\/|\/|#|data:)([^"']+)/gi,
+    (_, prefix: string, url: string) => `${prefix}/${url.replace(/^\.\//, "")}`,
+  );
+
+const JS_SCRIPT_TYPES = new Set([
+  "",
+  "module",
+  "text/javascript",
+  "application/javascript",
+  "text/ecmascript",
+  "application/ecmascript",
+]);
+
+const scriptSrc = (open: string): string => /\bsrc\s*=\s*["']([^"']*)["']/i.exec(open)?.[1] ?? "";
+
+// SSR-safe inline script for rebuild sections/head; generic rehost output keeps
+// its scripts raw inside section HTML or at body end.
+const jsxInlineScript = (js: string): string =>
+  `<script dangerouslySetInnerHTML={{ __html: ${JSON.stringify(js).replace(/</g, "\\u003c")} }} />`;
+
+// Inline scripts/styles nested inside a section survive conversion as
+// executable/raw SSR tags. Token passes keep their bodies out of htmlToJsx's
+// text escaping (CSS `>` selectors and JS would otherwise break JSX parsing).
+const sectionJsx = (html: string): string => {
+  const scripts: string[] = [];
+  const styles: string[] = [];
+  const marked = html
+    .replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)/gi, (full, open: string, body: string) => {
+      if (scriptSrc(open) !== "") return rewriteLocalUrlTag(full);
+      const type = (/\btype\s*=\s*["']([^"']*)["']/i.exec(open)?.[1] ?? "").toLowerCase().trim();
+      if (!JS_SCRIPT_TYPES.has(type)) return full;
+      scripts.push(body.trim());
+      return `@@AW_INLINE_${scripts.length - 1}@@`;
+    })
+    .replace(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi, (_, body: string) => {
+      styles.push(body);
+      return `@@AW_STYLE_${styles.length - 1}@@`;
+    });
+  let out = htmlToJsx(marked);
+  scripts.forEach((js, i) => {
+    out = out.replace(`@@AW_INLINE_${i}@@`, jsxInlineScript(js));
+  });
+  styles.forEach((css, i) => {
+    out = out.replace(`@@AW_STYLE_${i}@@`, jsxInlineScript(css).replace("<script", "<style"));
+  });
+  return out;
+};
+
+const layoutHeadTags = (tags: string[]): string =>
+  tags.length ? `\n${tags.map((t) => indent(t, 8)).join("\n")}\n      ` : "";
+
+const layoutBodyScripts = (scripts: BodyScript[]): string =>
+  scripts.length
+    ? `\n      ${scripts
+        .map((b) => (b.kind === "external" ? rewriteLocalUrlTag(b.tag) : jsxInlineScript(b.js)))
+        .join("\n      ")}`
     : "";
 
-const layout = (name: string, headLinks: string[]): string =>
+const layout = (name: string, headTags: string[], bodyScripts: BodyScript[]): string =>
   `import type { Metadata } from "next";
 import "./globals.css";
 
@@ -201,8 +267,8 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <head>${layoutHeadLinks(headLinks)}</head>
-      <body>{children}</body>
+      <head>${layoutHeadTags(headTags)}</head>
+      <body>{children}${layoutBodyScripts(bodyScripts)}</body>
     </html>
   );
 }
@@ -236,13 +302,6 @@ ${bodies.map((b) => indent(b, pad)).join("\n\n")}
     return () => ctx.revert();
   }, [])`;
 
-// Generic-shape inline js has no gsap contract (astro parity: raw script) —
-// plain effect, no gsap imports or guard.
-const plainEffect = (bodies: string[]): string =>
-  `useEffect(() => {
-${bodies.map((b) => indent(b, 4)).join("\n\n")}
-  }, [])`;
-
 interface Attribution {
   perSection: Map<string, string[]>;
   pageLevel: string[];
@@ -255,21 +314,21 @@ const page = (split: Split, attributed: Attribution): string => {
   const imports = sections.map((_, i) => `import ${nn(i)} from "../components/${nn(i)}";`).join("\n");
   const renders = sections.map((_, i) => indent(`<${nn(i)} />`, 6)).join("\n");
 
-  // generic: the whole inline script ships plain (astro precedent — no gsap
-  // assumptions in arbitrary page js); rebuild: unattributable timeline blocks
-  // run only behind a gsap dependency, else they compile against a dep the
-  // project doesn't have.
-  const payload = generic ? (split.scripts.inlineJs ? [split.scripts.inlineJs] : []) : attributed.pageLevel;
-  const runnable = generic ? payload : hasCdns ? payload : [];
-  const unwired = payload.length > 0 && runnable.length === 0;
-  const client = split.scripts.inlineJs !== "";
+  // generic rehost: sections are opaque SSR HTML and scripts ship raw, so the
+  // page renders no effect copy. rebuild: unattributable timeline blocks run
+  // only behind a gsap dependency, else they compile against a dep the project
+  // doesn't have.
+  const payload = generic ? [] : attributed.pageLevel;
+  const runnable = hasCdns ? payload : [];
+  const unwired = !generic && payload.length > 0 && runnable.length === 0;
+  const client = !generic && split.scripts.inlineJs !== "";
   const effect = (() => {
-    if (runnable.length > 0) return `  ${generic ? plainEffect(runnable) : gsapEffect(runnable, 6)};\n`;
+    if (runnable.length > 0) return `  ${gsapEffect(runnable, 6)};\n`;
     if (unwired)
       return `  // ${payload.length} unattributed captured timeline${payload.length === 1 ? "" : "s"} — no gsap CDN tag in the source; wire manually.\n`;
     return "";
   })();
-  const gsapImports = runnable.length > 0 && !generic ? `\nimport gsap from "gsap";\nimport { ScrollTrigger } from "gsap/ScrollTrigger";\n` : "";
+  const gsapImports = runnable.length > 0 ? `\nimport gsap from "gsap";\nimport { ScrollTrigger } from "gsap/ScrollTrigger";\n` : "";
   const reactImport = runnable.length > 0 ? `import { useEffect } from "react";\n` : "";
 
   return `${client ? '"use client";\n\n' : ""}${imports}${reactImport ? `\n${reactImport}` : ""}${gsapImports}
@@ -284,10 +343,23 @@ ${renders}
 `;
 };
 
-const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns: boolean): string => {
+const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns: boolean, raw: boolean): string => {
   const blocks = attributed.perSection.get(s.className) ?? [];
   const header = `// ${nn(i)} — exact rebuild of root .${s.className || "(classless)"}; markup verbatim, no slots.\n`;
-  const jsx = indentBody(htmlToJsx(s.text));
+  if (raw) {
+    // Generic rehost: React owns only the root shell; the captured subtree is
+    // one opaque SSR HTML string, so parse-time scripts/styles run in place and
+    // their DOM mutations cannot trip hydration.
+    const open = htmlToJsx(s.startTag).replace(/\s*\/?>$/, "");
+    const html = JSON.stringify(s.innerHtml).replace(/</g, "\\u003c");
+    return `${header}export default function ${nn(i)}() {
+  return (
+    ${open} dangerouslySetInnerHTML={{ __html: ${html} }} />
+  );
+}
+`;
+  }
+  const jsx = indentBody(sectionJsx(s.text));
   if (blocks.length > 0 && hasCdns) {
     // kit samestack nextSection wiring: "use client" + gsap.context + revert
     return `${header}"use client";
@@ -329,8 +401,20 @@ export function emitNext(split: Split, outDir: string, name: string): { files: S
   const files: ScaffoldFile[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
   const sections = split.sections.sections ?? [];
+  const generic = split.sections.detected === "generic";
   const hasCdns = split.scripts.cdns.length > 0;
   const attributed = attributeBlocks(split);
+  const headTags = [
+    ...split.scripts.headExternal.map(rewriteLocalUrlTag),
+    ...split.styles.headLinks.map((t) => jsxSelfClose(rewriteLocalUrlTag(t))),
+    ...split.scripts.headInlineJs.map(jsxInlineScript),
+  ];
+  // Generic: every loose body script (external + inline) stays raw at body end.
+  // Section-nested scripts already ship inside the raw section HTML, so they
+  // are not in bodyScripts (no double execution). Rebuild keeps externals only.
+  const bodyScripts = generic
+    ? split.scripts.bodyScripts
+    : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external");
 
   // kit samestack package.json shape (tsx sources ship, so the type deps must
   // too or `next dev` stalls); gsap only when the source's CDN tags say gsap.
@@ -374,9 +458,9 @@ export function emitNext(split: Split, outDir: string, name: string): { files: S
       exclude: ["node_modules"],
     }),
   );
-  add("app/layout.tsx", layout(name, split.styles.headLinks));
+  add("app/layout.tsx", layout(name, headTags, bodyScripts));
   add("app/globals.css", globalsCss(split));
   add("app/page.tsx", page(split, attributed));
-  sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, section(s, i, attributed, hasCdns)));
+  sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, section(s, i, attributed, hasCdns, generic)));
   return { files };
 }
