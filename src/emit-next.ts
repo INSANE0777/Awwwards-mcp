@@ -12,8 +12,8 @@
 // that dependency behind it. Import cycle with build-project.ts is
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
-import { attributeBlocks, cssTo, nn, packageName } from "./build-project.js";
-import type { BodyScript, RebuildSection, ScaffoldFile, Split } from "./build-project.js";
+import { attributeBlocks, bodyBounds, cssTo, nn, packageName, scriptFile } from "./build-project.js";
+import type { BodyScript, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
 
 // Dashed HTML/SVG attrs → JSX camelCase. Dashed-but-unlisted (data-*, aria-*,
 // unknown) stays as-is; class is a plain rename; style is special-cased in
@@ -247,6 +247,149 @@ const sectionJsx = (html: string): string => {
 const layoutHeadTags = (tags: string[]): string =>
   tags.length ? `\n${tags.map((t) => indent(t, 8)).join("\n")}\n      ` : "";
 
+// Rehost layout: one client loader owns every page script (see SiteScripts).
+// Head keeps only stylesheet links; executable head tags move into the loader
+// so their captured order survives.
+const rehostLayout = (name: string, headTags: string[], cssImports: string[]): string =>
+  `import type { Metadata } from "next";
+${cssImports.map((line) => `${line}\n`).join("")}import SiteScripts from "../components/SiteScripts";
+
+export const metadata: Metadata = {
+  title: ${JSON.stringify(name)},
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html lang="en">
+      <head>${layoutHeadTags(headTags)}</head>
+      <body>
+        {children}
+        <SiteScripts />
+      </body>
+    </html>
+  );
+}
+`;
+
+const rehostBody = (rehost: RehostSplit): string => {
+  const { start, end } = bodyBounds(rehost.shell);
+  return rehost.shell.slice(start, end);
+};
+
+const rehostPage = (rehost: RehostSplit): string => {
+  const imports = rehost.sections.map((_, i) => `import ${nn(i)} from "../components/${nn(i)}";`).join("\n");
+  const jsx = htmlToJsx(rehostBody(rehost))
+    .trim()
+    .replace(/<(Section\d+)\/>/g, "<$1 />");
+  return `${imports}
+
+export default function Page() {
+  return (
+    <>
+${indent(jsx, 6)}
+    </>
+  );
+}
+`;
+};
+
+const rehostSection = (s: RebuildSection, i: number, split: Split): string => {
+  const header = `// ${nn(i)} — native rehost section #${s.id || "(id-less)"}; real JSX, no slots.\n`;
+  // Mustache templates and CSS custom properties in style="" are the two
+  // bounded-converter gaps that produce invalid JSX ({{…}} text / --x keys).
+  const conversionRisk = /\{\{|\{%/.test(s.innerHtml) || /\bstyle\s*=\s*["'][^"']*--[a-z0-9_-]+\s*:/i.test(s.innerHtml);
+  let jsx: string | null = null;
+  if (!conversionRisk) {
+    try {
+      jsx = htmlToJsx(s.text);
+    } catch {
+      jsx = null;
+    }
+  }
+  if (jsx !== null) {
+    return `${header}export default function ${nn(i)}() {
+  return (
+    ${indent(jsx.trim(), 4)}
+  );
+}
+`;
+  }
+  split.warnings.push(
+    `${nn(i)}: JSX conversion risk (brace/template or CSS custom properties) — shipped as opaque HTML (dangerouslySetInnerHTML)`,
+  );
+  const open = htmlToJsx(s.startTag).replace(/\s*\/?>$/, "");
+  const html = JSON.stringify(s.innerHtml).replace(/</g, "\\u003c");
+  return `${header}export default function ${nn(i)}() {
+  return (
+    ${open} dangerouslySetInnerHTML={{ __html: ${html} }} />
+  );
+}
+`;
+};
+
+const siteScripts = (rehost: RehostSplit): string => {
+  const entries = rehost.scripts
+    .map((entry) =>
+      entry.kind === "inline"
+        ? `  { js: ${JSON.stringify(entry.js)} },`
+        : `  { src: ${JSON.stringify(entry.local ? `/scripts/${scriptFile(entry.src)}` : entry.src)}${entry.type ? `, type: ${JSON.stringify(entry.type)}` : ""} },`,
+    )
+    .join("\n");
+  return `"use client";
+
+import { useEffect } from "react";
+
+// Captured page scripts in source order. Classic scripts must run as side
+// effects from their original globals; ESM imports would change their scope.
+const SCRIPTS: Array<{ src: string; type?: string } | { js: string }> = [
+${entries}
+];
+
+let started = false;
+
+export default function SiteScripts() {
+  useEffect(() => {
+    if (started) return; // StrictMode remounts must not execute the page twice
+    started = true;
+    let cancelled = false;
+    const added: HTMLScriptElement[] = [];
+    const load = (entry: { src: string; type?: string } | { js: string }) =>
+      new Promise<void>((resolve) => {
+        const el = document.createElement("script");
+        if ("src" in entry) {
+          el.src = entry.src;
+          if (entry.type) el.type = entry.type;
+          el.onload = () => resolve();
+          el.onerror = () => resolve(); // a dead CDN must not stall the rest
+        } else {
+          el.textContent = entry.js;
+        }
+        document.body.appendChild(el);
+        added.push(el);
+        if (!("src" in entry)) resolve();
+      });
+
+    void (async () => {
+      for (const entry of SCRIPTS) {
+        if (cancelled) return;
+        await load(entry);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      for (const el of added) el.remove();
+    };
+  }, []);
+
+  return null;
+}
+`;
+};
+
+
 const layoutBodyScripts = (scripts: BodyScript[]): string =>
   scripts.length
     ? `\n      ${scripts
@@ -460,6 +603,27 @@ export function emitNext(split: Split, outDir: string, name: string): { files: S
       exclude: ["node_modules"],
     }),
   );
+  const rehost = split.rehost;
+  if (rehost) {
+    const cssImports: string[] = [];
+    if (split.styles.tokensCss) {
+      add("styles/tokens.css", cssTo(split.styles.tokensCss, "/assets/"));
+      cssImports.push('import "../styles/tokens.css";');
+    }
+    if (split.styles.siteCss) {
+      add("styles/site.css", cssTo(split.styles.siteCss, "/assets/"));
+      cssImports.push('import "../styles/site.css";');
+    }
+    const styleLinks = split.headTags
+      .filter((t) => t.kind === "style")
+      .map((t) => jsxSelfClose(rewriteLocalUrlTag(t.tag)));
+    add("app/layout.tsx", rehostLayout(name, styleLinks, cssImports));
+    add("app/page.tsx", rehostPage(rehost));
+    rehost.sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, rehostSection(s, i, split)));
+    add("components/SiteScripts.tsx", siteScripts(rehost));
+    return { files };
+  }
+
   add("app/layout.tsx", layout(name, headTags, bodyScripts));
   add("app/globals.css", globalsCss(split));
   add("app/page.tsx", page(split, attributed));

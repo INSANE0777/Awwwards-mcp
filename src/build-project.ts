@@ -21,6 +21,7 @@ import { emitNext } from "./emit-next.js";
 
 export interface RebuildSection {
   tag: string;
+  id: string; // "" when the root is classless/id-less (rebuild roots are `c-N`)
   className: string; // first class token of the root ("" when classless); rebuild roots are `c-N`
   startTag: string; // verbatim opening tag
   innerHtml: string; // verbatim between opening and closing tag
@@ -38,6 +39,22 @@ export interface SplitStyles {
   headLinks: string[]; // verbatim <link rel=stylesheet> tags (font services ship; content urls never)
   perSection: Map<string, string>; // className -> rules whose selectors mention it (class-safe match)
   sharedCss: string; // all other top-level rules, incl. shared @media guards
+  siteCss: string; // every non-:root rule in original source order (rehost cascade-safe home)
+}
+
+export type LoaderScript =
+  | { kind: "external"; src: string; local: boolean; tag: string; type: string }
+  | { kind: "inline"; js: string };
+
+// Native generic shape: the document keeps its chrome, its content container's
+// id/section children become components, and all page JS moves to one ordered
+// loader (classic scripts keep their captured order instead of becoming ESM).
+export interface RehostSplit {
+  shell: string; // whole document with section nodes replaced by <SectionNN /> markers
+  container: string; // tag#id label of the content container (e.g. main#main)
+  sections: RebuildSection[];
+  scripts: LoaderScript[];
+  warnings: string[];
 }
 
 export interface TimelineBlock {
@@ -85,6 +102,7 @@ export interface Split {
   headTags: HeadTag[]; // head scripts/stylesheet links in source order
   warnings: string[];
   assetRefs: string[]; // unique local refs in document order
+  rehost: RehostSplit | null; // native generic split when a content container was proven
 }
 
 // Generic rehost pages (e.g. a Webflow export) carry nav/loader/utility as
@@ -161,8 +179,13 @@ const findClose = (html: string, from: number, tag: string): number => {
   return -1;
 };
 
-const walkTopLevel = (body: string): RebuildSection[] => {
-  const roots: RebuildSection[] = [];
+interface WalkedSection extends RebuildSection {
+  start: number; // offset in the walked string
+  end: number; // just past the close tag
+}
+
+const walkSpans = (body: string): WalkedSection[] => {
+  const roots: WalkedSection[] = [];
   let i = 0;
   while (i < body.length) {
     if (body.startsWith("<!--", i)) {
@@ -191,16 +214,21 @@ const walkTopLevel = (body: string): RebuildSection[] => {
     const closeEnd = body.indexOf(">", close) + 1;
     roots.push({
       tag,
+      id: attr(startTag, "id"),
       className: attr(startTag, "class").trim().split(/\s+/)[0] ?? "",
       startTag,
       innerHtml: body.slice(gt + 1, close),
       closeTag: body.slice(close, closeEnd),
       text: body.slice(start, closeEnd),
+      start,
+      end: closeEnd,
     });
     i = closeEnd;
   }
   return roots;
 };
+
+const walkTopLevel = (body: string): RebuildSection[] => walkSpans(body);
 
 // Primary shape: the kit's rebuild output, whose TOP-LEVEL body children are
 // the per-band roots <tag class="c-N"> — div roots included (real captures
@@ -280,6 +308,7 @@ export function splitStyles(html: string, classNames: string[] = autoSectionClas
     headLinks,
     perSection,
     sharedCss: shared.join("\n"),
+    siteCss: rest.trim(),
   };
 }
 
@@ -506,9 +535,10 @@ export interface CopyAssetsResult {
 // Copied css/js files are scanned for their own local deps (fonts, audio,
 // images), so a stylesheet or app script cannot 404 its children. A missing
 // source is a warning (missing[]), never a hard failure.
-export async function copyAssets(html: string, srcDir: string, outDir: string, opts: { into?: string } = {}): Promise<CopyAssetsResult> {
+export async function copyAssets(html: string, srcDir: string, outDir: string, opts: { into?: string; skip?: string[] } = {}): Promise<CopyAssetsResult> {
   const root = join(resolve(outDir), opts.into ?? "");
   const srcRoot = resolve(srcDir);
+  const skip = new Set(opts.skip ?? []);
   const copied: string[] = [];
   const missing: string[] = [];
   const seen = new Set<string>();
@@ -531,13 +561,17 @@ export async function copyAssets(html: string, srcDir: string, outDir: string, o
     const dest = resolve(job.to);
     if (seen.has(dest)) continue;
     seen.add(dest);
-    try {
-      await mkdir(dirname(job.to), { recursive: true });
-      await copyFile(job.from, job.to);
-      copied.push(job.label);
-    } catch {
-      addMissing(job.label);
-      continue;
+    // skip: the file moves to its own project folder later; still scan it for
+    // dependencies so those keep resolving from their original page-relative base.
+    if (!skip.has(job.label)) {
+      try {
+        await mkdir(dirname(job.to), { recursive: true });
+        await copyFile(job.from, job.to);
+        copied.push(job.label);
+      } catch {
+        addMissing(job.label);
+        continue;
+      }
     }
     if (!TEXT_ASSET.test(job.from)) continue;
     if (JS_TEXT_ASSET.test(job.from) && VENDOR_JS.test(job.from)) continue;
@@ -561,11 +595,151 @@ export async function copyAssets(html: string, srcDir: string, outDir: string, o
 
 const bodyInner = (html: string): string => /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
 
+// All JS in document order, including scripts that sat inside a section. The
+// rehost loader runs this exact sequence; inline bodies keep their slots.
+const collectLoaderScripts = (html: string): LoaderScript[] => {
+  const scripts: LoaderScript[] = [];
+  for (const m of html.matchAll(SCRIPT_RE)) {
+    const open = m[1] ?? "";
+    const src = attr(open, "src");
+    if (src !== "") {
+      scripts.push({
+        kind: "external",
+        src,
+        local: isLocalRef(src),
+        tag: (m[1] ?? "") + (m[2] ?? "") + (m[3] ?? ""),
+        type: attr(open, "type").toLowerCase().trim(),
+      });
+      continue;
+    }
+    if (!JS_TYPES.has(attr(open, "type").toLowerCase().trim())) continue;
+    const js = (m[2] ?? "").trim();
+    if (js !== "") scripts.push({ kind: "inline", js });
+  }
+  return scripts;
+};
+
+// Section components never carry script/style tags: JS goes to the one loader,
+// CSS to tokens/site. (A data script inside a section is lost here, matching
+// the generated-page law that sections are markup only.)
+const stripSectionAssets = (html: string): string =>
+  html.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "").replace(SCRIPT_RE, "");
+
+// The shell keeps non-JS data scripts (ld+json/importmap) because they are
+// document metadata; executable/page scripts all move to the loader.
+const stripShellAssets = (html: string): string =>
+  html
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
+    .replace(SCRIPT_RE, (full: string, open: string) => (attr(open, "src") !== "" || JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full));
+
+interface RehostContainer {
+  start: number; // inner start in the document
+  end: number; // inner end in the document
+  label: string;
+}
+
+const mainContainer = (html: string): RehostContainer | null => {
+  const open = /<main\b[^>]*>/i.exec(html);
+  if (!open) return null;
+  const gt = tagEnd(html, open.index);
+  if (gt === -1) return null;
+  const close = findClose(html, gt + 1, "main");
+  if (close === -1) return null;
+  const id = attr(open[0], "id");
+  return { start: gt + 1, end: close, label: `main${id ? `#${id}` : ""}` };
+};
+
+const roleMainContainer = (html: string): RehostContainer | null => {
+  const open = /<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*\brole\s*=\s*["']?main\b[^>]*>/i.exec(html);
+  if (!open) return null;
+  const tag = (open[1] ?? "").toLowerCase();
+  const gt = tagEnd(html, open.index);
+  if (gt === -1) return null;
+  const close = findClose(html, gt + 1, tag);
+  if (close === -1) return null;
+  const id = attr(open[0], "id");
+  return { start: gt + 1, end: close, label: `${tag}${id ? `#${id}` : ""}` };
+};
+
+// No semantic main: a single body-level wrapper is the container only when its
+// own element children prove a multi-band page (>=2 id-bearing children).
+const wrapperContainer = (html: string): RehostContainer | null => {
+  const bodyOpen = /<body\b[^>]*>/i.exec(html);
+  const offset = bodyOpen ? bodyOpen.index + bodyOpen[0].length : 0;
+  const bodyEnd = /<\/body\s*>/i.exec(html)?.index ?? html.length;
+  const roots = walkSpans(html.slice(offset, bodyEnd)).filter((r) => r.tag !== "script" && r.tag !== "style");
+  if (roots.length !== 1) return null;
+  const root = roots[0];
+  if (!root || root.tag === "script") return null;
+  const kids = walkSpans(root.innerHtml).filter((k) => k.id !== "");
+  if (kids.length < 2) return null;
+  return {
+    start: offset + root.start + root.startTag.length,
+    end: offset + root.start + root.startTag.length + root.innerHtml.length,
+    label: `${root.tag}${root.id ? `#${root.id}` : ""}`,
+  };
+};
+
+/**
+ * Native generic split: shell (whole document, section nodes replaced by
+ * `<SectionNN />` markers) + sections + one ordered script list. Returns null
+ * when no content container can be proven, so the caller keeps the legacy
+ * generic path (no silent rewrite).
+ */
+export function splitRehost(html: string): RehostSplit | null {
+  const container = mainContainer(html) ?? roleMainContainer(html) ?? wrapperContainer(html);
+  if (!container) return null;
+  const inner = html.slice(container.start, container.end);
+  const children = walkSpans(inner);
+  const chosen = children.filter((c) => c.id !== "" || c.tag === "section");
+  if (chosen.length === 0) return null;
+
+  const sections: RebuildSection[] = chosen.map((c) => {
+    const innerHtml = stripSectionAssets(c.innerHtml);
+    return {
+      tag: c.tag,
+      id: c.id,
+      className: c.className,
+      startTag: c.startTag,
+      innerHtml,
+      closeTag: c.closeTag,
+      text: c.startTag + innerHtml + c.closeTag,
+    };
+  });
+
+  // Replace back-to-front so earlier offsets stay valid; markers are the exact
+  // component names both astro and JSX resolve (vite swaps the HTML back in).
+  let rehosted = inner;
+  for (let i = chosen.length - 1; i >= 0; i--) {
+    const node = chosen[i];
+    if (!node) continue;
+    rehosted = rehosted.slice(0, node.start) + `<${nn(i)} />` + rehosted.slice(node.end);
+  }
+  const shell = stripShellAssets(html.slice(0, container.start) + rehosted + html.slice(container.end));
+
+  return {
+    shell,
+    container: container.label,
+    sections,
+    scripts: collectLoaderScripts(html),
+    warnings: [],
+  };
+}
+
+// Offset-safe body inner bounds for emitters that need the body only.
+export const bodyBounds = (html: string): { start: number; end: number } => {
+  const open = /<body\b[^>]*>/i.exec(html);
+  const start = open ? open.index + open[0].length : 0;
+  const close = /<\/body\s*>/i.exec(html);
+  return { start, end: close ? close.index : html.length };
+};
+
 // Fallback when the section model cannot cover the body: h1/p-only pages have
 // no container root, and text between roots has no home. One synthetic root
 // carries the whole body so no target can silently drop content.
 const fullBodySection = (body: string): RebuildSection => ({
   tag: "div",
+  id: "",
   className: "",
   startTag: "<div>",
   innerHtml: body,
@@ -597,25 +771,35 @@ export function splitBuild(html: string): Split {
   const parsed = parseRebuildSections(html);
   const body = bodyInner(html);
   const parsedRoots = parsed.sections ?? [];
-  const fallback = parsedRoots.length === 0 || residualBodyContent(body, parsedRoots) !== "";
-  const sections: ParsedSections = fallback
-    ? { sections: [fullBodySection(body)], detected: "generic" }
-    : parsed;
+  // Generic pages with a proven content container split natively before the
+  // residual-content check: chrome outside main (skip links, dialogs) is shell,
+  // not leftovers that force a full-body block.
+  const rehost = parsed.detected === "generic" ? splitRehost(html) : null;
+  const fallback = rehost === null && (parsedRoots.length === 0 || residualBodyContent(body, parsedRoots) !== "");
+  const sections: ParsedSections = rehost
+    ? { sections: rehost.sections, detected: "generic" }
+    : fallback
+      ? { sections: [fullBodySection(body)], detected: "generic" }
+      : parsed;
   const scripts = extractScripts(html);
   // Scripts inside a section root stay in that markup; only loose body
   // scripts are re-emitted at page level (dedupe law: never execute twice).
+  // Rehost moves every script to the one loader, so no body tags remain here.
   const roots = sections.sections ?? [];
-  scripts.bodyScripts = scripts.bodyScripts.filter((b) =>
-    b.kind === "external" ? !roots.some((s) => s.text.includes(b.tag)) : !roots.some((s) => s.text.includes(b.js)),
-  );
+  scripts.bodyScripts = rehost
+    ? []
+    : scripts.bodyScripts.filter((b) =>
+        b.kind === "external" ? !roots.some((s) => s.text.includes(b.tag)) : !roots.some((s) => s.text.includes(b.js)),
+      );
   return {
     html,
     sections,
     styles: splitStyles(html, fallback ? [] : parsedRoots.map((s) => s.className)),
     scripts,
     headTags: collectHeadTags(html),
-    warnings: fallback ? [FULL_BODY_WARNING] : [],
+    warnings: [...(fallback ? [FULL_BODY_WARNING] : []), ...(rehost?.warnings ?? [])],
     assetRefs: collectAssetRefs(html),
+    rehost,
   };
 }
 
@@ -718,6 +902,47 @@ const astroInlineTags = (html: string): string => html.replace(/<script\b/gi, "<
 
 export const nn = (i: number): string => `Section${String(i + 1).padStart(2, "0")}`;
 
+// Local script refs move under the target's scripts dir; queries/fragments are
+// runtime-only and never part of the copied file path.
+export const scriptFile = (src: string): string => (src.split(/[?#]/)[0] ?? "").replace(/^\.\//, "");
+
+const withSrc = (tag: string, src: string): string =>
+  tag.replace(/(\bsrc\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s>]+)/i, (_m, prefix: string) => `${prefix}"${src}"`);
+
+const rehostScriptUrl = (entry: Extract<LoaderScript, { kind: "external" }>, dir: string): string =>
+  entry.local ? `/${dir}/${scriptFile(entry.src)}` : entry.src;
+
+const rehostLoaderTag = (entry: LoaderScript, dir: string): string =>
+  entry.kind === "inline" ? `<script>\n${entry.js}\n</script>` : withSrc(entry.tag, rehostScriptUrl(entry, dir));
+
+const astroRehostLoaderTag = (entry: LoaderScript): string =>
+  entry.kind === "inline"
+    ? `<script is:inline>\n${entry.js}\n</script>`
+    : astroInlineTags(withSrc(entry.tag, rehostScriptUrl(entry, "scripts")));
+
+// One ordered block at the end of the shell (the single loader for this page).
+const withLoader = (doc: string, block: string): string => {
+  if (block === "") return doc;
+  return /<\/body\s*>/i.test(doc)
+    ? doc.replace(/<\/body\s*>/i, () => `${block}\n</body>`)
+    : `${doc}\n${block}\n`;
+};
+
+const inlineShell = (rehost: RehostSplit): string => {
+  let doc = rehost.shell;
+  rehost.sections.forEach((s, i) => {
+    doc = doc.replace(`<${nn(i)} />`, () => s.text);
+  });
+  return doc;
+};
+
+// Astro parses `{` as an expression start; sections with literal braces ship as
+// a set:html string (same guard as the legacy emitter).
+const astroSection = (s: RebuildSection, i: number): { content: string; risky: boolean } => {
+  const risky = /[{`]/.test(s.innerHtml);
+  return { risky, content: risky ? `<Fragment set:html={${JSON.stringify(s.text)}} />` : s.text };
+};
+
 export function emitAstro(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
   void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
@@ -738,6 +963,42 @@ export function emitAstro(split: Split, outDir: string, name: string): { files: 
     }),
   );
   add("astro.config.mjs", 'import { defineConfig } from "astro/config";\n\nexport default defineConfig({});\n');
+
+  const rehost = split.rehost;
+  if (rehost) {
+    const imports: string[] = [];
+    if (split.styles.tokensCss) {
+      add("src/styles/tokens.css", cssTo(split.styles.tokensCss, cssBase));
+      imports.push('import "../styles/tokens.css";');
+    }
+    if (split.styles.siteCss) {
+      add("src/styles/site.css", cssTo(split.styles.siteCss, cssBase));
+      imports.push('import "../styles/site.css";');
+    }
+    rehost.sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
+    const loader = rehost.scripts.map(astroRehostLoaderTag).join("\n");
+    add(
+      "src/pages/index.astro",
+      `---
+// Generated by awwwards-build-project — native shell, real sections, one ordered loader.
+${imports.join("\n")}
+---
+${withLoader(rehost.shell, loader ? indent(loader, 2) : "")}`,
+    );
+    rehost.sections.forEach((s, i) => {
+      const { content, risky } = astroSection(s, i);
+      if (risky) split.warnings.push(`${nn(i)}: literal braces/backticks — shipped via set:html`);
+      add(
+        `src/components/${nn(i)}.astro`,
+        `---
+// ${nn(i)} — section #${s.id || "(id-less)"}; markup verbatim, no slots.${risky ? "\n// braces present: content ships as a set:html string (astro would parse { as an expression)" : ""}
+---
+${content}
+`,
+      );
+    });
+    return { files };
+  }
 
   const imports: string[] = [];
   if (split.styles.tokensCss) add("src/styles/tokens.css", cssTo(split.styles.tokensCss, cssBase));
@@ -865,6 +1126,32 @@ export default {
 `,
   );
 
+  const rehost = split.rehost;
+  if (rehost) {
+    // Vite has no component tree: the shell keeps section markup inline (no
+    // marker + client render step), while css and classic scripts get real
+    // project folders. The module entry is css-only; every page script keeps
+    // its captured order in the html.
+    const imports: string[] = [];
+    if (split.styles.tokensCss) {
+      add("src/styles/tokens.css", cssTo(split.styles.tokensCss, cssBase));
+      imports.push('import "./styles/tokens.css";');
+    }
+    if (split.styles.siteCss) {
+      add("src/styles/site.css", cssTo(split.styles.siteCss, cssBase));
+      imports.push('import "./styles/site.css";');
+    }
+    add("src/main.js", imports.length ? `${imports.join("\n")}\n` : "");
+    const loader = [
+      rehost.scripts.map((s) => rehostLoaderTag(s, "src/scripts")).join("\n"),
+      '<script type="module" src="/src/main.js"></script>',
+    ]
+      .filter(Boolean)
+      .join("\n");
+    add("index.html", withLoader(inlineShell(rehost), loader));
+    return { files };
+  }
+
   // Generic rehost shape: the body already carries its own inline scripts,
   // nested w-scripts and body-end CDN/local tags — ship it byte-verbatim so
   // each runs in place once. Rebuild shape keeps the kit's section assembly.
@@ -955,7 +1242,29 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   // and `vite build` rewrites refs); astro and next serve public/ at the site
   // root — matching each emitter's css re-basing and local link/script hrefs.
   const outDir = resolve(args.out);
-  const { missing } = await copyAssets(html, dirname(src), outDir, args.target === "vite" ? {} : { into: "public" });
+  const rehostScripts =
+    split.rehost?.scripts.filter((s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external" && s.local) ?? [];
+  const { missing } = await copyAssets(html, dirname(src), outDir, {
+    ...(args.target === "vite" ? {} : { into: "public" }),
+    ...(rehostScripts.length ? { skip: rehostScripts.map((s) => s.src) } : {}),
+  });
+  // Rehost scripts load from one folder per target; copyAssets skipped their
+  // original copies above and this is the path the single loader points at.
+  const missingScripts: string[] = [];
+  if (split.rehost) {
+    const into = args.target === "vite" ? join("src", "scripts") : join("public", "scripts");
+    for (const entry of rehostScripts) {
+      const rel = scriptFile(entry.src);
+      if (rel === "" || rel.includes("..")) continue;
+      try {
+        const to = join(outDir, into, rel);
+        await mkdir(dirname(to), { recursive: true });
+        await copyFile(resolve(dirname(src), rel), to);
+      } catch {
+        missingScripts.push(entry.src);
+      }
+    }
+  }
   try {
     for (const f of emitted.files) {
       const to = join(outDir, f.path);
@@ -969,6 +1278,10 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     outDir,
     target: args.target,
     files: emitted.files.map((f) => f.path),
-    warnings: [...split.warnings, ...missing.map((ref) => `asset not found: ${ref}`)],
+    warnings: [
+      ...split.warnings,
+      ...missing.map((ref) => `asset not found: ${ref}`),
+      ...missingScripts.map((ref) => `asset not found: ${ref}`),
+    ],
   };
 }
