@@ -125,7 +125,7 @@ export type StackFn = (
 // analyze_bundle: fetches a page + its script chunks (bounded), greps keywords.
 export type BundleFn = (
   url: string,
-  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean },
+  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean },
 ) => Promise<BundleReport | { error: string }>;
 
 // build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
@@ -335,6 +335,7 @@ export interface Handlers {
     keywords?: string[];
     maxChunks?: number;
     walkChunks?: boolean;
+    edges?: boolean;
   }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName }): Promise<ToolResponse>;
   capture_component(args: {
@@ -1257,23 +1258,26 @@ export function createHandlers(deps: {
     keywords?: string[];
     maxChunks?: number;
     walkChunks?: boolean;
+    edges?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: bundle-forensics is only touched when the tool actually runs.
       const capture =
         deps.bundleFn ??
-        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean }) =>
+        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean }) =>
           import("./bundle-forensics.js").then((m) =>
             m.captureBundleForensics(url, {
               keywords: opts?.keywords,
               maxChunks: opts?.maxChunks,
               walkChunks: opts?.walkChunks,
+              edges: opts?.edges,
             }),
           ));
       const result = await capture(args.url, {
         keywords: args.keywords,
         maxChunks: args.maxChunks,
         walkChunks: args.walkChunks,
+        edges: args.edges,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };

@@ -29,12 +29,14 @@ const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
 
 // Deep-walk bounds: ≤20 walk-discovered chunks per run is the walk's OWN cap,
 // independent of maxChunks (the shared maxTotalBytes still applies). Ref
-// pattern (plan-verbatim): a quoted 4..200
-// char body followed by ".js" — its lazy quantifier needs ≥4 non-quote chars
-// BEFORE the terminal ".js", so quoted bodies shorter than 7 chars ("/a.js")
-// never match. Longer real-world chunk names are the walk's normal diet.
+// pattern: a quoted body whose final path token — ≥4 chars, no slash, no dot
+// — immediately precedes the terminal ".js". The old ≥4-total-char floor
+// still matched 1-3-char-stem junk ("../b.js", "chunk.a.js") once d087e53
+// made refs resolve chunk-relative; the token floor kills that class while
+// real chunk names ("./chunk-b.js", "862.1bd3e00c.js") pass. Quoted bodies
+// shorter than "abcd.js" (7 chars) still never match.
 const WALK_CHUNK_CAP = 20;
-const WALK_REF_SRC = `["']([^"']{4,200}?\\.js)["']`;
+const WALK_REF_SRC = `["']([^"']{0,200}?[^/.]{4}\\.js)["']`;
 
 // Basename sanitized to the portable set; empty → "chunk". A trailing script
 // extension is stripped so the ".js" below isn't doubled ("/a.js" → "0-a.js",
@@ -55,6 +57,81 @@ const msg = (err: unknown): string =>
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// ---- static import edges (opt-in `edges`) --------------------------------
+// Pure per-chunk scan of saved chunk TEXT: no execution, no fetching, no URL
+// guessing. `to` stays the verbatim specifier (or numeric-id string); the
+// honesty number `unresolved` counts emitted edges that do not land exactly
+// on a captured chunk URL — bare specifiers and webpack ids never do.
+export type ImportEdgeKind = "esm-import" | "esm-reexport" | "cjs-require" | "webpack-id";
+
+export interface ImportEdge {
+  from: number;
+  to: string;
+  kind: ImportEdgeKind;
+  raw: string;
+}
+
+// SavedChunk-like input: a captured chunk record joined with its saved text.
+export interface EdgeScanChunk {
+  index: number;
+  url: string;
+  text: string;
+}
+
+export interface ImportGraph {
+  edges: ImportEdge[];
+  unresolved: number;
+}
+
+export const MAX_EDGES_PER_CHUNK = 20;
+export const MAX_EDGES_TOTAL = 400;
+
+// Minified-tolerant families: the [^;'"()]*? bridge keeps from-forms inside
+// ONE statement even in single-line bundles; \d{4,} keeps the webpack family
+// on real numeric module ids (motivating case: `e.i(870178)`).
+const EDGE_FAMILIES: Array<[RegExp, ImportEdgeKind]> = [
+  [/\bimport\b[^;'"()]*?\bfrom\s*["']([^"']+)["']/g, "esm-import"],
+  [/\bimport\s*["']([^"']+)["']/g, "esm-import"], // bare side-effect import
+  [/\bexport\b[^;'"()]*?\bfrom\s*["']([^"']+)["']/g, "esm-reexport"],
+  [/\brequire\s*\(\s*["']([^"']+)["']/g, "cjs-require"],
+  [/\w+\.i\((\d{4,})\)/g, "webpack-id"],
+];
+
+export function extractEdges(chunks: EdgeScanChunk[]): ImportGraph {
+  const edges: ImportEdge[] = [];
+  const capturedUrls = new Set(chunks.map((c) => c.url));
+  const seen = new Set<string>();
+  let unresolved = 0;
+  for (const chunk of chunks) {
+    if (edges.length >= MAX_EDGES_TOTAL) break;
+    let perChunk = 0;
+    for (const [re, kind] of EDGE_FAMILIES) {
+      for (const m of chunk.text.matchAll(re)) {
+        if (perChunk >= MAX_EDGES_PER_CHUNK || edges.length >= MAX_EDGES_TOTAL) break;
+        const to = m[1] ?? "";
+        const key = `${chunk.index}\u0000${kind}\u0000${to}`;
+        if (seen.has(key)) continue; // dedupe first-wins
+        seen.add(key);
+        perChunk++;
+        edges.push({ from: chunk.index, to, kind, raw: m[0] });
+        // Resolved ONLY by landing exactly on a captured URL; webpack ids are
+        // registry numbers that can never be checked — counted unresolved.
+        let landed = false;
+        if (kind !== "webpack-id") {
+          try {
+            landed = capturedUrls.has(new URL(to, chunk.url).href);
+          } catch {
+            landed = false;
+          }
+        }
+        if (!landed) unresolved++;
+      }
+      if (edges.length >= MAX_EDGES_TOTAL) break;
+    }
+  }
+  return { edges, unresolved };
+}
+
 export interface BundleReport {
   url: string;
   host: string;
@@ -67,6 +144,10 @@ export interface BundleReport {
   unpacked: boolean;
   unpackedDir?: string;
   hint?: string;
+  // Opt-in `edges` pass only — default reports are byte-identical to before.
+  edges?: ImportEdge[];
+  edgeCount?: number;
+  unresolved?: number;
 }
 
 export interface BundleForensicsOpts {
@@ -83,6 +164,9 @@ export interface BundleForensicsOpts {
   // sources and fetch up to 20 newly discovered chunks — the walk's own cap,
   // independent of maxChunks, within the shared byte budget.
   walkChunks?: boolean;
+  // Opt-in static import graph (default false → identical report shape, zero
+  // extra fetches): the pure extractEdges scan over the saved chunk texts.
+  edges?: boolean;
 }
 
 export async function captureBundleForensics(
@@ -332,6 +416,13 @@ export async function captureBundleForensics(
       }
     }
 
+    // Opt-in static import graph: pure scan over the saved RAW chunk texts —
+    // deliberately before the unpack pass below, whose pretty rewrite
+    // replaces c.path, so the graph always describes the captured bundle.
+    const graph = opts.edges
+      ? extractEdges(chunks.map((c) => ({ index: c.index, url: c.url, text: readFileSync(c.path, "utf8") })))
+      : undefined;
+
     // Optional unpack pass: hard-capped (first 10 QUALIFYING chunks, 2MB each
     // — see the loop), each chunk try/caught — a webcrack crash or odd result
     // shape can never fail the report beyond a warning.
@@ -412,6 +503,9 @@ export async function captureBundleForensics(
       unpacked,
       unpackedDir: unpacked ? unpackedDir : undefined,
       hint: unpacked ? undefined : unpackLoaded ? UNPACK_NOOP_HINT : UNPACK_HINT,
+      ...(graph
+        ? { edges: graph.edges, edgeCount: graph.edges.length, unresolved: graph.unresolved }
+        : {}),
     };
   } catch (err) {
     return { error: msg(err) };

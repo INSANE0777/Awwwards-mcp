@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureBundleForensics } from "../src/bundle-forensics.js";
+import { captureBundleForensics, extractEdges } from "../src/bundle-forensics.js";
 import { createHandlers } from "../src/server.js";
 import { AwwwardsClient } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
@@ -348,15 +348,21 @@ describe("universal extraction: inline scripts + preload hints", () => {
 });
 
 describe("walkChunks (B3: opt-in deep chunk walk)", () => {
-  const B2_JS = `${pageOrigin}/b.js`;
-  const C_JS = `${pageOrigin}/c.js`;
-  // a.js references itself (already-fetched → no refetch) and two more chunks;
-  // b.js points back at a.js (cycle → seen-set) and on to c.js. Ref bodies
-  // stay ≥7 chars — the plan-pinned lazy regex can't see shorter ones.
+  const ALPHA_JS = `${pageOrigin}/alpha.js`;
+  const B2_JS = `${pageOrigin}/bpage.js`;
+  const C_JS = `${pageOrigin}/cdepth.js`;
+  // D1 walk-regex floor: ref bodies need a ≥4-char final path token before
+  // ".js", so fixtures use token-length names (alpha/bpage/cdepth) — the
+  // old 1-3-char stems ("../b.js") are exactly the junk class the floor
+  // excludes. Pins carried over from the original map: a.js's text refs the
+  // already-fetched alpha.js (first-pass seen-dedupe), alpha.js self-refs
+  // mid-walk, bpage.js walks back to alpha.js (cycle → seen-set), and
+  // cdepth.js carries the keyword.
   const walkMap: Record<string, string> = {
-    [PAGE]: `<html><script src="/a.js"></script></html>`,
-    [A_JS]: `var self = "${A_JS}"; var next = "../b.js";`,
-    [B2_JS]: `var back = "${A_JS}"; var deeper = "../c.js";`,
+    [PAGE]: `<html><script src="/a.js"></script><script src="${ALPHA_JS}"></script></html>`,
+    [A_JS]: `var seen = "./alpha.js"; var next = "../bpage.js";`,
+    [ALPHA_JS]: `var backKey = "./alpha.js"; var deeper = "../cdepth.js";`,
+    [B2_JS]: `var back = "../alpha.js"; var deeper = "../cdepth.js";`,
     [C_JS]: `terminal-marker(1);`,
   };
   const countingFetch = (map: Record<string, string>, calls: string[]) =>
@@ -377,8 +383,8 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     if ("error" in rep) return;
     cleanup.push(rep.outDir);
     // page + first pass, then exactly one extra fetch per discovered chunk
-    expect(calls).toEqual([PAGE, A_JS, B2_JS, C_JS]);
-    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, B2_JS, C_JS]);
+    expect(calls).toEqual([PAGE, A_JS, ALPHA_JS, B2_JS, C_JS]);
+    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, ALPHA_JS, B2_JS, C_JS]);
     // walk bytes are keyword-searched like the rest
     expect(rep.matches.some((m) => m.url === C_JS && m.keyword === "terminal-marker")).toBe(true);
     expect(rep.warnings).toEqual([]);
@@ -393,16 +399,16 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect("error" in rep).toBe(false);
     if ("error" in rep) return;
     cleanup.push(rep.outDir);
-    expect(calls).toEqual([PAGE, A_JS]); // page + html-advertised chunks only
-    expect(rep.chunkCount).toBe(1);
+    expect(calls).toEqual([PAGE, A_JS, ALPHA_JS]); // page + html-advertised chunks only
+    expect(rep.chunkCount).toBe(2);
   });
 
   it("walk cap is 20 discovered chunks per run", async () => {
-    // 2-digit padding keeps every ref body ≥7 chars (regex minimum above)
-    const wUrls = Array.from({ length: 25 }, (_, i) => `${pageOrigin}/w${String(i).padStart(2, "0")}.js`);
+    // 3-digit padding keeps every ref's final stem ≥4 chars (the D1 floor)
+    const wUrls = Array.from({ length: 25 }, (_, i) => `${pageOrigin}/w${String(i).padStart(3, "0")}.js`);
     const map: Record<string, string> = {
       [PAGE]: `<html><script src="/a.js"></script></html>`,
-      [A_JS]: Array.from({ length: 25 }, (_, i) => `var p${i}="/w${String(i).padStart(2, "0")}.js";`).join(""),
+      [A_JS]: Array.from({ length: 25 }, (_, i) => `var p${i}="/w${String(i).padStart(3, "0")}.js";`).join(""),
     };
     for (const u of wUrls) map[u] = "z".repeat(60);
     const rep = await captureBundleForensics(PAGE, {
@@ -421,7 +427,7 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
   it("walk fetches stay under maxTotalBytes (oversized discoveries skip with a walk-marked warning)", async () => {
     const map: Record<string, string> = {
       [PAGE]: `<html><script src="/a.js"></script></html>`,
-      [A_JS]: "y".repeat(5000) + `var next="../b.js";`,
+      [A_JS]: "y".repeat(5000) + `var next="../bpage.js";`,
       [B2_JS]: "z".repeat(5000),
     };
     const rep = await captureBundleForensics(PAGE, {
@@ -434,7 +440,7 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     if ("error" in rep) return;
     cleanup.push(rep.outDir);
     expect(rep.chunkCount).toBe(1);
-    expect(rep.warnings.join("\n")).toContain("/b.js: would exceed maxTotalBytes");
+    expect(rep.warnings.join("\n")).toContain("/bpage.js: would exceed maxTotalBytes");
   });
 
   // F1 (dogfood): the base pass eating maxChunks must not starve the walk —
@@ -442,7 +448,7 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
   it("walk runs on its own 20-chunk cap: maxChunks exhaustion doesn't stop discovered chunks", async () => {
     const map: Record<string, string> = {
       [PAGE]: `<html><script src="/a.js"></script></html>`,
-      [A_JS]: `var next="../b.js";`,
+      [A_JS]: `var next="../bpage.js";`,
       [B2_JS]: "var b=1;",
     };
     const calls: string[] = [];
@@ -463,7 +469,7 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
   // F1 (dogfood): byte budget exhausted by the base pass → walk stops with the
   // existing walk-sourced warning and fetches nothing.
   it("byte budget exhausted by the base pass → walk stops with the walk-sourced byte warning", async () => {
-    const REF = 'var next="../b.js";';
+    const REF = 'var next="../bpage.js";';
     const map: Record<string, string> = {
       [PAGE]: `<html><script src="/a.js"></script></html>`,
       [A_JS]: "y".repeat(5000 - REF.length) + REF, // exactly maxTotalBytes
@@ -486,7 +492,8 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
 
   // F2 (dogfood): Turbopack/Next chunk sources carry chunk-relative paths —
   // they must resolve against the CHUNK's own URL, not the page URL.
-  // (Ref bodies stay ≥7 chars — the pinned walk regex can't see "./b.js".)
+  // (Sub-token stems like "./b.js" never pass the D1 token floor — hence the
+  // long ref names.)
   it("walk resolves chunk-internal refs against the chunk's own URL; cross-origin skipped", async () => {
     const NEXT_A = `${pageOrigin}/_next/static/chunks/a.js`;
     const NEXT_B = `${pageOrigin}/_next/static/chunks/chunk-b.js`;
@@ -512,6 +519,136 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(calls).toEqual([PAGE, NEXT_A, NEXT_B, NEXT_C]);
     expect(rep.chunks.map((c) => c.url)).toEqual([NEXT_A, NEXT_B, NEXT_C]);
     expect(rep.warnings).toEqual([]);
+  });
+
+  // D1 walk-regex floor regression: 1-3-char stems are the junk class that
+  // chunk-relative resolution (d087e53) used to actually fetch ("../b.js",
+  // dotted "chunk.a.js"); the ≥4-char token floor must keep them unfetched
+  // while a real ≥4-char-stem name still walks.
+  it("walk regex floor: short-stem refs stay invisible, long-stem refs still walk", async () => {
+    const LONG = `${pageOrigin}/longname.js`;
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: `var j1 = "../b.js"; var j2 = "chunk.a.js"; var j3 = "./x.js"; var real = "./longname.js";`,
+      [LONG]: "var real=1;",
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(calls).toEqual([PAGE, A_JS, LONG]); // the junk classes never fetch
+    expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, LONG]);
+    expect(rep.warnings).toEqual([]);
+  });
+});
+
+describe("extractEdges (D1: static import edges)", () => {
+  const mk = (index: number, url: string, text: string) => ({ index, url, text });
+  const A = `${pageOrigin}/a.js`;
+
+  it("finds all four families over chunk text; specifiers stay verbatim raw strings", () => {
+    const g = extractEdges([
+      mk(
+        0,
+        A,
+        `import {x} from "react-dom";import"./poly.js";export * from "./helpers.js";var r=require("./cfg.json");e.i(870178);`,
+      ),
+    ]);
+    expect(g.edges).toEqual([
+      { from: 0, to: "react-dom", kind: "esm-import", raw: 'import {x} from "react-dom"' },
+      { from: 0, to: "./poly.js", kind: "esm-import", raw: 'import"./poly.js"' },
+      { from: 0, to: "./helpers.js", kind: "esm-reexport", raw: 'export * from "./helpers.js"' },
+      { from: 0, to: "./cfg.json", kind: "cjs-require", raw: 'require("./cfg.json"' },
+      { from: 0, to: "870178", kind: "webpack-id", raw: "e.i(870178)" },
+    ]);
+    // Nothing captured on the horizon → every edge honestly counts unresolved.
+    expect(g.unresolved).toBe(5);
+  });
+
+  it("counts an edge resolved only when its relative specifier lands on a captured chunk", () => {
+    const NA = `${pageOrigin}/_next/static/a.js`;
+    const NB = `${pageOrigin}/_next/static/chunk-b.js`;
+    const g = extractEdges([
+      mk(0, NA, `import {b} from "./chunk-b.js"; import "react"; e.i(870178);`),
+      mk(1, NB, "var b=1;"),
+    ]);
+    expect(g.edges.map((e) => [e.from, e.to, e.kind])).toEqual([
+      [0, "./chunk-b.js", "esm-import"],
+      [0, "react", "esm-import"],
+      [0, "870178", "webpack-id"],
+    ]);
+    // "react" and the webpack id can't be checked → unresolved; the relative
+    // specifier landed exactly on chunk 1 — no URL was guessed, counted vs not.
+    expect(g.unresolved).toBe(2);
+  });
+
+  it("dedupes first-wins per (chunk, kind, target); cross-chunk repeats stay separate edges", () => {
+    const text = `import x from "./once.js"; import y from "./once.js"; export * from "./once.js";`;
+    const g = extractEdges([mk(0, A, text), mk(1, `${pageOrigin}/bee.js`, text)]);
+    expect(g.edges.map((e) => [e.from, e.kind])).toEqual([
+      [0, "esm-import"],
+      [0, "esm-reexport"],
+      [1, "esm-import"],
+      [1, "esm-reexport"],
+    ]);
+    expect(g.unresolved).toBe(4); // each chunk's two unlanded targets count
+  });
+
+  it("caps at 20 unique edges per chunk and 400 total", () => {
+    const many = (base: number) => Array.from({ length: 25 }, (_, i) => `var r=require("./m${base + i}.js");`).join("");
+    const chunks = Array.from({ length: 25 }, (_, c) => mk(c, `${pageOrigin}/c${c}.js`, many(c * 100)));
+    const g = extractEdges(chunks);
+    // 20 unique/chunk × 20 chunks fill the 400 total; chunk 23+24 already drop.
+    expect(g.edges).toHaveLength(400);
+    expect(g.unresolved).toBe(400);
+    expect(g.edges.filter((e) => e.from >= 23)).toHaveLength(0);
+  });
+});
+
+describe("captureBundleForensics edges (D1: opt-in static import graph)", () => {
+  const edgeMap = () => ({
+    [PAGE]: `<html><script src="/a.js"></script><script src="/bpage.js"></script></html>`,
+    [A_JS]: `import {x} from "./bpage.js"; var r=require("react"); e.i(870178);`,
+    [`${pageOrigin}/bpage.js`]: "var bp=1;",
+  });
+
+  it("edges: true adds edges + edgeCount + unresolved over the saved raw chunks", async () => {
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(edgeMap()),
+      edges: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.edges).toEqual([
+      { from: 0, to: "./bpage.js", kind: "esm-import", raw: 'import {x} from "./bpage.js"' },
+      { from: 0, to: "react", kind: "cjs-require", raw: 'require("react"' },
+      { from: 0, to: "870178", kind: "webpack-id", raw: "e.i(870178)" },
+    ]);
+    expect(rep.edgeCount).toBe(3);
+    expect(rep.unresolved).toBe(2); // ./bpage.js landed on a captured chunk; react + id did not
+  });
+
+  it("default output is byte-identical: none of the three graph keys ever appear", async () => {
+    for (const edges of [undefined, false]) {
+      const rep = await captureBundleForensics(PAGE, {
+        fetchFn: fakeFetchMap(edgeMap()),
+        edges,
+        unpackLoader: async () => null,
+      });
+      expect("error" in rep).toBe(false);
+      if ("error" in rep) return;
+      cleanup.push(rep.outDir);
+      expect("edges" in rep).toBe(false);
+      expect("edgeCount" in rep).toBe(false);
+      expect("unresolved" in rep).toBe(false);
+    }
   });
 });
 
@@ -570,5 +707,19 @@ describe("analyze_bundle handler", () => {
     });
     await h.analyze_bundle({ url: PAGE, walkChunks: true, maxChunks: 3 });
     expect(seenOpts).toEqual({ maxChunks: 3, walkChunks: true });
+  });
+
+  it("passes edges through to bundleFn opts", async () => {
+    let seenOpts: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean } | undefined;
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(cacheDir()),
+      bundleFn: async (_url, opts) => {
+        seenOpts = opts;
+        return { error: "short-circuit" };
+      },
+    });
+    await h.analyze_bundle({ url: PAGE, edges: true, maxChunks: 2 });
+    expect(seenOpts).toEqual({ maxChunks: 2, edges: true });
   });
 });
