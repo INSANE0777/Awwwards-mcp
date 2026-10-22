@@ -342,6 +342,9 @@ const headScriptJsx = (entry: LoaderScript): string => {
 
 // Rehost layout: document head metadata + head scripts in captured order, one
 // client loader for body scripts (see SiteScripts).
+// shortcut: <html lang> and <body> attributes are not carried (hardcoded en /
+// bare body) — Next-only gap; vite/astro keep them. Wire document attrs when a
+// non-en or themed rehost shows up.
 const rehostLayout = (headLines: string[], cssImports: string[]): string =>
   `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
 import SiteScripts from "../components/SiteScripts";

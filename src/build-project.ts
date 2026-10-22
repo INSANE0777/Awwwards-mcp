@@ -333,6 +333,8 @@ const hoistCssImports = (css: string): { css: string; hoisted: string[] } => {
   return { css: [...imports, rest].filter(Boolean).join("\n"), hoisted };
 };
 
+// shortcut: <style media="…"> scoping is not carried — bodies are folded as
+// unconditional rules; keep media on stylesheet links when a site relies on it.
 export function splitStyles(html: string, classNames: string[] = autoSectionClasses(html)): SplitStyles {
   const allCss = stripCssComments(
     [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n"),
@@ -1248,6 +1250,9 @@ const headScriptTag = (entry: LoaderScript, dir: string, astro: boolean): string
 // Replays every captured head tag in source order: metadata, stylesheet links,
 // data scripts, and executable scripts at their original positions. <style>
 // blocks are skipped because their CSS is emitted through tokens/site.css.
+// shortcut: only title|meta|link|script replay — base/noscript are dropped,
+// and a link inside noscript is promoted; extend the tag set when a real site
+// depends on them.
 const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean): string => {
   const head = rehost.headHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
   const lines: string[] = [];
