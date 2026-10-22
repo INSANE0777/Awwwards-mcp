@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 const FIXTURES = join(__dirname, "fixtures", "build-project");
 const sample = () => readFileSync(join(FIXTURES, "sample.html"), "utf8");
+const sample2 = () => readFileSync(join(FIXTURES, "sample2.html"), "utf8");
+const sample3 = () => readFileSync(join(FIXTURES, "sample3.html"), "utf8");
 
 const nextByName = (html: string, name = "Neu Omni 2") => emitNext(splitBuild(html), "unused", name).files;
 const byPath = (files: Array<{ path: string; content: string }>) =>
@@ -24,6 +26,10 @@ describe("htmlToJsx: attr renames (kit ports)", () => {
 
   it("className passes through unchanged (no double conversion)", () => {
     expect(htmlToJsx('<div className="c-0">x</div>')).toBe('<div className="c-0">x</div>');
+  });
+
+  it("lowercase video attrs map to JSX names (playsinline → playsInline)", () => {
+    expect(htmlToJsx('<video playsinline muted></video>')).toBe('<video playsInline muted></video>');
   });
 });
 
@@ -82,6 +88,12 @@ describe("htmlToJsx: style attr (kit ports)", () => {
   it("strips !important suffixes from style values", () => {
     expect(htmlToJsx('<svg style="visibility: visible !important; opacity: 1 !important; transform: translate(0px, 0px)">')).toBe(
       '<svg style={{ visibility: "visible", opacity: "1", transform: "translate(0px, 0px)" }}>',
+    );
+  });
+
+  it("-ms- vendor prefix maps to lowercase ms (React types: msTransform)", () => {
+    expect(htmlToJsx('<div style="-ms-transform: none; -webkit-transform: none"></div>')).toContain(
+      'msTransform: "none", WebkitTransform: "none"',
     );
   });
 });
@@ -184,6 +196,7 @@ describe("emitNext", () => {
     expect(layout).toContain('import "./globals.css";');
     expect(layout).toContain('title: "Neu Omni 2"');
     expect(layout).toContain('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Demo+Local&display=swap" />');
+    expect(layout).not.toContain("/ />"); // M1: already self-closed links stay single-slash
   });
 
   it("page: SectionNN composition, use client when inlineJs exists, no page-level effect when all blocks attribute", () => {
@@ -244,7 +257,7 @@ describe("emitNext", () => {
     expect(s1).toContain("&#123;from&#125;");
   });
 
-  it("generic html: whole inline script ships in a plain page effect (no gsap imports, no cdns)", () => {
+  it("generic html: loose inline script ships once as raw body-end SSR HTML", () => {
     const generic = `<!doctype html>
 <html><head><style>.hero { color: red; }</style></head>
 <body>
@@ -253,11 +266,13 @@ describe("emitNext", () => {
 </body></html>`;
     const f3 = byPath(nextByName(generic));
     const page = f3["app/page.tsx"] ?? "";
-    expect(page.startsWith('"use client";')).toBe(true);
-    expect(page).toContain('import { useEffect } from "react";');
-    expect(page).not.toContain('from "gsap"');
-    expect(page).toContain('document.querySelectorAll("h1").forEach(() => {});');
-    expect(page).not.toContain("gsap.registerPlugin");
+    const layout = f3["app/layout.tsx"] ?? "";
+    expect(page).not.toContain('"use client"');
+    expect(page).not.toContain("useEffect");
+    expect(page).not.toContain("querySelectorAll");
+    expect(layout).toContain("dangerouslySetInnerHTML");
+    expect(layout).toContain("querySelectorAll(\\\"h1\\\")");
+    expect(JSON.stringify(f3).split("querySelectorAll").length - 1).toBe(1);
   });
 
   it("blocks without any gsap cdn are recorded, never wired (kit reconcile law)", () => {
@@ -294,6 +309,42 @@ gsap.timeline({ scrollTrigger: { trigger: ".c-999", start: "top 85%" } })
     expect(page).toContain("gsap.registerPlugin(ScrollTrigger);");
     expect(page).toContain(".from(\".c-999\", { opacity: 0 });");
     expect(f5["components/Section01.tsx"]).not.toContain("useEffect");
+  });
+
+  it("rehost shape: local css/js carried as public paths; section + loose scripts run once in place", () => {
+    const files = nextByName(sample2());
+    const f = byPath(files);
+    const layout = f["app/layout.tsx"] ?? "";
+    const s1 = f["components/Section01.tsx"] ?? "";
+    const page = f["app/page.tsx"] ?? "";
+    expect(layout).toContain('<link rel="stylesheet" href="/assets/site.css" />');
+    expect(layout).not.toContain("/ />"); // M1: self-closed input must not double-slash
+    expect(layout).toContain('<script src="https://cdn.example.test/lenis.min.js"></script>');
+    expect(layout).toContain('<script src="https://unpkg.com/split-type"></script>');
+    expect(layout).toContain('<script src="/assets/site.js" defer></script>');
+    expect(layout).toContain("__tailRuns");
+    expect(s1).toContain("dangerouslySetInnerHTML");
+    expect(s1).toContain("__heroRuns");
+    expect(s1).toContain(".hero > p");
+    expect(page).not.toContain("__heroRuns");
+    expect(files.map((x) => x.path)).not.toContain("components/SiteScripts.tsx");
+    expect(JSON.stringify(files).split("__heroRuns").length - 1).toBe(1);
+  });
+
+  it("root-relative rehost: public paths + strict vendor order, head bootstrap kept", () => {
+    const files = nextByName(sample3());
+    const f = byPath(files);
+    const layout = f["app/layout.tsx"] ?? "";
+    expect(layout).toContain('<link rel="stylesheet" href="/styles.css" />');
+    const [css, head, gsap, st, app] = ['href="/styles.css"', '<script src="/vendor/head.js">', '<script src="/vendor/gsap.min.js">', '<script src="/vendor/ScrollTrigger.min.js">', '<script src="/app.js">'].map((n) => layout.indexOf(n));
+    expect(css).toBeGreaterThan(-1);
+    expect(head).toBeGreaterThan(css);
+    expect(gsap).toBeGreaterThan(head);
+    expect(st).toBeGreaterThan(gsap);
+    expect(app).toBeGreaterThan(st);
+    expect(layout).toContain("prefers-reduced-motion");
+    expect(f["components/Section01.tsx"]).toContain('<div className="stage" id="stage" dangerouslySetInnerHTML');
+    expect(f["components/Section02.tsx"]).toContain('<div className="scroll-space" id="space" dangerouslySetInnerHTML');
   });
 
   it("determinism: two runs are byte-equal", () => {
