@@ -44,17 +44,24 @@ export interface SplitStyles {
 
 export type LoaderScript =
   | { kind: "external"; src: string; local: boolean; tag: string; type: string }
-  | { kind: "inline"; js: string };
+  | { kind: "inline"; js: string; type: string };
+
+export interface InlineScript {
+  js: string;
+  type: string; // "" for classic scripts
+}
 
 // Native generic shape: the document keeps its chrome, its content container's
-// id/section children become components, and all page JS moves to one ordered
+// id/section children become components, and page JS moves to one ordered
 // loader (classic scripts keep their captured order instead of becoming ESM).
+// Head inline scripts stay in <head> so pre-paint bootstraps do not wait for
+// hydration.
 export interface RehostSplit {
   shell: string; // whole document with section nodes replaced by <SectionNN /> markers
   container: string; // tag#id label of the content container (e.g. main#main)
   sections: RebuildSection[];
-  scripts: LoaderScript[];
-  warnings: string[];
+  scripts: LoaderScript[]; // ordered loader entries (head inline scripts excluded)
+  headInline: InlineScript[]; // <head> inline JS, emitted raw in place
 }
 
 export interface TimelineBlock {
@@ -87,6 +94,11 @@ export interface ExtractedScripts {
 export interface ScaffoldFile {
   path: string;
   content: string;
+}
+
+export interface EmitResult {
+  files: ScaffoldFile[];
+  warnings: string[]; // emitter-local (impure split models are never mutated)
 }
 
 export type HeadTag =
@@ -597,10 +609,13 @@ const bodyInner = (html: string): string => /<body\b[^>]*>([\s\S]*?)<\/body>/i.e
 
 // All JS in document order, including scripts that sat inside a section. The
 // rehost loader runs this exact sequence; inline bodies keep their slots.
-const collectLoaderScripts = (html: string): LoaderScript[] => {
-  const scripts: LoaderScript[] = [];
+const collectScriptEntries = (html: string): Array<LoaderScript & { head: boolean }> => {
+  const { start: hStart, end: hEnd } = headBounds(html);
+  const scripts: Array<LoaderScript & { head: boolean }> = [];
   for (const m of html.matchAll(SCRIPT_RE)) {
     const open = m[1] ?? "";
+    const at = m.index ?? 0;
+    const head = at >= hStart && at < hEnd;
     const src = attr(open, "src");
     if (src !== "") {
       scripts.push({
@@ -609,12 +624,14 @@ const collectLoaderScripts = (html: string): LoaderScript[] => {
         local: isLocalRef(src),
         tag: (m[1] ?? "") + (m[2] ?? "") + (m[3] ?? ""),
         type: attr(open, "type").toLowerCase().trim(),
+        head,
       });
       continue;
     }
-    if (!JS_TYPES.has(attr(open, "type").toLowerCase().trim())) continue;
+    const type = attr(open, "type").toLowerCase().trim();
+    if (!JS_TYPES.has(type)) continue;
     const js = (m[2] ?? "").trim();
-    if (js !== "") scripts.push({ kind: "inline", js });
+    if (js !== "") scripts.push({ kind: "inline", js, type, head });
   }
   return scripts;
 };
@@ -650,7 +667,7 @@ const mainContainer = (html: string): RehostContainer | null => {
 };
 
 const roleMainContainer = (html: string): RehostContainer | null => {
-  const open = /<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*\brole\s*=\s*["']?main\b[^>]*>/i.exec(html);
+  const open = /<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*\brole\s*=\s*(?:"main"|'main'|main)(?=[\s/>])[^>]*>/i.exec(html);
   if (!open) return null;
   const tag = (open[1] ?? "").toLowerCase();
   const gt = tagEnd(html, open.index);
@@ -717,12 +734,16 @@ export function splitRehost(html: string): RehostSplit | null {
   }
   const shell = stripShellAssets(html.slice(0, container.start) + rehosted + html.slice(container.end));
 
+  const entries = collectScriptEntries(html);
+  const headInline: InlineScript[] = entries
+    .filter((s): s is Extract<LoaderScript, { kind: "inline" }> & { head: true } => s.kind === "inline" && s.head)
+    .map((s) => ({ js: s.js, type: s.type }));
   return {
     shell,
     container: container.label,
     sections,
-    scripts: collectLoaderScripts(html),
-    warnings: [],
+    scripts: entries.filter((s) => !(s.kind === "inline" && s.head)).map(({ head: _head, ...rest }) => rest),
+    headInline,
   };
 }
 
@@ -797,7 +818,7 @@ export function splitBuild(html: string): Split {
     styles: splitStyles(html, fallback ? [] : parsedRoots.map((s) => s.className)),
     scripts,
     headTags: collectHeadTags(html),
-    warnings: [...(fallback ? [FULL_BODY_WARNING] : []), ...(rehost?.warnings ?? [])],
+    warnings: fallback ? [FULL_BODY_WARNING] : [],
     assetRefs: collectAssetRefs(html),
     rehost,
   };
@@ -847,11 +868,72 @@ const indent = (text: string, n: number): string =>
     .map((l) => (l ? " ".repeat(n) + l : l))
     .join("\n");
 
-// css ships into src/styles/, so ./assets url()s re-base (vite ../../assets,
-// astro /assets, next /assets); quoted and bare url() forms both covered.
-export const cssTo = (css: string, assetsBase: string): string => {
-  const out = css.replace(/url\(\s*(["']?)\.\/assets\//g, `url($1${assetsBase}`);
+// Resolves a css url() reference against the file's own directory so the
+// extracted stylesheet can live in src/styles/. `..` that would escape the
+// project root is left untouched (copyAssets already warns about it).
+const CSS_URL_ALL_RE = /url\(\s*(["']?)([^)"']+)\1\s*\)/g;
+
+const rebaseCssUrls = (css: string, fromDir: string, base: string): string =>
+  css.replace(CSS_URL_ALL_RE, (full: string, quote: string, ref: string) => {
+    const clean = ref.trim();
+    if (!isLocalRef(clean) || /[\s()]/.test(clean)) return full;
+    const cut = clean.search(/[?#]/);
+    const path = cut === -1 ? clean : clean.slice(0, cut);
+    const tail = cut === -1 ? "" : clean.slice(cut);
+    if (!ASSET_EXT.test(path)) return full;
+    const parts: string[] = [];
+    for (const part of `${fromDir}/${path}`.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part === "..") {
+        if (parts.length === 0) return full;
+        parts.pop();
+      } else {
+        parts.push(part);
+      }
+    }
+    const resolved = parts.join("/");
+    return resolved === "" ? full : `url(${quote}${base}${resolved}${tail}${quote})`;
+  });
+
+// css ships into src/styles/, so relative url()s re-base to the target root
+// (vite "../../", astro/next "/"); queried and bare forms are both covered.
+export const cssTo = (css: string, base: string, fromDir = ""): string => {
+  const out = rebaseCssUrls(css, fromDir, base);
   return out.endsWith("\n") ? out : out + "\n";
+};
+
+// Native rehost: local stylesheet links become inline <style> at their exact
+// source position, so tokens/site keep one order; the link is then dropped.
+// Remote stylesheets keep their link. CSS urls are rebased to the project root
+// before injection (the file's own directory is the original base).
+const inlineLocalStyles = async (html: string, srcDir: string): Promise<{ html: string; folded: string[] }> => {
+  const folded: string[] = [];
+  const parts: string[] = [];
+  let last = 0;
+  for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
+    const tag = m[0];
+    if (!/\brel\s*=\s*["']?stylesheet/i.test(tag)) continue;
+    if (/\bdisabled\b/i.test(tag)) continue;
+    const media = attr(tag, "media").trim();
+    if (media !== "" && media.toLowerCase() !== "all") continue;
+    const href = attr(tag, "href");
+    if (!isLocalRef(href)) continue;
+    const rel = href.split(/[?#]/)[0] ?? "";
+    if (rel === "") continue;
+    let css: string;
+    try {
+      css = await readFile(resolve(srcDir, rel), "utf8");
+    } catch {
+      continue; // copyAssets reports the missing file; the link stays
+    }
+    parts.push(html.slice(last, m.index));
+    parts.push(`<style data-folded="${rel}">\n${rebaseCssUrls(css, dirname(rel), "")}\n</style>`);
+    last = (m.index ?? 0) + tag.length;
+    folded.push(href);
+  }
+  if (folded.length === 0) return { html, folded };
+  parts.push(html.slice(last));
+  return { html: parts.join(""), folded };
 };
 
 const sectionsBodyHtml = (split: Split): string => (split.sections.sections ?? []).map((s) => s.text).join("\n");
@@ -912,13 +994,27 @@ const withSrc = (tag: string, src: string): string =>
 const rehostScriptUrl = (entry: Extract<LoaderScript, { kind: "external" }>, dir: string): string =>
   entry.local ? `/${dir}/${scriptFile(entry.src)}` : entry.src;
 
+const scriptTypeAttr = (type: string): string => (type === "" || type === "text/javascript" ? "" : ` type="${type}"`);
+
 const rehostLoaderTag = (entry: LoaderScript, dir: string): string =>
-  entry.kind === "inline" ? `<script>\n${entry.js}\n</script>` : withSrc(entry.tag, rehostScriptUrl(entry, dir));
+  entry.kind === "inline"
+    ? `<script${scriptTypeAttr(entry.type)}>${entry.js}</script>`
+    : withSrc(entry.tag, rehostScriptUrl(entry, dir));
 
 const astroRehostLoaderTag = (entry: LoaderScript): string =>
   entry.kind === "inline"
-    ? `<script is:inline>\n${entry.js}\n</script>`
+    ? `<script is:inline${scriptTypeAttr(entry.type)}>${entry.js}</script>`
     : astroInlineTags(withSrc(entry.tag, rehostScriptUrl(entry, "scripts")));
+
+// Pre-paint head inline scripts go back into <head> raw: they must not wait
+// for hydration, and Astro must not bundle them (is:inline).
+const headInlineTags = (scripts: InlineScript[], astro: boolean): string[] =>
+  scripts.map((s) => `<script${astro ? " is:inline" : ""}${scriptTypeAttr(s.type)}>${s.js}</script>`);
+
+const withHeadInline = (doc: string, block: string): string => {
+  if (block === "") return doc;
+  return /<\/head\s*>/i.test(doc) ? doc.replace(/<\/head\s*>/i, () => `${block}\n</head>`) : doc;
+};
 
 // One ordered block at the end of the shell (the single loader for this page).
 const withLoader = (doc: string, block: string): string => {
@@ -943,13 +1039,14 @@ const astroSection = (s: RebuildSection, i: number): { content: string; risky: b
   return { risky, content: risky ? `<Fragment set:html={${JSON.stringify(s.text)}} />` : s.text };
 };
 
-export function emitAstro(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
+export function emitAstro(split: Split, outDir: string, name: string): EmitResult {
   void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
+  const warnings: string[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
   const sections = split.sections.sections ?? [];
   const attributed = attributeBlocks(split);
-  const cssBase = "/assets/"; // astro serves public/assets at the site root
+  const cssBase = "/"; // astro serves public/ at the site root
 
   add(
     "package.json",
@@ -977,17 +1074,18 @@ export function emitAstro(split: Split, outDir: string, name: string): { files: 
     }
     rehost.sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
     const loader = rehost.scripts.map(astroRehostLoaderTag).join("\n");
+    const head = headInlineTags(rehost.headInline, true).join("\n");
     add(
       "src/pages/index.astro",
       `---
 // Generated by awwwards-build-project — native shell, real sections, one ordered loader.
 ${imports.join("\n")}
 ---
-${withLoader(rehost.shell, loader ? indent(loader, 2) : "")}`,
+${withLoader(withHeadInline(rehost.shell, head), loader)}`,
     );
     rehost.sections.forEach((s, i) => {
       const { content, risky } = astroSection(s, i);
-      if (risky) split.warnings.push(`${nn(i)}: literal braces/backticks — shipped via set:html`);
+      if (risky) warnings.push(`${nn(i)}: literal braces/backticks — shipped via set:html`);
       add(
         `src/components/${nn(i)}.astro`,
         `---
@@ -997,7 +1095,7 @@ ${content}
 `,
       );
     });
-    return { files };
+    return { files, warnings };
   }
 
   const imports: string[] = [];
@@ -1077,16 +1175,17 @@ ${content}
 ${blocks.length ? timelineScript(blocks) : ""}`,
     );
   });
-  return { files };
+  return { files, warnings };
 }
 
-export function emitVite(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
+export function emitVite(split: Split, outDir: string, name: string): EmitResult {
   void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
+  const warnings: string[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
   const sections = split.sections.sections ?? [];
   const generic = split.sections.detected === "generic";
-  const cssBase = "../../assets/"; // css lives in src/styles/; assets at the project root
+  const cssBase = "../../"; // css lives in src/styles/; assets at the project root
 
   add(
     "package.json",
@@ -1148,8 +1247,11 @@ export default {
     ]
       .filter(Boolean)
       .join("\n");
-    add("index.html", withLoader(inlineShell(rehost), loader));
-    return { files };
+    add(
+      "index.html",
+      withLoader(withHeadInline(inlineShell(rehost), headInlineTags(rehost.headInline, false).join("\n")), loader),
+    );
+    return { files, warnings };
   }
 
   // Generic rehost shape: the body already carries its own inline scripts,
@@ -1205,7 +1307,7 @@ ${bodyTags ? `${bodyTags}\n` : ""}<script type="module" src="/src/main.js"></scr
   const inline = !generic && split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : "";
   const js = imports.length || inline ? `${imports.join("\n")}\n${inline}` : "";
   add("src/main.js", js);
-  return { files };
+  return { files, warnings };
 }
 
 export interface BuildProjectResult {
@@ -1231,7 +1333,18 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     return { error: `cannot read ${src}: ${err instanceof Error ? err.message : String(err)}` };
   }
   const name = args.name ?? "rebuild-site";
-  const split = splitBuild(html);
+  // Probe first: only native rehost pages fold local stylesheets (legacy generic
+  // output keeps its link contract). Folding happens before the real split so
+  // :root extraction and site.css order see the stylesheet body in source place.
+  let split = splitBuild(html);
+  let foldedCss: string[] = [];
+  if (split.rehost) {
+    const inlined = await inlineLocalStyles(html, dirname(src));
+    if (inlined.folded.length > 0) {
+      foldedCss = inlined.folded;
+      split = splitBuild(inlined.html);
+    }
+  }
   const emitted =
     args.target === "vite"
       ? emitVite(split, args.out, name)
@@ -1246,7 +1359,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     split.rehost?.scripts.filter((s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external" && s.local) ?? [];
   const { missing } = await copyAssets(html, dirname(src), outDir, {
     ...(args.target === "vite" ? {} : { into: "public" }),
-    ...(rehostScripts.length ? { skip: rehostScripts.map((s) => s.src) } : {}),
+    ...(rehostScripts.length || foldedCss.length ? { skip: [...foldedCss, ...rehostScripts.map((s) => s.src)] } : {}),
   });
   // Rehost scripts load from one folder per target; copyAssets skipped their
   // original copies above and this is the path the single loader points at.
@@ -1280,6 +1393,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     files: emitted.files.map((f) => f.path),
     warnings: [
       ...split.warnings,
+      ...emitted.warnings,
       ...missing.map((ref) => `asset not found: ${ref}`),
       ...missingScripts.map((ref) => `asset not found: ${ref}`),
     ],

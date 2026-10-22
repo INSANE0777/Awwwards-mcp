@@ -12,8 +12,8 @@
 // that dependency behind it. Import cycle with build-project.ts is
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
-import { attributeBlocks, bodyBounds, cssTo, nn, packageName, scriptFile } from "./build-project.js";
-import type { BodyScript, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
+import { attributeBlocks, bodyBounds, cssTo, headBounds, nn, packageName, scriptFile } from "./build-project.js";
+import type { BodyScript, EmitResult, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
 
 // Dashed HTML/SVG attrs → JSX camelCase. Dashed-but-unlisted (data-*, aria-*,
 // unknown) stays as-is; class is a plain rename; style is special-cased in
@@ -104,17 +104,26 @@ const cssKeyToJsx = (k: string): string => {
 const stripImportant = (v: string): string => v.replace(/\s*!important\s*$/i, "");
 
 // style="a: 1; b: 2" → object-literal body (split ; then FIRST : — url values
-// contain colons); convertAttr wraps it in {{ }}.
-const styleToObject = (css: string): string =>
-  css
+// contain colons); convertAttr wraps it in {{ }}. Custom properties (--x) need
+// quoted keys, and their object then needs a CSSProperties cast for TSX.
+const styleToObject = (css: string): { body: string; custom: boolean } => {
+  let custom = false;
+  const body = css
     .split(";")
     .map((d) => d.trim())
     .filter(Boolean)
     .map((d) => {
       const i = d.indexOf(":");
-      return `${cssKeyToJsx(d.slice(0, i))}: ${JSON.stringify(stripImportant(d.slice(i + 1).trim()))}`;
+      const key = d.slice(0, i).trim();
+      if (key.startsWith("--")) {
+        custom = true;
+        return `${JSON.stringify(key)}: ${JSON.stringify(stripImportant(d.slice(i + 1).trim()))}`;
+      }
+      return `${cssKeyToJsx(key)}: ${JSON.stringify(stripImportant(d.slice(i + 1).trim()))}`;
     })
     .join(", ");
+  return { body, custom };
+};
 
 // One attribute: rename per table; style's value becomes an object literal;
 // className / data-* / aria-* / unknown attrs pass through unchanged.
@@ -129,7 +138,10 @@ const convertAttr = (attr: string): string => {
     // namespaced attrs (xmlns:*, xml:*) are inert in React and get dropped.
     return key === "xlink:href" ? `xlinkHref${eq}${value}` : "";
   }
-  if (key === "style") return `style={{ ${styleToObject(value.slice(1, -1))} }}`;
+  if (key === "style") {
+    const style = styleToObject(value.slice(1, -1));
+    return `style={{ ${style.body} }${style.custom ? " as React.CSSProperties" : ""}}`;
+  }
   const name = ATTR_MAP.get(key) ?? NAMESPACED.get(key) ?? m[1];
   return `${name}${eq}${value}`;
 };
@@ -173,6 +185,10 @@ export function htmlToJsx(html: string): string {
 }
 
 const j = (obj: object): string => JSON.stringify(obj, null, 2) + "\n";
+
+const REACT_STYLE_CAST = " as React.CSSProperties";
+const reactStyleImport = (jsx: string): string =>
+  jsx.includes(REACT_STYLE_CAST) ? 'import type React from "react";\n' : "";
 
 const indent = (text: string, n: number): string =>
   text
@@ -247,23 +263,67 @@ const sectionJsx = (html: string): string => {
 const layoutHeadTags = (tags: string[]): string =>
   tags.length ? `\n${tags.map((t) => indent(t, 8)).join("\n")}\n      ` : "";
 
-// Rehost layout: one client loader owns every page script (see SiteScripts).
-// Head keeps only stylesheet links; executable head tags move into the loader
-// so their captured order survives.
-const rehostLayout = (name: string, headTags: string[], cssImports: string[]): string =>
-  `import type { Metadata } from "next";
-${cssImports.map((line) => `${line}\n`).join("")}import SiteScripts from "../components/SiteScripts";
+// Head attribute read (head tags are never rewritten by htmlToJsx before this).
+const headAttr = (tag: string, name: string): string =>
+  new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find(Boolean) ?? "";
 
-export const metadata: Metadata = {
-  title: ${JSON.stringify(name)},
+const escapeHtmlText = (text: string): string =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+const jsxRawScript = (open: string, body: string): string =>
+  `${open.replace(/\s*\/?>$/, "")} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(body).replace(/</g, "\\u003c")} }} />`;
+
+const jsxInlineScriptTyped = (js: string, type: string): string =>
+  `<script${type && type !== "text/javascript" ? ` type="${type}"` : ""} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(js).replace(/</g, "\\u003c")} }} />`;
+
+// Document head carried into layout.tsx: captured title (fallback --name),
+// meta/og/favicon links, and non-JS data scripts (ld+json/importmap). Local
+// stylesheets were folded before the split; remote ones are added by the
+// caller from headTags. Executable head scripts are handled separately (inline
+// stays in head, externals go to SiteScripts).
+const rehostHeadLines = (shell: string, name: string): string[] => {
+  const { start, end } = headBounds(shell);
+  const head = end > start ? shell.slice(start, end) : "";
+  const lines: string[] = [];
+  let hasTitle = false;
+  for (const m of head.matchAll(/<title\b[^>]*>[\s\S]*?<\/title\s*>|<meta\b[^>]*>|<link\b[^>]*>|<script\b[^>]*>[\s\S]*?<\/script\s*>/gi)) {
+    const tag = m[0];
+    if (/^<title/i.test(tag)) {
+      hasTitle = true;
+      lines.push(htmlToJsx(tag));
+      continue;
+    }
+    if (/^<meta/i.test(tag)) {
+      lines.push(jsxSelfClose(tag));
+      continue;
+    }
+    if (/^<link/i.test(tag)) {
+      if (/rel\s*=\s*["']?stylesheet/i.test(tag)) continue;
+      lines.push(jsxSelfClose(rewriteLocalUrlTag(tag)));
+      continue;
+    }
+    const open = /^<script\b[^>]*>/i.exec(tag)?.[0] ?? "";
+    const type = headAttr(open, "type").toLowerCase();
+    if (JS_SCRIPT_TYPES.has(type)) continue; // inline -> headInline; external -> loader
+    const body = /^<script\b[^>]*>([\s\S]*?)<\/script\s*>$/i.exec(tag)?.[1] ?? "";
+    lines.push(jsxRawScript(open, body));
+  }
+  if (!hasTitle) lines.unshift(htmlToJsx(`<title>${escapeHtmlText(name)}</title>`));
+  return lines;
 };
+
+// Rehost layout: document head metadata + pre-paint inline scripts, one client
+// loader for body/external page scripts (see SiteScripts).
+const rehostLayout = (headLines: string[], cssImports: string[], headInline: Array<{ js: string; type: string }>): string =>
+  `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
+import SiteScripts from "../components/SiteScripts";
 
 export default function RootLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <head>${layoutHeadTags(headTags)}</head>
+      <head>${layoutHeadTags([...headLines, ...headInline.map((s) => jsxInlineScriptTyped(s.js, s.type))])}</head>
       <body>
         {children}
         <SiteScripts />
@@ -283,7 +343,8 @@ const rehostPage = (rehost: RehostSplit): string => {
   const jsx = htmlToJsx(rehostBody(rehost))
     .trim()
     .replace(/<(Section\d+)\/>/g, "<$1 />");
-  return `${imports}
+  const styleImport = reactStyleImport(jsx);
+  return `${styleImport}${styleImport ? "\n" : ""}${imports}
 
 export default function Page() {
   return (
@@ -295,13 +356,14 @@ ${indent(jsx, 6)}
 `;
 };
 
-const rehostSection = (s: RebuildSection, i: number, split: Split): string => {
+const rehostSection = (s: RebuildSection, i: number): { content: string; warning: string } => {
   const header = `// ${nn(i)} — native rehost section #${s.id || "(id-less)"}; real JSX, no slots.\n`;
-  // Mustache templates and CSS custom properties in style="" are the two
-  // bounded-converter gaps that produce invalid JSX ({{…}} text / --x keys).
-  const conversionRisk = /\{\{|\{%/.test(s.innerHtml) || /\bstyle\s*=\s*["'][^"']*--[a-z0-9_-]+\s*:/i.test(s.innerHtml);
+  // Mustache templates are the remaining bounded-converter gap: `{{…}}` is not
+  // valid JSX text. CSS custom properties now convert correctly (quoted keys +
+  // CSSProperties cast) and no longer force the opaque path.
+  const mustache = /\{\{|\{%/.test(s.innerHtml);
   let jsx: string | null = null;
-  if (!conversionRisk) {
+  if (!mustache) {
     try {
       jsx = htmlToJsx(s.text);
     } catch {
@@ -309,32 +371,37 @@ const rehostSection = (s: RebuildSection, i: number, split: Split): string => {
     }
   }
   if (jsx !== null) {
-    return `${header}export default function ${nn(i)}() {
+    const styleImport = reactStyleImport(jsx);
+    return {
+      content: `${header}${styleImport}${styleImport ? "\n" : ""}export default function ${nn(i)}() {
   return (
     ${indent(jsx.trim(), 4)}
   );
 }
-`;
+`,
+      warning: "",
+    };
   }
-  split.warnings.push(
-    `${nn(i)}: JSX conversion risk (brace/template or CSS custom properties) — shipped as opaque HTML (dangerouslySetInnerHTML)`,
-  );
   const open = htmlToJsx(s.startTag).replace(/\s*\/?>$/, "");
+  const styleImport = reactStyleImport(open);
   const html = JSON.stringify(s.innerHtml).replace(/</g, "\\u003c");
-  return `${header}export default function ${nn(i)}() {
+  return {
+    content: `${header}${styleImport}${styleImport ? "\n" : ""}export default function ${nn(i)}() {
   return (
     ${open} dangerouslySetInnerHTML={{ __html: ${html} }} />
   );
 }
-`;
+`,
+    warning: `${nn(i)}: mustache/template syntax — shipped as opaque HTML (dangerouslySetInnerHTML)`,
+  };
 };
 
 const siteScripts = (rehost: RehostSplit): string => {
   const entries = rehost.scripts
     .map((entry) =>
       entry.kind === "inline"
-        ? `  { js: ${JSON.stringify(entry.js)} },`
-        : `  { src: ${JSON.stringify(entry.local ? `/scripts/${scriptFile(entry.src)}` : entry.src)}${entry.type ? `, type: ${JSON.stringify(entry.type)}` : ""} },`,
+        ? `  { src: "", js: ${JSON.stringify(entry.js)}, type: ${JSON.stringify(entry.type)} },`
+        : `  { src: ${JSON.stringify(entry.local ? `/scripts/${scriptFile(entry.src)}` : entry.src)}, js: "", type: ${JSON.stringify(entry.type)} },`,
     )
     .join("\n");
   return `"use client";
@@ -343,47 +410,50 @@ import { useEffect } from "react";
 
 // Captured page scripts in source order. Classic scripts must run as side
 // effects from their original globals; ESM imports would change their scope.
-const SCRIPTS: Array<{ src: string; type?: string } | { js: string }> = [
+// --- site-loader:start
+const SCRIPTS = [
 ${entries}
 ];
 
-let started = false;
+function mountSiteScripts() {
+  // DOM is the source of truth: a previous mount's nodes are cleared here so a
+  // StrictMode remount or client navigation always runs the sequence once.
+  for (const el of document.querySelectorAll("script[data-site-scripts]")) el.remove();
 
-export default function SiteScripts() {
-  useEffect(() => {
-    if (started) return; // StrictMode remounts must not execute the page twice
-    started = true;
-    let cancelled = false;
-    const added: HTMLScriptElement[] = [];
-    const load = (entry: { src: string; type?: string } | { js: string }) =>
-      new Promise<void>((resolve) => {
+  let cancelled = false;
+  const added = Array.from(document.querySelectorAll("script[data-site-scripts]"));
+
+  (async () => {
+    for (const entry of SCRIPTS) {
+      if (cancelled) return;
+      await new Promise((resolve) => {
         const el = document.createElement("script");
-        if ("src" in entry) {
+        el.setAttribute("data-site-scripts", "");
+        if (entry.src !== "") {
           el.src = entry.src;
           if (entry.type) el.type = entry.type;
-          el.onload = () => resolve();
-          el.onerror = () => resolve(); // a dead CDN must not stall the rest
+          el.onload = () => resolve(undefined);
+          el.onerror = () => resolve(undefined); // a dead CDN must not stall the rest
         } else {
+          if (entry.type) el.type = entry.type;
           el.textContent = entry.js;
         }
         document.body.appendChild(el);
         added.push(el);
-        if (!("src" in entry)) resolve();
+        if (entry.src === "") resolve(undefined);
       });
+    }
+  })();
 
-    void (async () => {
-      for (const entry of SCRIPTS) {
-        if (cancelled) return;
-        await load(entry);
-      }
-    })();
+  return () => {
+    cancelled = true;
+    for (const el of added) el.remove();
+  };
+}
+// --- site-loader:end
 
-    return () => {
-      cancelled = true;
-      for (const el of added) el.remove();
-    };
-  }, []);
-
+export default function SiteScripts() {
+  useEffect(() => mountSiteScripts(), []);
   return null;
 }
 `;
@@ -421,11 +491,11 @@ export default function RootLayout({
 // css home for next); urls re-base to /assets/ because assets copy to public/.
 const globalsCss = (split: Split): string => {
   const parts: string[] = [];
-  if (split.styles.tokensCss) parts.push(cssTo(split.styles.tokensCss, "/assets/"));
-  if (split.styles.sharedCss) parts.push(cssTo(split.styles.sharedCss, "/assets/"));
+  if (split.styles.tokensCss) parts.push(cssTo(split.styles.tokensCss, "/"));
+  if (split.styles.sharedCss) parts.push(cssTo(split.styles.sharedCss, "/"));
   (split.sections.sections ?? []).forEach((s) => {
     const css = split.styles.perSection.get(s.className) ?? "";
-    if (css) parts.push(cssTo(css, "/assets/"));
+    if (css) parts.push(cssTo(css, "/"));
   });
   return parts.join("\n");
 };
@@ -494,8 +564,9 @@ const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns:
     // one opaque SSR HTML string, so parse-time scripts/styles run in place and
     // their DOM mutations cannot trip hydration.
     const open = htmlToJsx(s.startTag).replace(/\s*\/?>$/, "");
+    const styleImport = reactStyleImport(open);
     const html = JSON.stringify(s.innerHtml).replace(/</g, "\\u003c");
-    return `${header}export default function ${nn(i)}() {
+    return `${header}${styleImport}${styleImport ? "\n" : ""}export default function ${nn(i)}() {
   return (
     ${open} dangerouslySetInnerHTML={{ __html: ${html} }} />
   );
@@ -503,11 +574,12 @@ const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns:
 `;
   }
   const jsx = indentBody(sectionJsx(s.text));
+  const styleImport = reactStyleImport(jsx);
   if (blocks.length > 0 && hasCdns) {
     // kit samestack nextSection wiring: "use client" + gsap.context + revert
     return `${header}"use client";
 
-import { useEffect } from "react";
+${styleImport}import { useEffect } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
@@ -523,7 +595,7 @@ export default function ${nn(i)}() {
   if (blocks.length > 0) {
     // kit reconcile law: anims without the dep are recorded, never wired —
     // no import is emitted without its dependency behind it
-    return `${header}// ${blocks.length} captured timeline${blocks.length === 1 ? "" : "s"} — no gsap CDN tag in the source; wire manually.
+    return `${header}${styleImport}// ${blocks.length} captured timeline${blocks.length === 1 ? "" : "s"} — no gsap CDN tag in the source; wire manually.
 export default function ${nn(i)}() {
   return (
     ${jsx}
@@ -531,7 +603,7 @@ export default function ${nn(i)}() {
 }
 `;
   }
-  return `${header}export default function ${nn(i)}() {
+  return `${header}${styleImport}export default function ${nn(i)}() {
   return (
     ${jsx}
   );
@@ -539,9 +611,10 @@ export default function ${nn(i)}() {
 `;
 };
 
-export function emitNext(split: Split, outDir: string, name: string): { files: ScaffoldFile[] } {
+export function emitNext(split: Split, outDir: string, name: string): EmitResult {
   void outDir; // kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
+  const warnings: string[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
   const sections = split.sections.sections ?? [];
   const generic = split.sections.detected === "generic";
@@ -607,26 +680,30 @@ export function emitNext(split: Split, outDir: string, name: string): { files: S
   if (rehost) {
     const cssImports: string[] = [];
     if (split.styles.tokensCss) {
-      add("styles/tokens.css", cssTo(split.styles.tokensCss, "/assets/"));
+      add("styles/tokens.css", cssTo(split.styles.tokensCss, "/"));
       cssImports.push('import "../styles/tokens.css";');
     }
     if (split.styles.siteCss) {
-      add("styles/site.css", cssTo(split.styles.siteCss, "/assets/"));
+      add("styles/site.css", cssTo(split.styles.siteCss, "/"));
       cssImports.push('import "../styles/site.css";');
     }
     const styleLinks = split.headTags
       .filter((t) => t.kind === "style")
       .map((t) => jsxSelfClose(rewriteLocalUrlTag(t.tag)));
-    add("app/layout.tsx", rehostLayout(name, styleLinks, cssImports));
+    add("app/layout.tsx", rehostLayout([...rehostHeadLines(rehost.shell, name), ...styleLinks], cssImports, rehost.headInline));
     add("app/page.tsx", rehostPage(rehost));
-    rehost.sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, rehostSection(s, i, split)));
+    rehost.sections.forEach((s, i) => {
+      const section = rehostSection(s, i);
+      if (section.warning) warnings.push(section.warning);
+      add(`components/${nn(i)}.tsx`, section.content);
+    });
     add("components/SiteScripts.tsx", siteScripts(rehost));
-    return { files };
+    return { files, warnings };
   }
 
   add("app/layout.tsx", layout(name, headTags, bodyScripts));
   add("app/globals.css", globalsCss(split));
   add("app/page.tsx", page(split, attributed));
   sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, section(s, i, attributed, hasCdns, generic)));
-  return { files };
+  return { files, warnings };
 }

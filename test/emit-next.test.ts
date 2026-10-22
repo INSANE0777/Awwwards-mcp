@@ -81,6 +81,13 @@ describe("htmlToJsx: style attr (kit ports)", () => {
     ).toBe('<div className="c-2" style={{ aspectRatio: "400/300", border: "1px dashed #999", background: "#f3f3f3" }}>x</div>');
   });
 
+  it("quotes custom-property keys and casts the style object to React.CSSProperties", () => {
+    expect(htmlToJsx('<div style="--x: 9%; --y: calc(100% - 2px); color: red">x</div>')).toBe(
+      '<div style={{ "--x": "9%", "--y": "calc(100% - 2px)", color: "red" } as React.CSSProperties}>x</div>',
+    );
+    expect(htmlToJsx('<div style="color: red">x</div>')).not.toContain("as React.CSSProperties");
+  });
+
   it("uses the first colon only (url values with colons survive)", () => {
     expect(htmlToJsx('<span style="color: red"></span>')).toBe('<span style={{ color: "red" }}></span>');
   });

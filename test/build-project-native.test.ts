@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProject, emitAstro, emitVite, splitBuild, splitRehost } from "../src/build-project.js";
@@ -20,7 +20,6 @@ describe("splitRehost: content container -> ordered sections + chrome shell", ()
     expect(rehost.sections.map((s) => s.id)).toEqual(["a", "b", "c"]);
     expect(rehost.sections.map((s) => s.tag)).toEqual(["section", "section", "section"]);
     expect(rehost.sections[0]?.startTag).toContain('id="a"');
-    expect(rehost.warnings).toEqual([]);
     // chrome survives around the markers, section content does not
     expect(rehost.shell).toContain('<a class="skip-link" href="#main">');
     expect(rehost.shell).toContain('<header class="top">');
@@ -33,11 +32,13 @@ describe("splitRehost: content container -> ordered sections + chrome shell", ()
     expect(rehost.shell).not.toContain('<div class="grid">');
   });
 
-  it("collects every JS script in captured order; styles/scripts leave the shell", () => {
+  it("collects loader scripts in captured order; head inline stays in head; styles/scripts leave the shell", () => {
     const rehost = splitRehost(sample4());
     if (!rehost) throw new Error("expected rehost split");
+    expect(rehost.headInline.map((s) => s.js)).toEqual([
+      'if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("rm");',
+    ]);
     expect(rehost.scripts.map((s) => (s.kind === "inline" ? "inline" : s.src))).toEqual([
-      "inline",
       "vendor/gsap.min.js",
       "app.js",
       "inline",
@@ -72,11 +73,18 @@ describe("splitRehost: content container -> ordered sections + chrome shell", ()
   it("keeps CDN externals in captured document order", () => {
     const html = `<!doctype html><html><head><script src="https://cdn.test/gsap.min.js"></script><script>window.boot=1</script></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main><script src="app.js"></script></body></html>`;
     const split = splitRehost(html);
+    expect(split?.headInline.map((s) => s.js)).toEqual(["window.boot=1"]);
     expect(split?.scripts.map((s) => (s.kind === "inline" ? "inline" : s.src))).toEqual([
       "https://cdn.test/gsap.min.js",
-      "inline",
       "app.js",
     ]);
+  });
+
+  it("matches role=main exactly (main-navigation is not a content container)", () => {
+    const html = `<!doctype html><html><body><nav role="main-navigation"><a href="#x">x</a></nav><div role="main"><section id="a">A</section><section id="b">B</section></div></body></html>`;
+    const split = splitRehost(html);
+    expect(split?.container).toBe("div");
+    expect(split?.sections.map((s) => s.id)).toEqual(["a", "b"]);
   });
 });
 
@@ -123,26 +131,138 @@ describe("next: native rehost tree", () => {
     expect(f["components/Section02.tsx"]).toContain('<div className="grid"><p>Beta</p></div>');
   });
 
-  it("one SiteScripts loader appends scripts in captured order (bootstrap, gsap, app, inline tail)", () => {
+  it("layout carries document head: title, description, og, favicon, ld+json", () => {
+    const layout = f["app/layout.tsx"] ?? "";
+    expect(layout).toContain("<title>Native Structure</title>");
+    expect(layout).toContain('<meta name="description" content="Native shell fixture" />');
+    expect(layout).toContain('<meta property="og:title" content="Native Structure" />');
+    expect(layout).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />');
+    expect(layout).toContain('<script type="application/ld+json" dangerouslySetInnerHTML={{ __html:');
+    expect(layout).toContain("@type");
+  });
+
+  it("one SiteScripts loader appends body scripts in captured order; head boot stays in head", () => {
     const loader = f["components/SiteScripts.tsx"] ?? "";
     expect(loader.startsWith('"use client";')).toBe(true);
     expect(loader).toContain("useEffect");
     expect(loader).toContain("return () => {");
     expect(loader).toContain("el.remove()");
-    const [boot, gsap, app, tail] = order(loader, [
-      "prefers-reduced-motion",
+    expect(loader).toContain('document.querySelectorAll("script[data-site-scripts]")');
+    expect(loader).not.toContain("prefers-reduced-motion");
+    const [gsap, app, tail] = order(loader, [
       "/scripts/vendor/gsap.min.js",
       "/scripts/app.js",
       "__order",
     ]);
-    expect(boot).toBeGreaterThan(-1);
-    expect(gsap).toBeGreaterThan(boot);
+    expect(gsap).toBeGreaterThan(-1);
     expect(app).toBeGreaterThan(gsap);
     expect(tail).toBeGreaterThan(app);
-    // no script tags sprayed anywhere else
-    expect(JSON.stringify(f).split("<script").length - 1).toBe(0);
-    expect(f["app/layout.tsx"]).toContain("<SiteScripts />");
-    expect(f["app/layout.tsx"]).not.toContain("prefers-reduced-motion");
+    const layout = f["app/layout.tsx"] ?? "";
+    expect(layout).toContain("prefers-reduced-motion");
+    expect(layout.indexOf("prefers-reduced-motion")).toBeLessThan(layout.indexOf("</head>"));
+    expect(layout).toContain("<SiteScripts />");
+  });
+
+  it("StrictMode remount + navigation re-run: DOM-driven loader, no module guard, module type kept", async () => {
+    const loader = f["components/SiteScripts.tsx"] ?? "";
+    expect(loader).not.toContain("let started");
+    const block = loader.slice(loader.indexOf("// --- site-loader:start"), loader.indexOf("// --- site-loader:end"));
+    const mount = new Function("document", `${block}\nreturn mountSiteScripts();`) as (doc: unknown) => () => void;
+
+    type FakeScript = {
+      src: string;
+      type: string;
+      textContent: string;
+      onload?: () => void;
+      onerror?: () => void;
+      attrs: Record<string, string>;
+      removed: boolean;
+      loaded?: boolean;
+      setAttribute: (k: string, v: string) => void;
+      remove: () => void;
+    };
+    const fakeDocument = () => {
+      const scripts: FakeScript[] = [];
+      const document = {
+        body: {
+          appendChild: (el: FakeScript) => {
+            scripts.push(el);
+          },
+        },
+        createElement: () => {
+          const el = {
+            src: "",
+            type: "",
+            textContent: "",
+            attrs: {} as Record<string, string>,
+            removed: false,
+            setAttribute(k: string, v: string) {
+              el.attrs[k] = v;
+            },
+            remove() {
+              el.removed = true;
+              const i = scripts.indexOf(el);
+              if (i >= 0) scripts.splice(i, 1);
+            },
+          };
+          return el;
+        },
+        querySelectorAll: () => scripts,
+      };
+      return { document, scripts };
+    };
+    const drive = async (doc: ReturnType<typeof fakeDocument>, total: number) => {
+      for (let i = 0; i < 200 && doc.scripts.length < total; i++) {
+        const last = doc.scripts[doc.scripts.length - 1];
+        if (last && last.onload && !last.loaded) {
+          last.loaded = true;
+          last.onload();
+        }
+        await Promise.resolve();
+      }
+    };
+    const orderOf = (scripts: FakeScript[]) => scripts.map((s) => s.src || s.textContent);
+
+    const doc = fakeDocument();
+    const cleanup = mount(doc.document);
+    expect(doc.scripts).toHaveLength(1);
+    await drive(doc, 3);
+    expect(orderOf(doc.scripts)).toEqual([
+      "/scripts/vendor/gsap.min.js",
+      "/scripts/app.js",
+      'window.__order = (window.__order || []).concat("nativeTail");',
+    ]);
+    // sequential: exactly one pending external until its onload fires
+    expect(doc.scripts.every((s) => s.attrs["data-site-scripts"] === "")).toBe(true);
+
+    cleanup();
+    expect(doc.scripts).toEqual([]);
+    // StrictMode simulated unmount -> remount: DOM cleared, full sequence re-runs
+    const cleanup2 = mount(doc.document);
+    await drive(doc, 3);
+    expect(orderOf(doc.scripts)).toEqual([
+      "/scripts/vendor/gsap.min.js",
+      "/scripts/app.js",
+      'window.__order = (window.__order || []).concat("nativeTail");',
+    ]);
+    cleanup2();
+    expect(doc.scripts).toEqual([]);
+
+    const moduleHtml = `<!doctype html><html><body><main id="main"><section id="a">A</section><section id="b">B</section></main><script type="module">window.__m = 1;</script></body></html>`;
+    const moduleLoader = byPath(emitNext(splitBuild(moduleHtml), "unused", "x").files)["components/SiteScripts.tsx"] ?? "";
+    expect(moduleLoader).toContain('type: "module"');
+    const moduleBlock = moduleLoader.slice(
+      moduleLoader.indexOf("// --- site-loader:start"),
+      moduleLoader.indexOf("// --- site-loader:end"),
+    );
+    const moduleMount = new Function("document", `${moduleBlock}\nreturn mountSiteScripts();`) as (
+      doc: unknown,
+    ) => () => void;
+    const moduleDoc = fakeDocument();
+    const moduleCleanup = moduleMount(moduleDoc.document);
+    await drive(moduleDoc, 1);
+    expect(moduleDoc.scripts[0]?.type).toBe("module");
+    moduleCleanup();
   });
 
   it("tokens.css + site.css imported once from the layout; ordered css kept", () => {
@@ -174,8 +294,10 @@ describe("astro: native rehost tree", () => {
     expect(section).not.toContain("<script");
   });
 
-  it("one ordered is:inline loader sequence, no script tags in section components", () => {
+  it("one ordered is:inline loader sequence; head boot stays in head; no script tags in sections", () => {
     const page = f["src/pages/index.astro"] ?? "";
+    expect(page).toMatch(/<script is:inline[^>]*>if \(matchMedia/);
+    expect(page.indexOf("prefers-reduced-motion")).toBeLessThan(page.indexOf("</head>"));
     const [boot, gsap, app, tail] = order(page, [
       "prefers-reduced-motion",
       'is:inline src="/scripts/vendor/gsap.min.js"',
@@ -186,6 +308,9 @@ describe("astro: native rehost tree", () => {
     expect(gsap).toBeGreaterThan(boot);
     expect(app).toBeGreaterThan(gsap);
     expect(tail).toBeGreaterThan(app);
+    expect(page.slice(page.indexOf("</head>"))).not.toContain("prefers-reduced-motion");
+    // inline body JS stays byte-exact: no indentation injected into the script
+    expect(page).toContain('<script is:inline>window.__order = (window.__order || []).concat("nativeTail");</script>');
     for (let i = 1; i <= 3; i++) {
       const s = f[`src/components/Section${String(i).padStart(2, "0")}.astro`] ?? "";
       expect(s).not.toContain("<script");
@@ -230,11 +355,65 @@ describe("vite: native rehost tree", () => {
     expect(app).toBeGreaterThan(gsap);
     expect(tail).toBeGreaterThan(app);
     expect(main).toBeGreaterThan(tail);
+    expect(index.indexOf("prefers-reduced-motion")).toBeLessThan(index.indexOf("</head>"));
     const js = f["src/main.js"] ?? "";
     expect(js).toContain('import "./styles/tokens.css";');
     expect(js).toContain('import "./styles/site.css";');
     expect(js).not.toContain("__order");
     expect(f["src/styles/site.css"]).not.toContain(":root");
+  });
+});
+
+describe("buildProject: local stylesheet folding + css url rebasing", () => {
+  it("folds local links in source order, extracts :root, drops the link, rebases urls", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-cssfold-"));
+    try {
+      mkdirSync(join(dir, "images"));
+      writeFileSync(join(dir, "images", "one.png"), "one");
+      writeFileSync(join(dir, "images", "inline.png"), "inline");
+      writeFileSync(
+        join(dir, "a.css"),
+        ':root { --a: 1px; }\nbody { margin: 0; }\n.a { background: url(images/one.png); }\n',
+      );
+      writeFileSync(join(dir, "b.css"), ".b { color: red; }\n");
+      writeFileSync(
+        join(dir, "index.html"),
+        `<!doctype html><html><head>
+<link rel="stylesheet" href="a.css">
+<link rel="stylesheet" href="b.css">
+<link rel="stylesheet" href="https://cdn.test/remote.css">
+<style>.c { background: url(images/inline.png); }</style>
+</head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`,
+      );
+      for (const target of ["next", "vite"] as const) {
+        const out = join(dir, target);
+        const res = await buildProject({ html: join(dir, "index.html"), target, out });
+        if ("error" in res) throw new Error(res.error);
+        expect(res.warnings).toEqual([]);
+        const stylesRoot = target === "next" ? join(out, "styles") : join(out, "src", "styles");
+        const tokens = readFileSync(join(stylesRoot, "tokens.css"), "utf8");
+        const site = readFileSync(join(stylesRoot, "site.css"), "utf8");
+        expect(tokens).toContain("--a: 1px;");
+        expect(site).toContain("body { margin: 0; }");
+        expect(site.indexOf("body { margin: 0; }")).toBeLessThan(site.indexOf(".b { color: red; }"));
+        const prefix = target === "next" ? "/" : "../../";
+        expect(site).toContain(`url(${prefix}images/one.png)`);
+        expect(site).toContain(`url(${prefix}images/inline.png)`);
+        const head = target === "next"
+          ? readFileSync(join(out, "app", "layout.tsx"), "utf8")
+          : readFileSync(join(out, "index.html"), "utf8");
+        expect(head).toContain("https://cdn.test/remote.css");
+        expect(head).not.toContain('href="/a.css"');
+        expect(head).not.toContain('href="a.css"');
+        const publicRoot = target === "next" ? join(out, "public") : out;
+        expect(existsSync(join(publicRoot, "images", "one.png"))).toBe(true);
+        expect(existsSync(join(publicRoot, "images", "inline.png"))).toBe(true);
+        expect(existsSync(join(publicRoot, "a.css"))).toBe(false);
+        expect(existsSync(join(publicRoot, "b.css"))).toBe(false);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -269,22 +448,44 @@ describe("JSX fallback: template braces keep a raw path + warning", () => {
       <section id="b"><p>plain</p></section>
     </main></body></html>`;
     const split = splitBuild(html);
-    const f = byPath(emitNext(split, "unused", "x").files);
+    const emitted = emitNext(split, "unused", "x");
+    const f = byPath(emitted.files);
     const risky = f["components/Section01.tsx"] ?? "";
     expect(risky).toContain("dangerouslySetInnerHTML");
     expect(f["components/Section02.tsx"]).not.toContain("dangerouslySetInnerHTML");
-    expect(split.warnings.some((w) => w.includes("brace"))).toBe(true);
+    expect(emitted.warnings.some((w) => w.includes("mustache"))).toBe(true);
+    // emitters are pure: the split model is never mutated
+    expect(split.warnings).toEqual([]);
   });
 
-  it("CSS custom properties in style attrs take the raw path too (invalid JSX keys otherwise)", () => {
+  it("CSS custom properties convert to quoted keys + React.CSSProperties cast, no raw fallback", () => {
     const html = `<!doctype html><html><body><main id="main">
       <section id="a"><div style="--x: 9%; --y: 21%; color: red">A</div></section>
       <section id="b"><p>plain</p></section>
     </main></body></html>`;
     const split = splitBuild(html);
-    const f = byPath(emitNext(split, "unused", "x").files);
-    expect(f["components/Section01.tsx"]).toContain("dangerouslySetInnerHTML");
+    const emitted = emitNext(split, "unused", "x");
+    const f = byPath(emitted.files);
+    const s1 = f["components/Section01.tsx"] ?? "";
+    expect(s1).not.toContain("dangerouslySetInnerHTML");
+    expect(s1).toContain('style={{ "--x": "9%", "--y": "21%", color: "red" } as React.CSSProperties}');
+    expect(s1.startsWith('// Section01')).toBe(true);
+    expect(s1).toContain('import type React from "react";');
     expect(f["components/Section02.tsx"]).not.toContain("dangerouslySetInnerHTML");
-    expect(split.warnings.some((w) => w.includes("custom"))).toBe(true);
+    expect(emitted.warnings).toEqual([]);
+  });
+
+  it("custom properties on a section ROOT and on page shell chrome also cast cleanly", () => {
+    const html = `<!doctype html><html><body><header style="--brand: 2px"><b>Chrome</b></header><main id="main">
+      <section id="a" style="--x: 9%"><p>A</p></section>
+      <section id="b"><p>B</p></section>
+    </main></body></html>`;
+    const split = splitBuild(html);
+    const f = byPath(emitNext(split, "unused", "x").files);
+    expect(f["components/Section01.tsx"]).toContain('as React.CSSProperties');
+    expect(f["components/Section01.tsx"]).toContain('import type React from "react";');
+    expect(f["app/page.tsx"]).toContain('"--brand": "2px"');
+    expect(f["app/page.tsx"]).toContain('as React.CSSProperties');
+    expect(f["app/page.tsx"]).toContain('import type React from "react";');
   });
 });
