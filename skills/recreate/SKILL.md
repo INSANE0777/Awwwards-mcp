@@ -7,11 +7,16 @@ description: Recreate a website from a link — evidence-driven reconstruction w
 
 Input: one URL (`$ARGUMENTS`). Follow the phases in order; do not skip the evidence steps.
 
-## Phase 0 — Rules of engagement (ask once, up front)
+## Phase 0 — Study-build terms (mandatory, every run)
 
-1. **Ownership.** Ask: "Do you own this site or have the owner's authorization to rebuild it?" If **yes** → exact content/assets allowed (assets list them as reference; replace list optional). If **no** → build a **pattern-faithful** recreation: identical layout/motion/typography structure, but **no copied text, images, fonts or audio** — slots/placeholders and original content instead. Never silently ship a stranger's copyrighted assets.
-2. **Scope.** Whole page or specific sections? Full page = one continuous unit when the reference is a scroll-narrative (fixed stage + long spacer) — do not force per-section pages onto it.
-3. **Target.** Plain single-file build (default), or emit a project with `build_project --target vite|astro|next`.
+This is a **local study build**: recreate the reference exactly — layout, text, images, fonts, audio, motion. In exchange, every output MUST ship the disclaimer:
+
+1. **README.md in the build** must state, prominently: the design, copy, images, fonts and audio belong to the original owners; this build is a private study/reference recreation; **it must not be deployed, published, sold, or presented as your own work**; publishing requires replacing every borrowed asset (list them) and obtaining licenses.
+2. **Header comment in the HTML** repeats the same notice in one line.
+3. **Provenance list**: every borrowed asset path + source URL enumerated in the README.
+4. If the user later wants to publish, that is a separate brief: replace assets → publish. Never quietly drop the disclaimer.
+
+Scope: whole page or specific sections? A continuous scroll-narrative (fixed stage + long spacer) is one unit — do not force per-section pages onto it. Target: plain single-file build (default) or `build_project --target vite|astro|next`.
 
 ## Phase 1 — Evidence (free MCP, all read-only)
 
@@ -28,7 +33,7 @@ Input: one URL (`$ARGUMENTS`). Follow the phases in order; do not skip the evide
 - One HTML file + CSS + JS matching the reference's own approach: vanilla for static sites; GSAP + ScrollTrigger + Lenis when the DNA shows them.
 - Wire motion from the **measured** values: census durations/easings/triggers, `gsapTriggers` pixel start/end, keyframe from/to values, scrub curves. Do not invent easings the census didn't show.
 - Continuous-scroll narratives: fixed viewport-size stage + long invisible spacer + one scrubbed master timeline; layer switching and `--bg` custom property tweens; reduced-motion mode collapses to a calm stacked document (always ship it).
-- Structure: semantic ids per section (`#hero`, `#work`), local `vendor/` for libs (strict load order: gsap → ScrollTrigger → lenis → app.js), local `assets/` for fonts/audio/covers (owned case) or neutral placeholders (non-owned case).
+- Structure: semantic ids per section (`#hero`, `#work`), local `vendor/` for libs (strict load order: gsap → ScrollTrigger → lenis → app.js), local `assets/` for fonts/audio/covers/images — **exact assets, copied in**.
 - All links `target="_blank" rel="noopener"`, metadata + OG + JSON-LD updated.
 
 ## Phase 3 — QA gate (do not declare done without it)
@@ -44,7 +49,7 @@ Input: one URL (`$ARGUMENTS`). Follow the phases in order; do not skip the evide
 
 ## Phase 5 — Handoff
 
-README with run instructions, asset provenance, and a **replace-before-publish** list (fonts/licenses, borrowed illustrations, covers, audio). Report: reference URL, evidence tools used, section map, QA matrix results, residual gaps.
+README with run instructions, the **mandatory study-build disclaimer** (copyright belongs to the original owners; no deploy/publish/production use; not presented as your own), full provenance list of borrowed assets, and the replace-before-publish plan if the user later wants to ship. Report: reference URL, evidence tools used, section map, QA matrix results, residual gaps.
 
 ## Known limits (say them out loud)
 
