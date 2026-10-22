@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -60,6 +60,7 @@ describe("captureLiveSite", () => {
           screenshot: async ({ path }: { path: string }) => {
             const fs = await import("node:fs/promises");
             await fs.writeFile(path, Buffer.from("png-bytes"));
+            return Buffer.from("png-bytes");
           },
         }),
         close: async () => {},
@@ -89,6 +90,7 @@ describe("captureLiveSite", () => {
           calls.push("shot");
           const fs = await import("node:fs/promises");
           await fs.writeFile(path, Buffer.from("png-bytes"));
+          return Buffer.from("png-bytes");
         },
       }),
       close: async () => {},
@@ -140,6 +142,7 @@ describe("captureLiveSite", () => {
           screenshot: async ({ path }: { path: string }) => {
             const fs = await import("node:fs/promises");
             await fs.writeFile(path, Buffer.from("png-bytes"));
+            return Buffer.from("png-bytes");
           },
         };
       },
@@ -179,5 +182,26 @@ describe("captureLiveSite", () => {
     // Exact equality: the desktop default must inject no mobile flags and no
     // extra fields into newPage.
     expect(captured[0]).toEqual({ viewport: { width: 1440, height: 900 } });
+  });
+
+  it("desktop and mobile captures of the same URL keep distinct files (issue #23)", async () => {
+    const dir = tmpDir();
+    const desktop = await captureLiveSite(
+      "https://x.test/same",
+      dir,
+      async () => ({ chromium: optionCapturingFake([]) }),
+    );
+    const mobile = await captureLiveSite(
+      "https://x.test/same",
+      dir,
+      async () => ({ chromium: optionCapturingFake([]) }),
+      { viewport: "mobile" },
+    );
+    expect("file" in desktop && "file" in mobile).toBe(true);
+    if (!("file" in desktop && "file" in mobile)) return;
+    expect(desktop.file).not.toBe(mobile.file);
+    expect(desktop.file.endsWith("-desktop.png")).toBe(true);
+    expect(mobile.file.endsWith("-mobile.png")).toBe(true);
+    expect(existsSync(desktop.file) && existsSync(mobile.file)).toBe(true);
   });
 });

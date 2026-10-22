@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 // preScroll lives in structure.ts so there is ONE scroll-through loop for
 // both tools; this is an intentional circular import (structure.ts imports
@@ -48,12 +47,16 @@ export async function captureLiveSite(
     // settle window; networkidle already means the network went quiet.
     if (waitStrategy === "load") await page.waitForTimeout(3000);
     await preScroll(page);
+    // Viewport goes into the name: the same URL captured at desktop and mobile
+    // must keep both files (issue #23). Return the buffer playwright already
+    // gave us — re-reading the file races a concurrent capture of the same URL.
+    const vp = opts?.viewport ?? "desktop";
     const file = join(
       imagesDir,
-      "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + ".png",
+      "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + "-" + vp + ".png",
     );
-    await page.screenshot({ path: file, fullPage: true });
-    return { file, base64: (await readFile(file)).toString("base64") };
+    const buf = (await page.screenshot({ path: file, fullPage: true })) as Buffer;
+    return { file, base64: buf.toString("base64") };
   } finally {
     try {
       await browser.close();

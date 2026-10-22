@@ -137,7 +137,7 @@ describe("recordSiteMotion", () => {
     expect("error" in res).toBe(false);
     if ("error" in res) return;
     const hash = hashOf(URL_UNDER_TEST);
-    expect(res.file).toBe(join(dir, `motion-${hash}.webm`));
+    expect(res.file).toBe(join(dir, `motion-${hash}-desktop.webm`));
     expect(res.frames).toBe(16); // default grid
     expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
     // The flushed webm was renamed into place; the per-call tmp dir is gone.
@@ -151,11 +151,11 @@ describe("recordSiteMotion", () => {
       {
         bin: "ffmpeg-stub-bin",
         video: res.file,
-        strip: join(dir, `motion-${hash}-strip.jpg`),
+        strip: join(dir, `motion-${hash}-desktop-strip.jpg`),
         frames: 16,
       },
     ]);
-    expect(existsSync(join(dir, `motion-${hash}-strip.jpg`))).toBe(true);
+    expect(existsSync(join(dir, `motion-${hash}-desktop-strip.jpg`))).toBe(true);
     // The recordVideo context points at a per-call tmp dir (mkdtemp under
     // cacheImagesDir, NOT a shared fixed dir) with the capture viewport.
     expect(recordVideoDir.startsWith(join(dir, ".video-tmp-"))).toBe(true);
@@ -199,7 +199,7 @@ describe("recordSiteMotion", () => {
     expect("error" in res).toBe(false);
     if ("error" in res) return;
     // Old success fields unchanged (timeline is additive).
-    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}-desktop.webm`));
     expect(res.frames).toBe(16);
     expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
 
@@ -252,7 +252,7 @@ describe("recordSiteMotion", () => {
     expect("error" in res).toBe(false);
     if ("error" in res) return;
     expect(res.timeline).toBeUndefined();
-    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}-desktop.webm`));
   });
 
   it("emits a Motion Evidence Sheet after strip success: sheetFn called once with (video, {url, timeline, totalHeight})", async () => {
@@ -299,9 +299,9 @@ describe("recordSiteMotion", () => {
     expect(sheetCalls[0].ctx.timeline).toBe(res.timeline);
     expect(sheetCalls[0].ctx.totalHeight).toBe(1200); // fake page height
     expect(sheetCalls[0].ctx.viewport).toEqual({ width: 1440, height: 900 }); // threaded from page.viewportSize()
-    expect(sheetCalls[0].opts).toEqual({ outDir: dir }); // same dir as the video
+    expect(sheetCalls[0].opts).toEqual({ outDir: join(dir, `motion-${hashOf(URL_UNDER_TEST)}-desktop`) }); // per-recording sheet dir
     // Old success fields intact.
-    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}-desktop.webm`));
     expect(res.frames).toBe(16);
     expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
   });
@@ -331,7 +331,7 @@ describe("recordSiteMotion", () => {
     expect(res.sheet).toBeNull();
     expect(res.sheetError).toBe("ffmpeg blew up");
     // Old fields intact.
-    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}.webm`));
+    expect(res.file).toBe(join(dir, `motion-${hashOf(URL_UNDER_TEST)}-desktop.webm`));
     expect(res.frames).toBe(16);
     expect(res.base64).toBe(Buffer.from("strip-jpeg").toString("base64"));
     expect(res.timeline).toBeDefined();
@@ -574,6 +574,40 @@ describe("recordSiteMotion", () => {
     // 390x844 viewport onto a matching 390x844 canvas (no pillarboxing).
     expect(contextOpts[0].recordVideo).toMatchObject({ size: { width: 390, height: 844 } });
     expect(typeof contextOpts[0].recordVideo.dir).toBe("string");
+  });
+
+  it("desktop and mobile recordings of the same URL keep distinct artifacts (issue #23)", async () => {
+    const dir = tmpDir();
+    const hash = hashOf(URL_UNDER_TEST);
+    const ffmpegFn = async (_bin: string, _video: string, strip: string) => {
+      const fs = await import("node:fs/promises");
+      await fs.writeFile(strip, Buffer.from("strip-jpeg"));
+    };
+    const loaderFor = (tag: string) => async () => ({
+      chromium: fakeChromium([], { down: 0, up: 0 }, [], (recDir: string) => {
+        writeFileSync(join(recDir, "recording.webm"), `fake-webm-${tag}`);
+      }),
+    });
+    const desktop = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: loaderFor("d"),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn,
+    });
+    const mobile = await recordSiteMotion(URL_UNDER_TEST, {
+      cacheImagesDir: dir,
+      loader: loaderFor("m"),
+      ffmpegPath: "ffmpeg-stub-bin",
+      ffmpegFn,
+      viewport: "mobile",
+    });
+    expect("file" in desktop && "file" in mobile).toBe(true);
+    if (!("file" in desktop && "file" in mobile)) return;
+    expect(desktop.file).toBe(join(dir, `motion-${hash}-desktop.webm`));
+    expect(mobile.file).toBe(join(dir, `motion-${hash}-mobile.webm`));
+    expect(existsSync(desktop.file) && existsSync(mobile.file)).toBe(true);
+    expect(existsSync(join(dir, `motion-${hash}-desktop-strip.jpg`))).toBe(true);
+    expect(existsSync(join(dir, `motion-${hash}-mobile-strip.jpg`))).toBe(true);
   });
 
   it("defaults to the desktop viewport, preserving the existing context fields (no mobile flags)", async () => {

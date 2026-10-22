@@ -221,9 +221,12 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
   }
 
   const frames = opts.frames ?? 16;
+  // Viewport in the names: desktop and mobile recordings of one URL must keep
+  // both artifacts (issue #23).
+  const vp = opts.viewport ?? "desktop";
   const hash = createHash("sha1").update(url).digest("hex").slice(0, 10);
-  const videoPath = join(opts.cacheImagesDir, `motion-${hash}.webm`);
-  const stripPath = join(opts.cacheImagesDir, `motion-${hash}-strip.jpg`);
+  const videoPath = join(opts.cacheImagesDir, `motion-${hash}-${vp}.webm`);
+  const stripPath = join(opts.cacheImagesDir, `motion-${hash}-${vp}-strip.jpg`);
   // Per-call tmp isolation: each run records into its own mkdtemp dir, so a
   // stale partial video from a crashed run (e.g. goto timeout → context.close()
   // still flushes a partial .webm) or a concurrent run's video can never be
@@ -526,7 +529,11 @@ export async function recordSiteMotion(url: string, opts: MotionOpts): Promise<M
     // inside the degrade try so a module-load failure degrades like any other
     // sheet failure instead of escaping as an unhandled rejection.
     sheetFn ??= (await import("./motion-sheet.js")).buildMotionSheet;
-    const result = await sheetFn(videoPath, { url, timeline, totalHeight, viewport }, { outDir: opts.cacheImagesDir });
+    // Per-recording sheet dir: the sheet's filenames are flat (sheet-kf-*.jpg,
+    // sheet.html, motion-sheet.md), so a shared dir let recordings of different
+    // URLs overwrite each other (issue #23).
+    const sheetDir = join(opts.cacheImagesDir, `motion-${hash}-${vp}`);
+    const result = await sheetFn(videoPath, { url, timeline, totalHeight, viewport }, { outDir: sheetDir });
     return { ...base, sheet: { htmlPath: result.htmlPath, mdPath: result.mdPath, keyframes: result.keyframes, masks: result.masks } };
   } catch (err) {
     // Degrade, never fail: the recording + filmstrip are already good.
