@@ -9,12 +9,15 @@ sourced from the web's best award-winning websites.
 <a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif?v=2" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="480"></a>
 
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
-e-commerce"), sees **real screenshots inline**, and can pull the **design DNA**
-of any site: color palette, tech stack, design elements, award history. Beyond
-inspiration it's a full evidence loop: band-map any page, census its scroll and
-hover motion, fingerprint its framework, capture canvas/pose grids, then
-**verify your build against the reference** (band + motion scoring) and generate
-GSAP timeline stubs from the captured motion.
+e-commerce"), sees **real screenshots inline**, and pulls the **design DNA** of any
+site: color palette, tech stack, design elements, award history. Then it goes past
+inspiration: point it at **any link** and it band-maps the page, censuses scroll and
+hover motion (keyframes, measured scrub curves), fingerprints the framework, captures
+canvas pose grids, and reads the site's bundles when a mechanism is unclear. From that
+evidence it **recreates the page section by section**, then converts the build into a
+runnable **Vite, Astro or Next.js project** with a measured motion manifest and
+per-section hooks. Close the loop with **`verify_build`** (band + motion scoring,
+measured perf) and generate GSAP timelines from the captured motion.
 
 And it's not just Awwwards websites — every capture, census, and verification
 tool **runs on any URL**. Just give it any site link and tell it to recreate:
