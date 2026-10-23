@@ -160,6 +160,26 @@ describe("motion.manifest.json", () => {
     });
   });
 
+  it("attributes structural section:nth-of-type paths, never out-of-range ones", () => {
+    const html = `<!doctype html><html><body><main id="main">
+      <section id="a"><h2 class="title">A</h2></section>
+      <section id="b"><h2>B</h2></section>
+    </main></body></html>`;
+    const parsed = normalizeScrollCensus({
+      anims: [
+        { selector: "main>section:nth-of-type(2)>h2", durationMs: 10, easing: "linear", scrub: false, pin: false },
+        { selector: "section:nth-of-type(1)>h2", durationMs: 20, easing: "linear", scrub: false, pin: false },
+        { selector: "main>section:nth-of-type(3)>h2", durationMs: 30, easing: "linear", scrub: false, pin: false },
+      ],
+      gsapTriggers: [],
+    });
+    if ("error" in parsed) throw new Error(parsed.error);
+    const manifest = buildMotionManifest(splitBuild(html), parsed.census);
+    expect(manifest.sections[0].triggers.map((t) => t.selector)).toEqual(["section:nth-of-type(1)>h2"]);
+    expect(manifest.sections[1].triggers.map((t) => t.selector)).toEqual(["main>section:nth-of-type(2)>h2"]);
+    expect(manifest.unattributed?.map((t) => t.selector)).toEqual(["main>section:nth-of-type(3)>h2"]);
+  });
+
   it("attributes an unowned measured selector to no section (never guesses)", () => {
     const parsed = normalizeScrollCensus({
       anims: [{ selector: ".unknown", durationMs: 10, easing: "linear", scrub: false, pin: false }],

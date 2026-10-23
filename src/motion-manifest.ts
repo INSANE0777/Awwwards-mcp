@@ -275,6 +275,16 @@ const selectorTokens = (selector: string): string[] => {
   return out;
 };
 
+// analyze_scroll_map often emits structural paths (`main>section:nth-of-type(2)>h2`)
+// with no id/class tokens. The outermost section index is real ownership evidence,
+// not a guess; out-of-range and nested-only paths stay unattributed.
+const STRUCTURAL_SECTION = /(?:^|[>\s])section:nth-of-type\(\s*(\d+)\s*\)/i;
+
+const structuralOwner = (selector: string, sectionCount: number): number => {
+  const n = Number(STRUCTURAL_SECTION.exec(selector)?.[1]);
+  return Number.isInteger(n) && n >= 1 && n <= sectionCount ? n - 1 : -1;
+};
+
 const sectionId = (section: RebuildSection, i: number): string =>
   section.id || section.className || `section-${i + 1}`;
 
@@ -314,7 +324,7 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
 
   const owner = (selector: string): number => {
     const tokens = selectorTokens(selector);
-    if (tokens.length === 0) return -1;
+    if (tokens.length === 0) return structuralOwner(selector, scans.length);
     let best = 0;
     let hit = -1;
     for (let i = 0; i < scans.length; i++) {
