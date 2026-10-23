@@ -79,6 +79,11 @@ export class RateLimiter {
   }
 }
 
+// One 1 req/s budget for every awwwards.com request in the MCP server process
+// (HTML listings + the official annual API). Opted into by cli.ts; tests and
+// one-shot scripts keep constructing their own limiters.
+export const SHARED_RATE_LIMITER = new RateLimiter(1000);
+
 export class AwwwardsClient {
   private rateLimiter: RateLimiter;
   private fetchFn: typeof fetch;

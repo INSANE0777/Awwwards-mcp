@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { AwwwardsClient } from "./awwwards.js";
+import { AwwwardsClient, SHARED_RATE_LIMITER } from "./awwwards.js";
 import { Cache } from "./cache.js";
 import { createHandlers, type ToolResponse } from "./server.js";
 import { captureLiveSite } from "./capture.js";
@@ -48,7 +48,7 @@ try {
   );
   process.exit(1);
 }
-const client = new AwwwardsClient();
+const client = new AwwwardsClient({ rateLimiter: SHARED_RATE_LIMITER });
 const handlers = createHandlers({
   client,
   cache,
@@ -190,6 +190,49 @@ server.tool(
   {},
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   () => asMcpResult(handlers.list_categories()),
+);
+
+server.tool(
+  "get_annual_categories",
+  "List the official Awwwards Annual Awards categories (Site of the Year, Agency of the Year, …) with nominee counts. Annual data comes from Awwwards' official public read-only API for personal, non-commercial inspiration use; nominee details are hydrated on request. Media URLs are reference-only — nothing is downloaded.",
+  {},
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  () => asMcpResult(handlers.get_annual_categories()),
+);
+
+server.tool(
+  "get_annual_nominees",
+  "List nominees in one official Awwwards Annual Awards category, hydrated on demand at 1 request/second (default 10, max 20 per call). Site summaries carry siteSlug and inLocalIndex, so an agent can jump to get_site_details when the daily index has the site. Personal, non-commercial inspiration use only; media URLs are reference-only and are never downloaded.",
+  {
+    category: z
+      .string()
+      .min(1)
+      .describe("Category slug from get_annual_categories, e.g. 'site-of-the-year'"),
+    limit: z.number().int().min(1).max(20).default(10)
+      .describe("Nominees to hydrate in this call (max 20)"),
+    offset: z.number().int().min(0).default(0)
+      .describe("Zero-based nominee offset within the category"),
+    hydrate: z.boolean().default(true)
+      .describe("Hydrate uncached nominees (1 req/s); false returns cached entries plus id stubs"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  (args) => asMcpResult(handlers.get_annual_nominees(args)),
+);
+
+server.tool(
+  "get_annual_nominee",
+  "Get one official Awwwards Annual Awards nominee in full: site entries carry date, description, designBy, country, image/video URLs; agency entries carry location, avatar, award tag counts and featured projects. Pass id (a UUID or full /api/annual/nominees/... path) or category+slug. Personal, non-commercial inspiration use only; media URLs are reference-only and nothing is downloaded.",
+  {
+    id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Nominee UUID or full /api/annual/nominees/sites|users/<uuid> path"),
+    category: z.string().min(1).optional().describe("Category slug, for slug-based lookup"),
+    slug: z.string().min(1).optional().describe("Nominee slug, paired with category"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  (args) => asMcpResult(handlers.get_annual_nominee(args)),
 );
 
 server.tool(

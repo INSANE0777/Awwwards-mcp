@@ -27,6 +27,11 @@ import type { Categories, ElementMedia, ElementRecord, MotionDna, SiteDetails, S
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "./indexer.js";
 import { fetchNewWinners, addWatch, listWatches, removeWatch, recordsFromSiteHtml, checkWatches, matchesWatch } from "./feed.js";
 import { createDesignBrief, renderDesignBrief, type DesignBriefInput, type DesignBriefSource } from "./design-brief.js";
+import type {
+  AnnualCategoriesResult,
+  AnnualNomineeResult,
+  AnnualNomineesResult,
+} from "./annual.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -143,6 +148,21 @@ export type CaptureComponentFn = (
   url: string,
   opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number },
 ) => Promise<ComponentPack | { error: string }>;
+
+// Official Annual Awards API peers. Lazy defaults keep annual.ts off the hot
+// path and let handler tests inject shapes without network or cache.
+export type AnnualCategoriesFn = () => Promise<AnnualCategoriesResult>;
+export type AnnualNomineesFn = (args: {
+  category: string;
+  limit?: number;
+  offset?: number;
+  hydrate?: boolean;
+}) => Promise<AnnualNomineesResult>;
+export type AnnualNomineeFn = (args: {
+  id?: string;
+  category?: string;
+  slug?: string;
+}) => Promise<AnnualNomineeResult>;
 
 // C3 token-diet helpers (plan Task C3): pure compaction for the `compact`
 // flag on get_site_details / capture_component. Heavy per-element detail →
@@ -302,6 +322,18 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   get_element(args: { id: string }): Promise<ToolResponse>;
   list_categories(): Promise<ToolResponse>;
+  get_annual_categories(): Promise<ToolResponse>;
+  get_annual_nominees(args: {
+    category: string;
+    limit?: number;
+    offset?: number;
+    hydrate?: boolean;
+  }): Promise<ToolResponse>;
+  get_annual_nominee(args: {
+    id?: string;
+    category?: string;
+    slug?: string;
+  }): Promise<ToolResponse>;
   capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -399,6 +431,9 @@ export function createHandlers(deps: {
   stackFn?: StackFn;
   gsapStubFn?: GsapStubFn;
   buildProjectFn?: BuildProjectFn;
+  annualCategoriesFn?: AnnualCategoriesFn;
+  annualNomineesFn?: AnnualNomineesFn;
+  annualNomineeFn?: AnnualNomineeFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1136,6 +1171,71 @@ export function createHandlers(deps: {
     }
   }
 
+  // ---- official Annual Awards API ----
+  // Additive source: annual data comes only from the vendor-sanctioned API.
+  // There is deliberately no HTML-scraping fallback in these three tools.
+
+  async function get_annual_categories(): Promise<ToolResponse> {
+    try {
+      const get =
+        deps.annualCategoriesFn ??
+        (() => import("./annual.js").then((m) => m.getCategories({ cache })));
+      return { content: [text(JSON.stringify(await get(), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function get_annual_nominees(args: {
+    category: string;
+    limit?: number;
+    offset?: number;
+    hydrate?: boolean;
+  }): Promise<ToolResponse> {
+    try {
+      const get =
+        deps.annualNomineesFn ??
+        ((a: { category: string; limit?: number; offset?: number; hydrate?: boolean }) =>
+          import("./annual.js").then((m) => m.getNominees(a.category, a, { cache })));
+      return { content: [text(JSON.stringify(await get(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function get_annual_nominee(args: {
+    id?: string;
+    category?: string;
+    slug?: string;
+  }): Promise<ToolResponse> {
+    try {
+      if (!args.id && !(args.category && args.slug)) {
+        return {
+          content: [
+            text(
+              "Provide either id (a UUID or a full /api/annual/nominees/... path) " +
+                "or both category and slug.",
+            ),
+          ],
+          isError: true,
+        };
+      }
+      const get =
+        deps.annualNomineeFn ??
+        ((a: { id?: string; category?: string; slug?: string }) => {
+          if (a.id) {
+            return import("./annual.js").then((m) => m.resolveNominee(a.id!, { cache }));
+          }
+          return import("./annual.js").then((m) =>
+            m.getNomineeBySlug(a.category!, a.slug!, { cache }),
+          );
+        });
+      return { content: [text(JSON.stringify(await get(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -1676,6 +1776,9 @@ export function createHandlers(deps: {
     search_elements,
     get_element,
     list_categories,
+    get_annual_categories,
+    get_annual_nominees,
+    get_annual_nominee,
     capture_live_site,
     analyze_page_structure,
     analyze_scroll_map,
