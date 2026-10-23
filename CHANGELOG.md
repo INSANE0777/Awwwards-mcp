@@ -3,6 +3,42 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.12.0 - 2026-10-23
+
+From capture to an owned project: conversion, authored motion, and a sharper audit layer.
+
+### New tool (26 total) — `build_project` + `awwwards-build-project` bin
+
+- Exact rebuild HTML or a real-site rehost → a runnable **Vite**, **Astro**, or **Next.js** project.
+- Native structure: sections become real components (JSX for Next/Astro), shell chrome kept once, CSS split into tokens + site, ordered script loader, head metadata / JSON-LD / pre-paint boot replayed in captured order.
+- Carries local external CSS/JS, inline scripts, and CDN libraries; StrictMode-safe loader; explicit warnings whenever content cannot be split safely (never silent loss).
+- `--authored --motion <census.json>`: drops site logic (head boot and animation libs stay), emits `motion.manifest.json` (measured per-section triggers + `pageTriggers` for unattributed rows) and inert per-section/page motion hooks/modules to author against.
+- Proven on a real hand-built GSAP site: all three targets build; desktop 1440×900 (8 anchors) and mobile 390×844 (5 anchors) parity exact — scrollHeight 25,650 identical, zero console errors/404s, reduced-motion clean.
+
+### Audit wave
+
+- Band-split v2: landmark subdivision + residual second pass kill mega-bands (a 20,631 px giant became 10 bands).
+- `build_gsap_stub` consumes measured scrub curves (real progress values, not guessed timelines).
+- Design briefs carry choreography hints (stagger / delay deltas from measured tween data).
+- `get_motion_dna` runs a single browser launch and adds `censusSummary`.
+- Compact response modes (`compact`) on the heaviest tools — measured ~38 % token cut.
+- `awwwards-verify` bin: CI-grade verdict with exit codes (0 pass … 4 missing tool).
+- `analyze_stack`: Webflow/Tailwind arbitration (no more Tailwind false positives on Webflow classes).
+- `analyze_bundle`: opt-in chunk-graph walk, static import edges, JSON-LD/importmap filtering, pretty-code keyword scan, 4-char regex floor.
+- `verify_build`: opt-in DOM-structure diff (missing/extra/rect-drift evidence, `incomplete` honesty flag); measured fps window audited and documented.
+- Mobile hover census skips the hover loop with an explanatory note instead of pretending.
+
+### Skills (seven)
+
+- `recreate` — link-to-site playbook: Awwwards lookup first, evidence capture on any URL, study-build terms, exact assets, scroll-anchor QA, conversion **only on request**.
+- `motion-authoring` — converting manifest + inert skeletons into real motion (topology, intent map, per-target surfaces, parity gate).
+- `awwwards-section-loop` gains the convert-and-author close-out; `awwwards-motion-study` teaches the manifest hand-off and bundle forensics; `awwwards-setup` mentions optional webcrack.
+
+### Fixes
+
+- Issue #23: viewport-qualified screenshot/motion filenames, per-recording sheet directory, no screenshot read-back race.
+- gsap stub keeps `pin` on superseded scrub rows; compact site details restore descriptions; daily env hint for optional webcrack; README tool/skill counts.
+
 ## v1.11.0 - 2026-10-20
 
 The precision ladder completed: scrub curves, choreography, and polish.
