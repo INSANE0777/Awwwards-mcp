@@ -118,12 +118,14 @@ continuity, one easing family across sections (or an intentional
 break). Fix coherence issues at the page level (tokens, shared CSS),
 not by re-opening sections unless a band regressed.
 
-### Step 6 — Convert what you locked
+### Step 6 — Convert only if the user asks
 
-Locked sections are exactly what `build_project --target vite|astro|next` needs: the
-band split becomes components. Then `--authored --motion census.json` and author the
-motion per section (see `motion-authoring`), keeping the same lock discipline: author
-section N, verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
+The single-file rebuild is a valid handoff. When the user asks for a project (or
+picks a framework), convert: locked sections are exactly what `build_project
+--target vite|astro|next` needs — the band split becomes components. If they also
+want authored motion, add `--authored --motion census.json` and author per section
+(see `motion-authoring`), keeping the same lock discipline: author section N,
+verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
 
 ## Failure modes this skill prevents
 

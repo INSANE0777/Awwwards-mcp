@@ -16,7 +16,7 @@ This is a **local study build**: recreate the reference exactly — layout, text
 3. **Provenance list**: every borrowed asset path + source URL enumerated in the README.
 4. If the user later wants to publish, that is a separate brief: replace assets → publish. Never quietly drop the disclaimer.
 
-Scope: whole page or specific sections? A continuous scroll-narrative (fixed stage + long spacer) is one unit — do not force per-section pages onto it. Target: plain single-file build (default) or `build_project --target vite|astro|next`.
+Scope: whole page or specific sections? A continuous scroll-narrative (fixed stage + long spacer) is one unit — do not force per-section pages onto it. Target: single-file build by default; **conversion is offered after QA, never assumed** (see Phase 4).
 
 ## Phase 1 — Evidence (free MCP, all read-only)
 
@@ -45,12 +45,18 @@ Scope: whole page or specific sections? A continuous scroll-narrative (fixed sta
 - Reduced-motion pass at 1440: stacked layout, no overflow.
 - If anything drifts from the evidence, fix and re-shoot — one anchor at a time (section-loop discipline).
 
-## Phase 4 — Project conversion + authored motion
+## Phase 4 — Optional project conversion (ask first)
 
-1. `awwwards-build-project <file.html> --target vite|astro|next --out <dir>` → native project: real section components, shell chrome, split CSS (`tokens.css` + `site.css`), ordered libs, head metadata/boot replayed.
-2. Convert with `--authored --motion <census.json>`: site logic scripts are dropped, head boot + animation libs (gsap/ScrollTrigger/lenis/split-type/circletype/lottie/three) stay, and `motion.manifest.json` carries measured per-section + page triggers.
-3. **Author the motion** (see `motion-authoring`): fill the generated hooks/modules from the manifest + the reference's readable JS; page-level motion first, then sections. Do not hand-edit manifest rows and call them measured — record any authored rows explicitly.
-4. Gate: `npm install && npm run build` per target, serve, then re-run Phase 3 desktop anchors **plus a 390×844 mobile smoke** and reduced-motion; zero errors/404s. Never hand over an unconverted 2000-line file when the user asked for a project.
+The rebuild is a valid deliverable on its own. After Phase 3 passes, **ask the user**:
+
+> Keep it as a single-file build, or convert it to a project — Vite (plain HTML/CSS/JS, no components), Astro (HTML components), or Next.js (React components)? And if converted, keep the original scripts or switch to authored motion (`--authored`)?
+
+Do not convert unprompted. Do not pick a framework for them. If they say "just build it", stop at Phase 3 + handoff.
+
+When they choose:
+1. `awwwards-build-project <file.html> --target vite|astro|next --out <dir>` → native structure: real section components, shell chrome, split CSS (`tokens.css` + `site.css`), ordered libs, head metadata/boot replayed.
+2. If they chose authored motion: `--authored --motion <census.json>` — site logic scripts dropped, head boot + animation libs kept, `motion.manifest.json` carries measured per-section + page triggers. Then author the motion (see `motion-authoring`), recording any authored rows explicitly.
+3. Gate: `npm install && npm run build` per target, serve, re-run Phase 3 anchors **plus a 390×844 mobile smoke** and reduced-motion; zero errors/404s.
 
 ## Phase 5 — Handoff
 

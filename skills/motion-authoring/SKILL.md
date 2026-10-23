@@ -5,6 +5,7 @@ description: Use when a converted project (build_project --authored) needs its m
 
 # Motion authoring — from measured manifest to real motion
 
+Runs only when the user chose a converted project **and** authored motion.
 The generator gives you structure, inert skeleton mounts, and
 `motion.manifest.json` (measured triggers, `pageTriggers`, initial-hidden
 hints). Authoring is the step where those mounts become real motion and
