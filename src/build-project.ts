@@ -18,6 +18,8 @@ import { dirname, join, resolve } from "node:path";
 // vite/next emit dispatch below and emit-next's cssTo/nn/attributeBlocks both
 // resolve at invocation, never at module eval.
 import { emitNext } from "./emit-next.js";
+import { buildMotionManifest, motionManifestJson, normalizeScrollCensus, type MotionEmitOptions, type NormalizedCensus } from "./motion-manifest.js";
+import { motionHasTriggers, webMotionSkeletons } from "./motion-skeletons.js";
 
 export interface RebuildSection {
   tag: string;
@@ -138,7 +140,7 @@ const mentions = (selector: string, cls: string): boolean =>
   new RegExp(`(?:^|[^\\w-])${cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(selector);
 
 const attr = (startTag: string, name: string): string => {
-  const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(startTag);
+  const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(startTag);
   return m ? (m[1] ?? m[2] ?? m[3] ?? "") : "";
 };
 
@@ -711,6 +713,71 @@ const stripShellAssets = (html: string): string =>
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
     .replace(SCRIPT_RE, (full: string, open: string) => (attr(open, "src") !== "" || JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full));
 
+// `--authored` keeps the page's third-party animation libraries (known
+// basenames on local/CDN paths, plus npm-CDN package segments) and head inline
+// boot scripts; other external scripts and body inline scripts are dropped.
+// Basename covers gsap.min.js / three.module.js; the package form covers CDNs
+// whose file is generic (split-type@x/umd/index.min.js).
+const MOTION_LIB_NAME = "(?:gsap|scrolltrigger|lenis|split-?type|circletype|lottie|three)";
+const MOTION_LIB_BASENAME = new RegExp(`^${MOTION_LIB_NAME}(?:[.@_-][\\w.-]*)?\\.m?js$`, "i");
+const MOTION_LIB_PACKAGE = new RegExp(`(?:^|/)${MOTION_LIB_NAME}@[^/]+(?:/|$)`, "i");
+
+export const isMotionLibraryScript = (src: string): boolean => {
+  const path = (src.split(/[?#]/)[0] ?? "").replace(/\\/g, "/");
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  return MOTION_LIB_BASENAME.test(base) || MOTION_LIB_PACKAGE.test(path);
+};
+
+export const keepAuthoredExternalScript = (src: string): boolean => isMotionLibraryScript(src);
+
+export const keepAuthoredBodyScript = (
+  entry: { kind: "external"; src: string } | { kind: "inline" },
+): boolean => entry.kind === "external" && keepAuthoredExternalScript(entry.src);
+
+export const keepAuthoredHeadScript = (entry: LoaderScript): boolean =>
+  entry.kind === "inline" || keepAuthoredExternalScript(entry.src);
+
+export const keepAuthoredHeadTag = (tag: HeadTag): boolean =>
+  tag.kind !== "external" || keepAuthoredExternalScript(attr(tag.tag, "src"));
+
+export const stripExecutableScripts = (html: string): string =>
+  html.replace(SCRIPT_RE, (full: string, open: string) => {
+    const src = attr(open, "src");
+    if (src === "") {
+      // body inline JS is site logic; data scripts (ld+json/importmap) are metadata
+      return JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full;
+    }
+    return keepAuthoredExternalScript(src) ? full : "";
+  });
+
+const HEAD_LOGIC = /gsap\.|ScrollTrigger|new\s+Lenis|addEventListener\(/;
+const MAX_SAFE_HEAD_INLINE = 2048;
+
+// One warning per dropped/external src plus one when a kept head inline script
+// looks like page logic (pre-paint boot is kept regardless).
+export const authoredScriptWarnings = (split: Split): string[] => {
+  const warnings: string[] = [];
+  const externals = split.rehost
+    ? [...split.rehost.headScripts, ...split.rehost.scripts].flatMap((s) => (s.kind === "external" ? [s.src] : []))
+    : [
+        ...split.headTags.flatMap((t) => (t.kind === "external" ? [attr(t.tag, "src")] : [])),
+        ...split.scripts.bodyScripts.flatMap((b) => (b.kind === "external" ? [b.src] : [])),
+      ];
+  const seen = new Set<string>();
+  for (const src of externals) {
+    if (src === "" || seen.has(src) || keepAuthoredExternalScript(src)) continue;
+    seen.add(src);
+    warnings.push(`authored: dropped external script ${src} (not a known animation library)`);
+  }
+  const headInline = split.rehost
+    ? split.rehost.headScripts.flatMap((s) => (s.kind === "inline" ? [s.js] : []))
+    : split.headTags.flatMap((t) => (t.kind === "inline" ? [t.js] : []));
+  if (headInline.some((js) => Buffer.byteLength(js, "utf8") > MAX_SAFE_HEAD_INLINE || HEAD_LOGIC.test(js))) {
+    warnings.push("kept head inline script that may be site logic — verify");
+  }
+  return warnings;
+};
+
 interface RehostContainer {
   start: number; // inner start in the document
   end: number; // inner end in the document
@@ -896,21 +963,28 @@ export interface BuildProjectArgs {
   target: "vite" | "astro" | "next";
   out: string;
   name?: string;
+  motion?: string; // analyze_scroll_map census JSON path
+  authored?: boolean; // drop legacy page scripts and wire the motion skeletons
 }
 
-export const BUILD_ARGS_USAGE = "usage: awwwards-build-project <html> --target vite|astro|next --out <dir> [--name pkg]";
+export const BUILD_ARGS_USAGE =
+  "usage: awwwards-build-project <html> --target vite|astro|next --out <dir> [--name pkg] [--motion census.json] [--authored]";
 
 // Pure arg model for the (Task-3) bin: parse here, map exit codes there.
 export function parseBuildArgs(argv: string[]): BuildProjectArgs | { error: string } {
   const positional: string[] = [];
   const flags = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
-    const inline = /^(--target|--out|--name)=(.*)$/.exec(argv[i]);
+    const inline = /^(--target|--out|--name|--motion)=(.*)$/.exec(argv[i]);
     if (inline) {
       flags.set((inline[1] ?? "").slice(2), inline[2] ?? "");
       continue;
     }
-    if (argv[i] === "--target" || argv[i] === "--out" || argv[i] === "--name") {
+    if (argv[i] === "--authored") {
+      flags.set("authored", "1");
+      continue;
+    }
+    if (argv[i] === "--target" || argv[i] === "--out" || argv[i] === "--name" || argv[i] === "--motion") {
       if (i + 1 >= argv.length) return { error: BUILD_ARGS_USAGE };
       flags.set(argv[i].slice(2), argv[i + 1] ?? "");
       i += 1;
@@ -923,7 +997,16 @@ export function parseBuildArgs(argv: string[]): BuildProjectArgs | { error: stri
   if (positional.length !== 1 || !target || !out) return { error: BUILD_ARGS_USAGE };
   if (target !== "vite" && target !== "astro" && target !== "next") return { error: BUILD_ARGS_USAGE };
   const name = flags.get("name");
-  return { html: positional[0] ?? "", target, out, ...(name ? { name } : {}) };
+  const motion = flags.get("motion");
+  if (flags.has("motion") && !motion) return { error: BUILD_ARGS_USAGE };
+  return {
+    html: positional[0] ?? "",
+    target,
+    out,
+    ...(name ? { name } : {}),
+    ...(motion ? { motion } : {}),
+    ...(flags.get("authored") === "1" ? { authored: true } : {}),
+  };
 }
 
 export const packageName = (name: string): string =>
@@ -1253,7 +1336,7 @@ const headScriptTag = (entry: LoaderScript, dir: string, astro: boolean): string
 // shortcut: only title|meta|link|script replay — base/noscript are dropped,
 // and a link inside noscript is promoted; extend the tag set when a real site
 // depends on them.
-const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean): string => {
+const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean, authored = false): string => {
   const head = rehost.headHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
   const lines: string[] = [];
   let scriptIndex = 0;
@@ -1266,7 +1349,7 @@ const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean): str
       if (JS_TYPES.has(attr(open, "type").toLowerCase())) {
         const entry = rehost.headScripts[scriptIndex];
         scriptIndex += 1;
-        if (entry) lines.push(headScriptTag(entry, dir, astro));
+        if (entry && (!authored || keepAuthoredHeadScript(entry))) lines.push(headScriptTag(entry, dir, astro));
         continue;
       }
     }
@@ -1305,11 +1388,40 @@ const astroSection = (s: RebuildSection, i: number): { content: string; risky: b
   return { risky, content: risky ? `<Fragment set:html={${JSON.stringify(s.text)}} />` : s.text };
 };
 
-export function emitAstro(split: Split, outDir: string, name: string): EmitResult {
+const astroMotionScript = (i: number): string =>
+  `<script>
+  import { init${nn(i)} } from "../animations/section${String(i + 1).padStart(2, "0")}.js";
+
+  init${nn(i)}();
+</script>
+`;
+
+const astroPageMotionScript = (): string =>
+  `<script>
+  import { initPageMotion } from "../animations/page.js";
+
+  initPageMotion();
+</script>
+`;
+
+// Page motion must mount before the section components' scripts.
+const withAstroPageMotion = (shell: string, sectionCount: number): string => {
+  if (sectionCount === 0) return shell;
+  const marker = `<${nn(0)} />`;
+  return shell.includes(marker) ? shell.replace(marker, () => `${astroPageMotionScript()}${marker}`) : shell;
+};
+
+export function emitAstro(split: Split, outDir: string, name: string, motion?: MotionEmitOptions): EmitResult {
   void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
   const warnings: string[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
+  const manifest = motion?.manifest ?? buildMotionManifest(split);
+  const authored = motion?.authored === true;
+  if (authored) warnings.push(...authoredScriptWarnings(split));
+  const hasMotionTriggers = motionHasTriggers(manifest);
+  add("motion.manifest.json", motionManifestJson(manifest));
+  for (const file of webMotionSkeletons(manifest)) add(file.path, file.content);
   const sections = split.sections.sections ?? [];
   const attributed = attributeBlocks(split);
   const cssBase = "/"; // astro serves public/ at the site root
@@ -1322,7 +1434,7 @@ export function emitAstro(split: Split, outDir: string, name: string): EmitResul
       version: "0.1.0",
       type: "module",
       scripts: { dev: "astro dev", build: "astro build", preview: "astro preview" },
-      dependencies: { astro: "^5" },
+      dependencies: { astro: "^5", ...(hasMotionTriggers ? { gsap: "^3" } : {}) },
     }),
   );
   add("astro.config.mjs", 'import { defineConfig } from "astro/config";\n\nexport default defineConfig({});\n');
@@ -1339,15 +1451,17 @@ export function emitAstro(split: Split, outDir: string, name: string): EmitResul
       imports.push('import "../styles/site.css";');
     }
     rehost.sections.forEach((_, i) => imports.push(`import ${nn(i)} from "../components/${nn(i)}.astro";`));
-    const loader = rehost.scripts.map(astroRehostLoaderTag).join("\n");
-    const head = rehostHeadReplay(rehost, "scripts", true);
+    const bodyScripts = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
+    const loader = bodyScripts.map(astroRehostLoaderTag).join("\n");
+    const head = rehostHeadReplay(rehost, "scripts", true, authored);
+    const shell = authored ? withAstroPageMotion(rehost.shell, rehost.sections.length) : rehost.shell;
     add(
       "src/pages/index.astro",
       `---
 // Generated by awwwards-build-project — native shell, real sections, one ordered loader.
 ${imports.join("\n")}
 ---
-${withLoader(withRehostHead(rehost.shell, head), loader)}`,
+${withLoader(withRehostHead(shell, head), loader)}`,
     );
     rehost.sections.forEach((s, i) => {
       const { content, risky } = astroSection(s, i);
@@ -1358,7 +1472,7 @@ ${withLoader(withRehostHead(rehost.shell, head), loader)}`,
 // ${nn(i)} — section #${s.id || "(id-less)"}; markup verbatim, no slots.${risky ? "\n// braces present: content ships as a set:html string (astro would parse { as an expression)" : ""}
 ---
 ${content}
-`,
+${authored ? astroMotionScript(i) : ""}`,
       );
     });
     return { files, warnings };
@@ -1381,13 +1495,15 @@ ${content}
 
   const generic = split.sections.detected === "generic";
   const headTags = split.headTags
-    .filter((t) => generic || t.kind !== "inline")
+    .filter((t) => (authored ? keepAuthoredHeadTag(t) : generic || t.kind !== "inline"))
     .map((t) =>
       t.kind === "inline" ? `<script is:inline>\n${t.js}\n</script>` : astroInlineTags(t.tag),
     );
-  const bodyTags = (generic
-    ? split.scripts.bodyScripts
-    : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external"))
+  const bodyTags = (authored
+    ? split.scripts.bodyScripts.filter(keepAuthoredBodyScript)
+    : generic
+      ? split.scripts.bodyScripts
+      : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external"))
     .map((b) =>
       b.kind === "external"
         ? b.tag.replace(/^<script\b/i, "<script is:inline")
@@ -1398,7 +1514,7 @@ ${content}
   // loose body tags), so no whole-script copy is hoisted here. Rebuild shape
   // keeps the kit's attributed timelines as before.
   const pageLevelScript =
-    generic || attributed.pageLevel.length === 0 ? "" : `\n${timelineScript(attributed.pageLevel)}`;
+    authored || generic || attributed.pageLevel.length === 0 ? "" : `\n${timelineScript(attributed.pageLevel)}`;
   add(
     "src/pages/index.astro",
     `---
@@ -1414,7 +1530,7 @@ ${imports.join("\n")}
 ${headTags.map((t) => indent(t, 4)).join("\n")}
   </head>
   <body>
-${sections.map((_, i) => `    <${nn(i)} />`).join("\n")}
+${authored ? astroPageMotionScript() : ""}${sections.map((_, i) => `    <${nn(i)} />`).join("\n")}
 ${bodyTags ? `${indent(bodyTags, 4)}\n` : ""}${pageLevelScript}  </body>
 </html>
 `,
@@ -1428,8 +1544,9 @@ ${bodyTags ? `${indent(bodyTags, 4)}\n` : ""}${pageLevelScript}  </body>
   // to the frontmatter fence.
   const braceRisk = /[{`]/;
   sections.forEach((s, i) => {
-    const blocks = attributed.perSection.get(s.className) ?? [];
-    const raw = astroInlineTags(s.text);
+    const blocks = authored ? [] : attributed.perSection.get(s.className) ?? [];
+    const markup = authored ? stripExecutableScripts(s.text) : s.text;
+    const raw = astroInlineTags(markup);
     const risky = braceRisk.test(s.innerHtml);
     const content = risky ? `<Fragment set:html={${JSON.stringify(raw)}} />` : raw;
     add(
@@ -1438,17 +1555,23 @@ ${bodyTags ? `${indent(bodyTags, 4)}\n` : ""}${pageLevelScript}  </body>
 // ${nn(i)} — exact rebuild of root .${s.className || "(classless)"}; markup verbatim, no slots.${risky ? "\n// braces present: content ships as a set:html string (astro would parse { as an expression)" : ""}
 ---
 ${content}
-${blocks.length ? timelineScript(blocks) : ""}`,
+${blocks.length ? timelineScript(blocks) : ""}${authored ? astroMotionScript(i) : ""}`,
     );
   });
   return { files, warnings };
 }
 
-export function emitVite(split: Split, outDir: string, name: string): EmitResult {
+export function emitVite(split: Split, outDir: string, name: string, motion?: MotionEmitOptions): EmitResult {
   void outDir; // params kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
   const warnings: string[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
+  const manifest = motion?.manifest ?? buildMotionManifest(split);
+  const authored = motion?.authored === true;
+  if (authored) warnings.push(...authoredScriptWarnings(split));
+  const hasMotionTriggers = motionHasTriggers(manifest);
+  add("motion.manifest.json", motionManifestJson(manifest));
+  for (const file of webMotionSkeletons(manifest)) add(file.path, file.content);
   const sections = split.sections.sections ?? [];
   const generic = split.sections.detected === "generic";
   const cssBase = "../../"; // css lives in src/styles/; assets at the project root
@@ -1461,6 +1584,7 @@ export function emitVite(split: Split, outDir: string, name: string): EmitResult
       version: "0.1.0",
       type: "module",
       scripts: { dev: "vite", build: "vite build", preview: "vite preview" },
+      ...(hasMotionTriggers ? { dependencies: { gsap: "^3" } } : {}),
       devDependencies: { vite: "^7" },
     }),
   );
@@ -1509,9 +1633,11 @@ export default {
       add("src/styles/site.css", cssTo(split.styles.siteCss, cssBase));
       imports.push('import "./styles/site.css";');
     }
-    add("src/main.js", imports.length ? `${imports.join("\n")}\n` : "");
+    const motionMain = authored ? 'import { initAnimations } from "./animations/registry.js";\n\ninitAnimations();\n' : "";
+    add("src/main.js", imports.length ? `${imports.join("\n")}\n${motionMain}` : motionMain);
+    const bodyScripts = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
     const loader = [
-      rehost.scripts.map((s) => rehostLoaderTag(s, "src/scripts")).join("\n"),
+      bodyScripts.map((s) => rehostLoaderTag(s, "src/scripts")).join("\n"),
       '<script type="module" src="/src/main.js"></script>',
     ]
       .filter(Boolean)
@@ -1519,7 +1645,7 @@ export default {
     add(
       "index.html",
       withLoader(
-        withRehostHead(inlineShell(rehost), rehostHeadReplay(rehost, "src/scripts", false)),
+        withRehostHead(inlineShell(rehost), rehostHeadReplay(rehost, "src/scripts", false, authored)),
         loader,
       ),
     );
@@ -1529,15 +1655,17 @@ export default {
   // Generic rehost shape: the body already carries its own inline scripts,
   // nested w-scripts and body-end CDN/local tags — ship it byte-verbatim so
   // each runs in place once. Rebuild shape keeps the kit's section assembly.
-  const body = generic ? bodyInner(split.html).trim() : sectionsBodyHtml(split);
+  const rawBody = generic ? bodyInner(split.html).trim() : sectionsBodyHtml(split);
+  const body = authored ? stripExecutableScripts(rawBody) : rawBody;
   const headTags = split.headTags
-    .filter((t) => generic || t.kind !== "inline")
+    .filter((t) => (authored ? keepAuthoredHeadTag(t) : generic || t.kind !== "inline"))
     .map((t) => (t.kind === "inline" ? `<script>\n${t.js}\n</script>` : t.tag));
   const bodyTags = generic
     ? ""
-    : split.scripts.bodyScripts
-        .filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external")
-        .map((b) => b.tag)
+    : (authored
+        ? split.scripts.bodyScripts.filter(keepAuthoredBodyScript)
+        : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external"))
+        .map((b) => (b.kind === "external" ? b.tag : ""))
         .join("\n");
   add(
     "index.html",
@@ -1575,9 +1703,11 @@ ${bodyTags ? `${bodyTags}\n` : ""}<script type="module" src="/src/main.js"></scr
   // Plan: no js split for vite — the rebuild inline script (register + REDUCED
   // guard + all timelines) ships whole in the module, loaded deferred so the
   // CDN classic scripts have already run. Generic bodies keep their scripts in
-  // place, so main.js is css-only there.
-  const inline = !generic && split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : "";
-  const js = imports.length || inline ? `${imports.join("\n")}\n${inline}` : "";
+  // place, so main.js is css-only there (`--authored` replaces them with the
+  // ordered registry instead).
+  const inline = !authored && !generic && split.scripts.inlineJs ? `${split.scripts.inlineJs}\n` : "";
+  const motionMain = authored ? 'import { initAnimations } from "./animations/registry.js";\n\ninitAnimations();\n' : "";
+  const js = imports.length || inline || motionMain ? `${imports.join("\n")}\n${inline}${motionMain}` : "";
   add("src/main.js", js);
   return { files, warnings };
 }
@@ -1605,6 +1735,28 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     return { error: `cannot read ${src}: ${err instanceof Error ? err.message : String(err)}` };
   }
   const name = args.name ?? "rebuild-site";
+  const authored = args.authored === true;
+  let census: NormalizedCensus | undefined;
+  const censusWarnings: string[] = [];
+  if (args.motion) {
+    const censusPath = resolve(args.motion);
+    let raw: string;
+    try {
+      raw = await readFile(censusPath, "utf8");
+    } catch (err) {
+      return { error: `cannot read motion census ${censusPath}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch (err) {
+      return { error: `motion census is not valid JSON (${censusPath}): ${err instanceof Error ? err.message : String(err)}` };
+    }
+    const parsed = normalizeScrollCensus(parsedJson);
+    if ("error" in parsed) return { error: parsed.error };
+    census = parsed.census;
+    censusWarnings.push(...parsed.warnings);
+  }
   // Probe first: only native rehost pages fold local stylesheets (legacy generic
   // output keeps its link contract). Folding happens before the real split so
   // :root extraction and site.css order see the stylesheet body in source place.
@@ -1621,25 +1773,35 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     foldedCss = inlined.folded;
     cssWarnings = inlined.warnings;
   }
+  const manifest = buildMotionManifest(split, census);
+  const motion: MotionEmitOptions = { manifest, authored };
   const emitted =
     args.target === "vite"
-      ? emitVite(split, args.out, name)
+      ? emitVite(split, args.out, name, motion)
       : args.target === "astro"
-        ? emitAstro(split, args.out, name)
-        : emitNext(split, args.out, name);
+        ? emitAstro(split, args.out, name, motion)
+        : emitNext(split, args.out, name, motion);
   // assets per target: vite preserves ref paths at the project root (dev-served,
   // and `vite build` rewrites refs); astro and next serve public/ at the site
   // root — matching each emitter's css re-basing and local link/script hrefs.
   const outDir = resolve(args.out);
-  const rehostScripts =
+  const legacyScripts =
     split.rehost === null
       ? []
       : [...split.rehost.headScripts, ...split.rehost.scripts].filter(
-          (s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external" && s.local,
+          (s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external",
         );
+  const keptScripts = authored
+    ? legacyScripts.filter((s) => keepAuthoredExternalScript(s.src))
+    : legacyScripts;
+  const rehostScripts = keptScripts.filter((s) => s.local);
+  const skipRefs = [
+    ...foldedCss,
+    ...(authored ? legacyScripts.map((s) => s.src) : rehostScripts.map((s) => s.src)),
+  ];
   const { missing } = await copyAssets(assetHtml, dirname(src), outDir, {
     ...(args.target === "vite" ? {} : { into: "public" }),
-    ...(rehostScripts.length || foldedCss.length ? { skip: [...foldedCss, ...rehostScripts.map((s) => s.src)] } : {}),
+    ...(skipRefs.length ? { skip: skipRefs } : {}),
   });
   // Rehost scripts load from one folder per target; copyAssets skipped their
   // original copies above and this is the path the single loader points at.
@@ -1674,6 +1836,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     warnings: [
       ...split.warnings,
       ...emitted.warnings,
+      ...censusWarnings,
       ...cssWarnings,
       ...missing.map((ref) => `asset not found: ${ref}`),
       ...missingScripts.map((ref) => `asset not found: ${ref}`),

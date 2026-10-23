@@ -12,8 +12,22 @@
 // that dependency behind it. Import cycle with build-project.ts is
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
-import { attributeBlocks, bodyBounds, cssTo, nn, packageName, scriptFile } from "./build-project.js";
+import {
+  attributeBlocks,
+  authoredScriptWarnings,
+  bodyBounds,
+  cssTo,
+  keepAuthoredBodyScript,
+  keepAuthoredHeadScript,
+  keepAuthoredHeadTag,
+  nn,
+  packageName,
+  scriptFile,
+  stripExecutableScripts,
+} from "./build-project.js";
 import type { BodyScript, EmitResult, LoaderScript, RebuildSection, RehostSplit, ScaffoldFile, Split } from "./build-project.js";
+import { buildMotionManifest, motionManifestJson, type MotionEmitOptions } from "./motion-manifest.js";
+import { motionHasTriggers, nextMotionSkeletons } from "./motion-skeletons.js";
 
 // Dashed HTML/SVG attrs → JSX camelCase. Dashed-but-unlisted (data-*, aria-*,
 // unknown) stays as-is; class is a plain rename; style is special-cased in
@@ -280,7 +294,7 @@ const layoutHeadTags = (tags: string[]): string =>
 
 // Head attribute read (head tags are never rewritten by htmlToJsx before this).
 const headAttr = (tag: string, name: string): string =>
-  new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find(Boolean) ?? "";
+  new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find(Boolean) ?? "";
 
 const escapeHtmlText = (text: string): string =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -292,7 +306,7 @@ const jsxRawScript = (open: string, body: string): string =>
 // links, data scripts, and executable scripts (their pre-paint positions). Local
 // stylesheets were folded before the split; <style> blocks are skipped because
 // their CSS ships through tokens/site.css.
-const rehostHeadLines = (rehost: RehostSplit, name: string): string[] => {
+const rehostHeadLines = (rehost: RehostSplit, name: string, authored: boolean): string[] => {
   const head = rehost.headHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
   const lines: string[] = [];
   let hasTitle = false;
@@ -319,7 +333,7 @@ const rehostHeadLines = (rehost: RehostSplit, name: string): string[] => {
     if (JS_SCRIPT_TYPES.has(type)) {
       const entry = rehost.headScripts[scriptIndex];
       scriptIndex += 1;
-      if (entry) lines.push(headScriptJsx(entry));
+      if (entry && (!authored || keepAuthoredHeadScript(entry))) lines.push(headScriptJsx(entry));
       continue;
     }
     const body = /^<script\b[^>]*>([\s\S]*?)<\/script\s*>$/i.exec(tag)?.[1] ?? "";
@@ -345,24 +359,24 @@ const headScriptJsx = (entry: LoaderScript): string => {
 // shortcut: <html lang> and <body> attributes are not carried (hardcoded en /
 // bare body) — Next-only gap; vite/astro keep them. Wire document attrs when a
 // non-en or themed rehost shows up.
-const rehostLayout = (headLines: string[], cssImports: string[]): string =>
-  `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
-import SiteScripts from "../components/SiteScripts";
-
-export default function RootLayout({
+const rehostLayout = (headLines: string[], cssImports: string[], components: string[]): string => {
+  const componentImport = components.map((c) => `import ${c} from "../components/${c}";`).join("\n");
+  const componentTag = components.map((c) => `\n        <${c} />`).join("");
+  return `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
+${componentImport ? `${componentImport}\n\n` : ""}export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
       <head>${layoutHeadTags(headLines)}</head>
       <body>
-        {children}
-        <SiteScripts />
+        {children}${componentTag}
       </body>
     </html>
   );
 }
 `;
+};
 
 const rehostBody = (rehost: RehostSplit): string => {
   const { start, end } = bodyBounds(rehost.shell);
@@ -387,8 +401,10 @@ ${indent(jsx, 6)}
 `;
 };
 
-const rehostSection = (s: RebuildSection, i: number): { content: string; warning: string } => {
+const rehostSection = (s: RebuildSection, i: number, authored: boolean): { content: string; warning: string } => {
   const header = `// ${nn(i)} — native rehost section #${s.id || "(id-less)"}; real JSX, no slots.\n`;
+  const text = authored ? stripExecutableScripts(s.text) : s.text;
+  const innerHtml = authored ? stripExecutableScripts(s.innerHtml) : s.innerHtml;
   // Mustache templates are the remaining bounded-converter gap: `{{…}}` is not
   // valid JSX text. CSS custom properties now convert correctly (quoted keys +
   // CSSProperties cast) and no longer force the opaque path.
@@ -396,7 +412,7 @@ const rehostSection = (s: RebuildSection, i: number): { content: string; warning
   let jsx: string | null = null;
   if (!mustache) {
     try {
-      jsx = htmlToJsx(s.text);
+      jsx = htmlToJsx(text);
     } catch {
       jsx = null;
     }
@@ -415,7 +431,7 @@ const rehostSection = (s: RebuildSection, i: number): { content: string; warning
   }
   const open = htmlToJsx(s.startTag).replace(/\s*\/?>$/, "");
   const styleImport = reactStyleImport(open);
-  const html = JSON.stringify(s.innerHtml).replace(/</g, "\\u003c");
+  const html = JSON.stringify(innerHtml).replace(/</g, "\\u003c");
   return {
     content: `${header}${styleImport}${styleImport ? "\n" : ""}export default function ${nn(i)}() {
   return (
@@ -427,8 +443,8 @@ const rehostSection = (s: RebuildSection, i: number): { content: string; warning
   };
 };
 
-const siteScripts = (rehost: RehostSplit): string => {
-  const entries = rehost.scripts
+const siteScripts = (scripts: LoaderScript[]): string => {
+  const entries = scripts
     .map((entry) =>
       entry.kind === "inline"
         ? `  { src: "", js: ${JSON.stringify(entry.js)}, type: ${JSON.stringify(entry.type)} },`
@@ -496,9 +512,9 @@ const layoutBodyScripts = (scripts: BodyScript[]): string =>
         .join("\n      ")}`
     : "";
 
-const layout = (name: string, headTags: string[], bodyScripts: BodyScript[]): string =>
+const layout = (name: string, headTags: string[], bodyScripts: BodyScript[], motion = false): string =>
   `import type { Metadata } from "next";
-import "./globals.css";
+import "./globals.css";${motion ? '\nimport MotionRoot from "../components/MotionRoot";' : ""}
 
 export const metadata: Metadata = {
   title: ${JSON.stringify(name)},
@@ -510,7 +526,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>${layoutHeadTags(headTags)}</head>
-      <body>{children}${layoutBodyScripts(bodyScripts)}</body>
+      <body>{children}${layoutBodyScripts(bodyScripts)}${motion ? "\n        <MotionRoot />" : ""}</body>
     </html>
   );
 }
@@ -549,7 +565,7 @@ interface Attribution {
   pageLevel: string[];
 }
 
-const page = (split: Split, attributed: Attribution): string => {
+const page = (split: Split, attributed: Attribution, authored: boolean): string => {
   const sections = split.sections.sections ?? [];
   const hasCdns = split.scripts.cdns.length > 0;
   const generic = split.sections.detected === "generic";
@@ -559,11 +575,11 @@ const page = (split: Split, attributed: Attribution): string => {
   // generic rehost: sections are opaque SSR HTML and scripts ship raw, so the
   // page renders no effect copy. rebuild: unattributable timeline blocks run
   // only behind a gsap dependency, else they compile against a dep the project
-  // doesn't have.
-  const payload = generic ? [] : attributed.pageLevel;
+  // doesn't have. `--authored` drops every captured page timeline.
+  const payload = generic || authored ? [] : attributed.pageLevel;
   const runnable = hasCdns ? payload : [];
   const unwired = !generic && payload.length > 0 && runnable.length === 0;
-  const client = !generic && split.scripts.inlineJs !== "";
+  const client = !authored && !generic && split.scripts.inlineJs !== "";
   const effect = (() => {
     if (runnable.length > 0) return `  ${gsapEffect(runnable, 6)};\n`;
     if (unwired)
@@ -585,8 +601,8 @@ ${renders}
 `;
 };
 
-const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns: boolean, raw: boolean): string => {
-  const blocks = attributed.perSection.get(s.className) ?? [];
+const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns: boolean, raw: boolean, authored: boolean): string => {
+  const blocks = authored ? [] : attributed.perSection.get(s.className) ?? [];
   const header = `// ${nn(i)} — exact rebuild of root .${s.className || "(classless)"}; markup verbatim, no slots.\n`;
   if (raw) {
     // Generic rehost: React owns only the root shell; the captured subtree is
@@ -594,7 +610,7 @@ const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns:
     // their DOM mutations cannot trip hydration.
     const open = htmlToJsx(s.startTag).replace(/\s*\/?>$/, "");
     const styleImport = reactStyleImport(open);
-    const html = JSON.stringify(s.innerHtml).replace(/</g, "\\u003c");
+    const html = JSON.stringify(authored ? stripExecutableScripts(s.innerHtml) : s.innerHtml).replace(/</g, "\\u003c");
     return `${header}${styleImport}${styleImport ? "\n" : ""}export default function ${nn(i)}() {
   return (
     ${open} dangerouslySetInnerHTML={{ __html: ${html} }} />
@@ -602,7 +618,7 @@ const section = (s: RebuildSection, i: number, attributed: Attribution, hasCdns:
 }
 `;
   }
-  const jsx = indentBody(sectionJsx(s.text));
+  const jsx = indentBody(sectionJsx(authored ? stripExecutableScripts(s.text) : s.text));
   const styleImport = reactStyleImport(jsx);
   if (blocks.length > 0 && hasCdns) {
     // kit samestack nextSection wiring: "use client" + gsap.context + revert
@@ -640,31 +656,43 @@ export default function ${nn(i)}() {
 `;
 };
 
-export function emitNext(split: Split, outDir: string, name: string): EmitResult {
+export function emitNext(split: Split, outDir: string, name: string, motion?: MotionEmitOptions): EmitResult {
   void outDir; // kept for Task-3 wiring symmetry; emitters are pure
   const files: ScaffoldFile[] = [];
   const warnings: string[] = [];
   const add = (path: string, content: string) => files.push({ path, content });
+  const manifest = motion?.manifest ?? buildMotionManifest(split);
+  const authored = motion?.authored === true;
+  if (authored) warnings.push(...authoredScriptWarnings(split));
+  add("motion.manifest.json", motionManifestJson(manifest));
+  const motionFiles = nextMotionSkeletons(manifest);
+  for (const file of motionFiles) add(file.path, file.content);
+  const motionRoot = motionFiles.some((f) => f.path === "components/MotionRoot.tsx");
   const sections = split.sections.sections ?? [];
   const generic = split.sections.detected === "generic";
   const hasCdns = split.scripts.cdns.length > 0;
   const attributed = attributeBlocks(split);
-  const headTags = split.headTags.map((t) =>
-    t.kind === "inline"
-      ? jsxInlineScript(t.js)
-      : t.kind === "style"
-        ? jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(t.tag)))
-        : rewriteLocalUrlTag(t.tag),
-  );
+  const headTags = split.headTags
+    .filter((t) => (authored ? keepAuthoredHeadTag(t) : true))
+    .map((t) =>
+      t.kind === "inline"
+        ? jsxInlineScript(t.js)
+        : t.kind === "style"
+          ? jsxSelfClose(htmlToJsx(rewriteLocalUrlTag(t.tag)))
+          : rewriteLocalUrlTag(t.tag),
+    );
   // Generic: every loose body script (external + inline) stays raw at body end.
   // Section-nested scripts already ship inside the raw section HTML, so they
   // are not in bodyScripts (no double execution). Rebuild keeps externals only.
-  const bodyScripts = generic
-    ? split.scripts.bodyScripts
-    : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external");
+  const bodyScripts = authored
+    ? split.scripts.bodyScripts.filter(keepAuthoredBodyScript)
+    : generic
+      ? split.scripts.bodyScripts
+      : split.scripts.bodyScripts.filter((b): b is Extract<BodyScript, { kind: "external" }> => b.kind === "external");
 
   // kit samestack package.json shape (tsx sources ship, so the type deps must
-  // too or `next dev` stalls); gsap only when the source's CDN tags say gsap.
+  // too or `next dev` stalls); gsap when the source's CDN tags say gsap or a
+  // measured census gave the skeleton hooks real triggers to import.
   add(
     "package.json",
     j({
@@ -676,7 +704,7 @@ export function emitNext(split: Split, outDir: string, name: string): EmitResult
         next: "^15",
         react: "^19",
         "react-dom": "^19",
-        ...(hasCdns ? { gsap: "^3" } : {}),
+        ...(hasCdns || motionHasTriggers(manifest) ? { gsap: "^3" } : {}),
       },
       devDependencies: { typescript: "^5", "@types/react": "^19", "@types/node": "^22" },
     }),
@@ -716,20 +744,24 @@ export function emitNext(split: Split, outDir: string, name: string): EmitResult
       add("styles/site.css", cssTo(split.styles.siteCss, "/"));
       cssImports.push('import "../styles/site.css";');
     }
-    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name), cssImports));
+    const authoredBody = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
+    const components = authored
+      ? [...(authoredBody.length > 0 ? ["SiteScripts"] : []), ...(motionRoot ? ["MotionRoot"] : [])]
+      : ["SiteScripts"];
+    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name, authored), cssImports, components));
     add("app/page.tsx", rehostPage(rehost));
     rehost.sections.forEach((s, i) => {
-      const section = rehostSection(s, i);
+      const section = rehostSection(s, i, authored);
       if (section.warning) warnings.push(section.warning);
       add(`components/${nn(i)}.tsx`, section.content);
     });
-    add("components/SiteScripts.tsx", siteScripts(rehost));
+    if (!authored || authoredBody.length > 0) add("components/SiteScripts.tsx", siteScripts(authoredBody));
     return { files, warnings };
   }
 
-  add("app/layout.tsx", layout(name, headTags, bodyScripts));
+  add("app/layout.tsx", layout(name, headTags, bodyScripts, authored && motionRoot));
   add("app/globals.css", globalsCss(split));
-  add("app/page.tsx", page(split, attributed));
-  sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, section(s, i, attributed, hasCdns, generic)));
+  add("app/page.tsx", page(split, attributed, authored));
+  sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, section(s, i, attributed, hasCdns, generic, authored)));
   return { files, warnings };
 }

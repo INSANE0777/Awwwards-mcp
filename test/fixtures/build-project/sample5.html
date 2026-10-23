@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Native Structure</title>
+<meta name="description" content="Native shell fixture">
+<meta property="og:title" content="Native Structure">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Person","name":"Native Structure"}
+</script>
+<script src="https://cdn.test/extra.js" defer></script>
+<style>
+:root {
+  --ink: rgb(17, 17, 17);
+  --paper: rgb(244, 240, 230);
+}
+html, body { margin: 0; }
+.frame { overflow: clip; }
+.layer { min-height: 100vh; }
+#a .title { color: var(--ink); }
+#b { background: var(--paper); }
+#b .grid { display: grid; grid-template-columns: 1fr; }
+#c .foot { font-size: 12px; }
+</style>
+<script>if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("rm");</script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="frame">
+  <div class="stage" id="stage">
+    <header class="top">
+      <b class="brand">Native Structure</b>
+      <nav class="nav" aria-label="Sections">
+        <button data-go="a">Alpha</button>
+        <button data-go="b">Beta</button>
+      </nav>
+    </header>
+    <div class="tunnel" id="tunnel" aria-hidden="true"></div>
+    <main id="main">
+      <section class="layer is-first" id="a" aria-label="Alpha" data-bg="ink">
+        <h1 class="title">Alpha</h1>
+        <p class="cap">First band.</p>
+      </section>
+      <section class="layer" id="b" aria-label="Beta" data-bg="paper">
+        <div class="grid"><p>Beta</p></div>
+      </section>
+      <section class="layer" id="c" aria-label="Gamma" data-bg="ink">
+        <p class="foot">Gamma</p>
+      </section>
+    </main>
+    <div class="ruler" id="ruler" aria-hidden="true"><div class="head" id="head"></div></div>
+  </div>
+</div>
+<div class="scroll-space" id="space"></div>
+<div class="cs" id="cs" role="dialog" aria-modal="true" aria-labelledby="csHeading" hidden>
+  <div class="cs-panel"><h2 class="cs-heading" id="csHeading"></h2></div>
+</div>
+<script src="vendor/gsap.min.js"></script>
+<script src="vendor/ScrollTrigger.min.js"></script>
+<script src="vendor/lenis.min.js"></script>
+<script src="vendor/split-type.min.js"></script>
+<script src="vendor/CircleType.min.js"></script>
+<script src="vendor/lottie.min.js"></script>
+<script src="app.js"></script>
+<script src="neu-ix.js"></script>
+<script>window.__order = (window.__order || []).concat("nativeTail");</script>
+</body>
+</html>

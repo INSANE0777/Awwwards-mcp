@@ -1,0 +1,87 @@
+{
+  "url": "https://example.test/native",
+  "capturedAt": 1760000000000,
+  "counts": {
+    "gsap-scrolltrigger": 2,
+    "css-scroll-timeline": 0,
+    "css-view-timeline": 0,
+    "data-attr": 0,
+    "css-keyframe": 1,
+    "smil": 0,
+    "unknown": 0
+  },
+  "anims": [
+    {
+      "selector": "#a .title",
+      "tag": "h1",
+      "props": ["opacity", "transform"],
+      "durationMs": 1200,
+      "delayMs": 0,
+      "easing": "power2.out",
+      "trigger": "gsap-scrolltrigger",
+      "scrub": true,
+      "pin": false,
+      "svgStroke": false,
+      "keyframes": [
+        { "offset": 0, "props": { "opacity": "0" } },
+        { "offset": 1, "props": { "opacity": "1" } }
+      ]
+    },
+    {
+      "selector": "#b .grid",
+      "tag": "div",
+      "props": ["opacity"],
+      "durationMs": 600,
+      "delayMs": 0,
+      "easing": "power1.out",
+      "trigger": "css-keyframe",
+      "scrub": false,
+      "pin": false,
+      "svgStroke": false
+    },
+    {
+      "selector": "#space",
+      "tag": "div",
+      "props": ["transform"],
+      "durationMs": 31210,
+      "delayMs": 0,
+      "easing": "none",
+      "trigger": "gsap-scrolltrigger",
+      "scrub": true,
+      "pin": false,
+      "svgStroke": false
+    }
+  ],
+  "gsapTriggers": [
+    {
+      "selector": "#a .title",
+      "scrub": true,
+      "pin": false,
+      "startPx": 0,
+      "endPx": 900,
+      "progress": 0.5,
+      "vars": { "ease": "power2.out" }
+    },
+    {
+      "selector": "#space",
+      "scrub": true,
+      "pin": true,
+      "startPx": 0,
+      "endPx": 36000,
+      "progress": 0.5,
+      "vars": { "ease": "none" }
+    }
+  ],
+  "scrubCurves": [
+    {
+      "selector": "#a .title",
+      "startPx": 0,
+      "endPx": 900,
+      "steps": [
+        { "scrollY": 0, "progress": 0, "transform": "none" },
+        { "scrollY": 900, "progress": 1, "transform": "translateY(0px)" }
+      ]
+    }
+  ],
+  "reducedMotion": false
+}
