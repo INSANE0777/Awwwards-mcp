@@ -266,7 +266,7 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
-## Built with awwwards-mcp: five real sites
+## Built with awwwards-mcp: six real sites
 
 Four complete sites were built through the full inspiration loop this MCP
 enables, using nothing but the server's tools plus the shipped
@@ -385,6 +385,8 @@ open `index.html` directly, no server or build step needed.
 ![NEUTOMNI rehost — Win-95 desktop with the pricing TV](assets/neutomni-rehost-desktop.png)
 
 ![NEUTOMNI rehost — red footer with contact and wordmark](assets/neutomni-rehost-footer.png)
+
+**6. NEUTOMNI study recreation** ([`showcase/nio/`](showcase/nio/index.html)) — a hand-built recreation of neutomni.com reconstructed from MCP evidence (band map, component packs, scroll/hover censuses, motion DNA, pose capture) rather than rehosted markup: authored HTML/CSS/JS with GSAP + ScrollTrigger + Lenis, sourced fonts/images/audio vendored locally. Ships with the mandatory study-build disclaimer and a full provenance list in its own README — a private reference build, **not for publication**; replace the borrowed assets before any real use. This is the `recreate` skill's end-to-end artifact.
 
 ## Skills used to build these
 
