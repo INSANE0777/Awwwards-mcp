@@ -221,7 +221,7 @@ server.tool(
 
 server.tool(
   "get_annual_nominee",
-  "Get one official Awwwards Annual Awards nominee in full: site entries carry date, description, designBy, country, image/video URLs; agency entries carry location, avatar, award tag counts and featured projects. Pass id (a UUID or full /api/annual/nominees/... path) or category+slug. Personal, non-commercial inspiration use only; media URLs are reference-only and nothing is downloaded.",
+  "Get one official Awwwards Annual Awards nominee in full: site entries carry date, description, designBy, country, image/video URLs; agency entries carry location, avatar, award tag counts and featured projects. Pass id (a UUID or full /api/annual/nominees/... path) or category+slug; category+slug may hydrate up to 20 uncached nominees at 1 request/second (~20s worst case), so prefer id when known. Personal, non-commercial inspiration use only; media URLs are reference-only and nothing is downloaded.",
   {
     id: z
       .string()

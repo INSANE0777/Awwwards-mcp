@@ -19,8 +19,11 @@ export const ANNUAL_MAX_LIMIT = 20;
 // Deliberate simplification of the plan: reuse the existing `meta` table
 // (namespaced keys + JSON values) instead of adding an annual_cache table.
 const CATEGORIES_KEY = "annual:categories";
-// Shared with cli.ts's scraper, so the whole server process respects one
-// 1 req/s awwwards.com budget.
+
+const CATEGORIES_NOTE =
+  "Nominees are hydrated on request at 1 request/second. Annual data comes from " +
+  "Awwwards' official public read-only API for personal, non-commercial inspiration " +
+  "use; media URLs are reference-only (no downloads).";
 
 export interface AnnualCategory {
   name: string;
@@ -90,17 +93,21 @@ export interface AnnualNomineeSummary {
 export interface AnnualMeta {
   cached: boolean;
   stale?: true;
+  // A 403/429 stopped the request. Consumers must not issue more requests.
+  blocked?: true;
   error?: string;
 }
 
 export interface AnnualCategoriesResult {
   categories: AnnualCategory[];
   meta: AnnualMeta;
+  note: string;
 }
 
 export interface AnnualNomineeResult {
   nominee: AnnualNominee;
   meta: AnnualMeta;
+  mediaNote: "reference-only";
 }
 
 export interface AnnualNomineesMeta {
@@ -108,6 +115,7 @@ export interface AnnualNomineesMeta {
   cached: number;
   partial: boolean;
   stale?: true;
+  blocked?: true;
   error?: string;
   note: string;
 }
@@ -152,8 +160,10 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// AwwwardsClient already gives the house semantics: shared RateLimiter, house
-// UA, 10 s timeout including body, one retry on failure, no retry on 403/429.
+// AwwwardsClient already gives the house semantics: rate limiter, house UA,
+// 10 s timeout including body, one retry on failure, no retry on 403/429.
+// Its limiter defaults to SHARED_RATE_LIMITER (also used by cli.ts's scraper),
+// so the MCP process keeps one 1 req/s awwwards.com budget.
 async function fetchAnnualJson(path: string, deps: AnnualDeps): Promise<unknown> {
   const client = new AwwwardsClient({
     rateLimiter: deps.rateLimiter ?? SHARED_RATE_LIMITER,
@@ -307,6 +317,25 @@ function inLocalIndex(cache: Cache, slug: string): boolean {
   }
 }
 
+const MEDIA_NOTE = "reference-only" as const;
+const BLOCKED_NOTE = "Awwwards is blocking requests; no further requests were made.";
+
+// Reads a nominee from cache at any age, never the network.
+function cachedOnlyNominee(
+  kind: "site" | "user",
+  id: string,
+  cache: Cache,
+): AnnualNomineeResult | null {
+  const key = nomineeKey(kind, id);
+  const fresh = cache.getMeta<AnnualNominee>(key, ANNUAL_TTL_MS);
+  if (fresh) return { nominee: fresh, meta: { cached: true }, mediaNote: MEDIA_NOTE };
+  const stale = staleRead<AnnualNominee>(cache, key);
+  if (stale) {
+    return { nominee: stale, meta: { cached: true, stale: true }, mediaNote: MEDIA_NOTE };
+  }
+  return null;
+}
+
 function summarize(nominee: AnnualNominee, cache: Cache): AnnualNomineeSummary {
   const base: AnnualNomineeSummary = {
     id: nominee.id,
@@ -348,7 +377,12 @@ async function loadCategoryRecords(
     if (stale) {
       return {
         records: stale,
-        meta: { cached: true, stale: true, error: message(err) },
+        meta: {
+          cached: true,
+          stale: true,
+          ...(err instanceof BlockedError ? { blocked: true as const } : {}),
+          error: message(err),
+        },
       };
     }
     throw err;
@@ -357,28 +391,40 @@ async function loadCategoryRecords(
 
 export async function getCategories(deps: AnnualDeps): Promise<AnnualCategoriesResult> {
   const { records, meta } = await loadCategoryRecords(deps);
-  return { categories: records.map(publicCategory), meta };
+  return { categories: records.map(publicCategory), meta, note: CATEGORIES_NOTE };
 }
 
 export async function getNominee(
   kind: "site" | "user",
   id: string,
   deps: AnnualDeps,
+  options: { allowStale?: boolean } = {},
 ): Promise<AnnualNomineeResult> {
   const key = nomineeKey(kind, id);
   const fresh = deps.cache.getMeta<AnnualNominee>(key, ANNUAL_TTL_MS);
-  if (fresh) return { nominee: fresh, meta: { cached: true } };
+  if (fresh) return { nominee: fresh, meta: { cached: true }, mediaNote: MEDIA_NOTE };
   try {
     const payload = await fetchAnnualJson(nomineePath(kind, id), deps);
     const nominee = kind === "site"
       ? parseSiteNominee(payload, id)
       : parseUserNominee(payload, id);
     deps.cache.setMeta(key, nominee);
-    return { nominee, meta: { cached: false } };
+    return { nominee, meta: { cached: false }, mediaNote: MEDIA_NOTE };
   } catch (err) {
+    // The slug scan opts out so the first real failure surfaces unchanged.
+    if (options.allowStale === false) throw err;
     const stale = staleRead<AnnualNominee>(deps.cache, key);
     if (stale) {
-      return { nominee: stale, meta: { cached: true, stale: true, error: message(err) } };
+      return {
+        nominee: stale,
+        mediaNote: MEDIA_NOTE,
+        meta: {
+          cached: true,
+          stale: true,
+          ...(err instanceof BlockedError ? { blocked: true as const } : {}),
+          error: message(err),
+        },
+      };
     }
     throw err;
   }
@@ -410,11 +456,16 @@ export async function getNominees(
   const ids = category.nominees.slice(offset, offset + limit);
 
   const nominees: AnnualNomineeSummary[] = [];
-  const errors: string[] = [];
+  const errors: string[] = categoryMeta.error ? [categoryMeta.error] : [];
   let hydrated = 0;
   let cached = 0;
   let partial = false;
   let stale = categoryMeta.stale === true;
+  let blocked = categoryMeta.blocked === true;
+
+  // A blocked categories request serves stale categories but must not fan out
+  // into nominee requests. Uncached entries become id-only stubs.
+  const canHydrate = hydrate && !blocked;
 
   for (const id of ids) {
     const key = nomineeKey(category.kind, id);
@@ -424,7 +475,7 @@ export async function getNominees(
       cached++;
       continue;
     }
-    if (!hydrate) {
+    if (!canHydrate) {
       partial = true;
       nominees.push({ id, kind: category.kind, inLocalIndex: false, hydratePending: true });
       continue;
@@ -438,11 +489,19 @@ export async function getNominees(
         stale = true;
         if (result.meta.error) errors.push(result.meta.error);
       }
+      // A stale-served block ends the call; the remaining ids stay pending.
+      if (result.meta.blocked) {
+        blocked = true;
+        break;
+      }
     } catch (err) {
       partial = true;
       errors.push(message(err));
       // Never keep hammering through a block; the rest are left pending.
-      if (err instanceof BlockedError) break;
+      if (err instanceof BlockedError) {
+        blocked = true;
+        break;
+      }
     }
   }
 
@@ -457,6 +516,7 @@ export async function getNominees(
       cached,
       partial,
       ...(stale ? { stale: true as const } : {}),
+      ...(blocked ? { blocked: true as const } : {}),
       ...(errors.length > 0 ? { error: errors[0] } : {}),
       note:
         "Details hydrate on request at 1 request/second and cache for 7 days. " +
@@ -468,6 +528,13 @@ export async function getNominees(
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOMINEE_PATH_RE = /\/api\/annual\/nominees\/(sites|users)\/([^/?#]+)\/?$/;
 
+function invalidReference(idOrPath: string): Error {
+  return new Error(
+    `Invalid annual nominee reference: ${idOrPath}. ` +
+      "Pass a UUID or a full /api/annual/nominees/sites|users/<uuid> path.",
+  );
+}
+
 // Accepts a bare UUID (kind resolved from the cached categories) or a full
 // `/api/annual/nominees/sites|users/<uuid>` path (or absolute URL ending in it).
 export async function resolveNominee(
@@ -477,17 +544,16 @@ export async function resolveNominee(
   const ref = idOrPath.trim();
   const pathMatch = NOMINEE_PATH_RE.exec(ref);
   if (pathMatch) {
+    const id = pathMatch[2]!;
+    // Validate before any cache/network work: `..` and other path fragments
+    // must never become a nominee id.
+    if (!UUID_RE.test(id)) throw invalidReference(idOrPath);
     const kind = pathMatch[1] === "sites" ? "site" : "user";
-    return getNominee(kind, pathMatch[2]!.toLowerCase(), deps);
+    return getNominee(kind, id.toLowerCase(), deps);
   }
-  if (!UUID_RE.test(ref)) {
-    throw new Error(
-      `Invalid annual nominee reference: ${idOrPath}. ` +
-        "Pass a UUID or a full /api/annual/nominees/sites|users/<uuid> path.",
-    );
-  }
+  if (!UUID_RE.test(ref)) throw invalidReference(idOrPath);
   const id = ref.toLowerCase();
-  const { records } = await loadCategoryRecords(deps);
+  const { records, meta } = await loadCategoryRecords(deps);
   const category = records.find((c) => c.nominees.includes(id));
   if (!category) {
     throw new Error(
@@ -495,48 +561,88 @@ export async function resolveNominee(
         "or pass the full /api/annual/nominees/... path.",
     );
   }
+  // A blocked categories lookup may use stale categories to identify the kind,
+  // but it must not trigger a fresh nominee request.
+  if (meta.blocked) {
+    const cached = cachedOnlyNominee(category.kind, id, deps.cache);
+    if (cached) {
+      return {
+        ...cached,
+        meta: {
+          ...cached.meta,
+          blocked: true,
+          ...(meta.error ? { error: meta.error } : {}),
+        },
+      };
+    }
+    throw new Error(meta.error ?? BLOCKED_NOTE);
+  }
   return getNominee(category.kind, id, deps);
 }
 
 // Slug convenience for get_annual_nominee({category, slug}): fresh cache first,
-// then any cached age, then a bounded 20-entry hydration scan. Slugs are not
-// API keys, so resolving one may cost up to 20 paced requests.
+// then any cached age, then a bounded 20-entry hydration scan for uncached ids.
+// Slugs are not API keys, so resolving one may cost up to 20 paced requests
+// (~20 s at 1 req/s). The first failed fetch stops the scan unchanged.
 export async function getNomineeBySlug(
   categorySlug: string,
   slug: string,
   deps: AnnualDeps,
 ): Promise<AnnualNomineeResult> {
-  const { records } = await loadCategoryRecords(deps);
+  const { records, meta: categoryMeta } = await loadCategoryRecords(deps);
   const category = records.find((c) => c.slug === categorySlug);
   if (!category) throw unknownCategory(categorySlug, records);
 
+  const blockedFields = categoryMeta.blocked
+    ? {
+        blocked: true as const,
+        ...(categoryMeta.error ? { error: categoryMeta.error } : {}),
+      }
+    : {};
+
+  const cachedIds = new Set<string>();
   for (const id of category.nominees) {
-    const cached = deps.cache.getMeta<AnnualNominee>(
-      nomineeKey(category.kind, id),
-      ANNUAL_TTL_MS,
-    );
-    if (cached?.slug === slug) return { nominee: cached, meta: { cached: true } };
-  }
-  for (const id of category.nominees) {
-    const cached = staleRead<AnnualNominee>(deps.cache, nomineeKey(category.kind, id));
-    if (cached?.slug === slug) {
-      return { nominee: cached, meta: { cached: true, stale: true } };
+    const key = nomineeKey(category.kind, id);
+    const fresh = deps.cache.getMeta<AnnualNominee>(key, ANNUAL_TTL_MS);
+    if (fresh) {
+      cachedIds.add(id);
+      if (fresh.slug === slug) {
+        return {
+          nominee: fresh,
+          meta: { cached: true, ...blockedFields },
+          mediaNote: MEDIA_NOTE,
+        };
+      }
+      continue;
+    }
+    const stale = staleRead<AnnualNominee>(deps.cache, key);
+    if (stale) {
+      cachedIds.add(id);
+      if (stale.slug === slug) {
+        return {
+          nominee: stale,
+          meta: { cached: true, stale: true, ...blockedFields },
+          mediaNote: MEDIA_NOTE,
+        };
+      }
     }
   }
 
+  if (categoryMeta.blocked) throw new Error(categoryMeta.error ?? BLOCKED_NOTE);
+
   let attempted = 0;
   for (const id of category.nominees) {
+    // Any cached candidate (fresh or stale) was already considered above;
+    // re-fetching it would waste a request and could mask a block.
+    if (cachedIds.has(id)) continue;
     if (attempted >= ANNUAL_MAX_LIMIT) break;
     attempted++;
-    try {
-      const result = await getNominee(category.kind, id, deps);
-      if (result.nominee.slug === slug) return result;
-    } catch (err) {
-      if (err instanceof BlockedError) throw err;
-    }
+    const result = await getNominee(category.kind, id, deps, { allowStale: false });
+    if (result.nominee.slug === slug) return result;
   }
   throw new Error(
-    `No nominee with slug "${slug}" in ${categorySlug} among the first ${attempted} entries. ` +
+    `No nominee with slug "${slug}" in ${categorySlug} among ${cachedIds.size} cached ` +
+      `and ${attempted} uncached entries. ` +
       "Find its id with get_annual_nominees (offset/limit), then call get_annual_nominee with that id.",
   );
 }

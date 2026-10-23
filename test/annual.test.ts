@@ -84,6 +84,16 @@ function categoriesPayload(ids: string[], kind: "site" | "user" = "site", slug =
 const uuid = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
+function sitePayload(id: string, slug: string) {
+  return {
+    data: {
+      id: `/api/annual/nominees/sites/${id}`,
+      type: "Site Nominee",
+      attributes: { _id: id, name: slug, slug, images: [], videos: [] },
+    },
+  };
+}
+
 function siteRow(slug: string): SiteSummary {
   return {
     id: 1,
@@ -116,6 +126,8 @@ describe("annual API client", () => {
       nomineeCount: 3,
     });
     expect(result.meta).toEqual({ cached: false });
+    expect(result.note).toContain("hydrated on request");
+    expect(result.note).toContain("reference-only");
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const url = String(fetchFn.mock.calls[0]![0]);
     expect(url).toBe("https://www.awwwards.com/api/annual/categories");
@@ -140,6 +152,7 @@ describe("annual API client", () => {
     expect(result.nominee.images).toHaveLength(1);
     expect(result.nominee.videos).toHaveLength(7);
     expect(result.meta).toEqual({ cached: false });
+    expect(result.mediaNote).toBe("reference-only");
   });
 
   it("normalizes a user nominee with tags and featured projects", async () => {
@@ -188,6 +201,22 @@ describe("annual API client", () => {
     expect(stale.meta.cached).toBe(true);
     expect(stale.meta.stale).toBe(true);
     expect(stale.meta.error).toContain("HTTP 500");
+  });
+
+  it("marks stale categories blocked when the API returns 403", async () => {
+    let t = 1_000_000;
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn, () => t);
+    await getCategories(d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+    fetchFn.mockImplementation(async () => new Response("blocked", { status: 403 }));
+
+    const stale = await getCategories(d);
+    expect(stale.categories).toHaveLength(6);
+    expect(stale.meta).toMatchObject({ cached: true, stale: true, blocked: true });
+    expect(stale.meta.error).toContain("blocking requests");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("serves a stale nominee with stale:true instead of pretending it is fresh", async () => {
@@ -318,6 +347,210 @@ describe("annual API client", () => {
     expect(result.meta.error).toContain("HTTP 500");
   });
 
+  it("marks blocked:true and stops after a 403 when stale cache is served", async () => {
+    let t = 1_000_000;
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn, () => t);
+    await getNominee("site", SITE_ID, d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+    fetchFn.mockImplementation(async () => new Response("blocked", { status: 403 }));
+
+    const stale = await getNominee("site", SITE_ID, d);
+    expect(stale.nominee.id).toBe(SITE_ID);
+    expect(stale.meta).toMatchObject({ cached: true, stale: true, blocked: true });
+    expect(stale.meta.error).toContain("blocking requests");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves stale categories blocked without hydrating any nominee", async () => {
+    let t = 1_000_000;
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn, () => t);
+    await getCategories(d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+    fetchFn.mockImplementation(async () => new Response("blocked", { status: 403 }));
+
+    const result = await getNominees("site-of-the-year", { limit: 3 }, d);
+    expect(result.nominees).toHaveLength(3);
+    expect(result.nominees[0]).toMatchObject({ kind: "site", hydratePending: true });
+    expect(result.meta).toMatchObject({
+      hydrated: 0,
+      cached: 0,
+      partial: true,
+      stale: true,
+      blocked: true,
+    });
+    expect(result.meta.error).toContain("blocking requests");
+    expect(fetchFn).toHaveBeenCalledTimes(1); // categories only
+  });
+
+  it("stops list hydration at the first blocked nominee even when stale data is served", async () => {
+    const ids = [uuid(1), uuid(2), uuid(3)];
+    let t = 1_000_000;
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/annual/categories")) return json(categoriesPayload(ids));
+      const id = url.split("/").pop()!;
+      return json(sitePayload(id, `slug-${id.slice(-4)}`));
+    });
+    const d = deps(fetchFn as never, () => t);
+    await getCategories(d);
+    for (const id of ids) await getNominee("site", id, d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+    fetchFn.mockImplementation(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/annual/categories")) return json(categoriesPayload(ids));
+      if (url.endsWith(ids[0]!)) return json(sitePayload(ids[0]!, "first"));
+      if (url.endsWith(ids[1]!)) return new Response("blocked", { status: 403 });
+      return json(sitePayload(ids[2]!, "third"));
+    });
+
+    const result = await getNominees("test-category", { limit: 3 }, d);
+    expect(result.nominees.map((n) => n.id)).toEqual([ids[0], ids[1]]);
+    expect(result.meta).toMatchObject({
+      hydrated: 1,
+      cached: 1,
+      partial: true,
+      stale: true,
+      blocked: true,
+    });
+    const detailUrls = fetchFn.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes("/nominees/"));
+    expect(detailUrls).toHaveLength(2);
+    expect(detailUrls.some((url) => url.includes(ids[2]!))).toBe(false);
+  });
+
+  it("stops list hydration at a thrown block with no stale cache", async () => {
+    const ids = [uuid(1), uuid(2), uuid(3)];
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/annual/categories")) return json(categoriesPayload(ids));
+      return new Response("blocked", { status: 403 });
+    });
+    const d = deps(fetchFn as never);
+
+    const result = await getNominees("test-category", { limit: 3 }, d);
+    expect(result.nominees).toEqual([]);
+    expect(result.meta).toMatchObject({
+      hydrated: 0,
+      cached: 0,
+      partial: true,
+      blocked: true,
+    });
+    expect(result.meta.error).toContain("blocking requests");
+    const detailUrls = fetchFn.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes("/nominees/"));
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain(ids[0]!);
+  });
+
+  it("rejects non-UUID path segments with zero HTTP calls", async () => {
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn);
+
+    for (const ref of [
+      "/api/annual/nominees/sites/..",
+      "/api/annual/nominees/sites/not-a-uuid",
+      "/api/annual/nominees/users/x",
+    ]) {
+      await expect(resolveNominee(ref, d)).rejects.toThrow(/Invalid annual nominee reference/);
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("skips every cached candidate during a slug hydration scan", async () => {
+    const ids = [uuid(1), uuid(2), uuid(3)];
+    let t = 1_000_000;
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/annual/categories")) return json(categoriesPayload(ids));
+      const id = url.split("/").pop()!;
+      return json(sitePayload(id, `slug-${id.slice(-4)}`));
+    });
+    const d = deps(fetchFn as never, () => t);
+    await getNominee("site", ids[0]!, d);
+    await getNominee("site", ids[1]!, d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+
+    const found = await getNomineeBySlug("test-category", `slug-${ids[2]!.slice(-4)}`, d);
+    expect(found.nominee.id).toBe(ids[2]);
+    const detailUrls = fetchFn.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes("/nominees/"));
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain(ids[2]!);
+  });
+
+  it("surfaces the first slug-scan API failure instead of not-found", async () => {
+    const ids = [uuid(1), uuid(2)];
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/annual/categories")) return json(categoriesPayload(ids));
+      if (url.endsWith(ids[0]!)) return json({ error: "down" }, 500);
+      return json(sitePayload(ids[1]!, "other"));
+    });
+    const d = deps(fetchFn as never);
+
+    await expect(getNomineeBySlug("test-category", "wanted", d)).rejects.toThrow(/HTTP 500/);
+    const urls = fetchFn.mock.calls.map(([input]) => String(input));
+    expect(urls.filter((url) => url.includes(ids[1]!))).toHaveLength(0);
+    // categories + two attempts for ids[0] (one retry)
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops a slug scan on a blocked fetch without touching later ids", async () => {
+    const ids = [uuid(1), uuid(2)];
+    const fetchFn = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/annual/categories")) return json(categoriesPayload(ids));
+      return new Response("blocked", { status: 403 });
+    });
+    const d = deps(fetchFn as never);
+
+    await expect(getNomineeBySlug("test-category", "wanted", d)).rejects.toBeInstanceOf(BlockedError);
+    const urls = fetchFn.mock.calls.map(([input]) => String(input));
+    expect(urls.filter((url) => url.includes(ids[1]!))).toHaveLength(0);
+    expect(fetchFn).toHaveBeenCalledTimes(2); // categories + one 403, no retry
+  });
+
+  it("does not scan nominees via slug when stale categories are blocked", async () => {
+    let t = 1_000_000;
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn, () => t);
+    await getCategories(d);
+    await getNominee("site", SITE_ID, d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+    fetchFn.mockImplementation(async () => new Response("blocked", { status: 403 }));
+
+    const cached = await getNomineeBySlug("site-of-the-year", "mario-roudil", d);
+    expect(cached.nominee.id).toBe(SITE_ID);
+    expect(cached.meta).toMatchObject({ cached: true, stale: true, blocked: true });
+    expect(fetchFn).toHaveBeenCalledTimes(1); // categories only, no scan
+  });
+
+  it("resolves a bare UUID from stale blocked categories without a nominee request", async () => {
+    let t = 1_000_000;
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn, () => t);
+    await getCategories(d);
+    await getNominee("site", SITE_ID, d);
+    t += ANNUAL_TTL_MS + 1;
+    fetchFn.mockClear();
+    fetchFn.mockImplementation(async () => new Response("blocked", { status: 403 }));
+
+    const cached = await resolveNominee(SITE_ID, d);
+    expect(cached.nominee.id).toBe(SITE_ID);
+    expect(cached.meta).toMatchObject({ cached: true, stale: true, blocked: true });
+    expect(fetchFn).toHaveBeenCalledTimes(1); // categories only
+  });
+
   it("builds summaries with siteSlug and inLocalIndex from cache only", async () => {
     const fetchFn = fixtureFetch();
     const d = deps(fetchFn);
@@ -353,6 +586,7 @@ describe("annual tools", () => {
       annualCategoriesFn: async () => ({
         categories: [{ name: "Site of the Year", slug: "site-of-the-year", kind: "site", nomineeCount: 30 }],
         meta: { cached: false },
+        note: "Nominees hydrate on request; media is reference-only.",
       }),
     });
     const res = await h.get_annual_categories();
@@ -360,6 +594,7 @@ describe("annual tools", () => {
     expect(JSON.parse((res.content[0] as { text: string }).text)).toEqual({
       categories: [{ name: "Site of the Year", slug: "site-of-the-year", kind: "site", nomineeCount: 30 }],
       meta: { cached: false },
+      note: "Nominees hydrate on request; media is reference-only.",
     });
   });
 
@@ -390,11 +625,17 @@ describe("annual tools", () => {
       images: [],
       videos: [],
     };
-    const fn = vi.fn(async () => ({ nominee, meta: { cached: true } }));
+    const fn = vi.fn(async () => ({
+      nominee,
+      meta: { cached: true },
+      mediaNote: "reference-only" as const,
+    }));
     const h = createHandlers({ client: client(), cache: cache(), annualNomineeFn: fn });
 
     const byId = await h.get_annual_nominee({ id: SITE_ID });
-    expect(JSON.parse((byId.content[0] as { text: string }).text).nominee.slug).toBe("mario-roudil");
+    const byIdBody = JSON.parse((byId.content[0] as { text: string }).text);
+    expect(byIdBody.nominee.slug).toBe("mario-roudil");
+    expect(byIdBody.mediaNote).toBe("reference-only");
 
     await h.get_annual_nominee({ category: "site-of-the-year", slug: "mario-roudil" });
     expect(fn).toHaveBeenLastCalledWith({ category: "site-of-the-year", slug: "mario-roudil" });
