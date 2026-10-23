@@ -23,10 +23,10 @@ const triggerLiteral = (t: MotionTrigger): string =>
     ease: t.ease,
   });
 
-const triggerList = (section: SectionMotion): string =>
-  section.triggers.length
-    ? `[\n${section.triggers.map((t) => `  ${triggerLiteral(t)},`).join("\n")}\n]`
-    : "[]";
+const triggerListOf = (triggers: MotionTrigger[]): string =>
+  triggers.length ? `[\n${triggers.map((t) => `  ${triggerLiteral(t)},`).join("\n")}\n]` : "[]";
+
+const triggerList = (section: SectionMotion): string => triggerListOf(section.triggers);
 
 const wired = (manifest: MotionManifest): SectionMotion[] =>
   manifest.sections.filter((s) => s.triggers.length > 0);
@@ -67,17 +67,61 @@ export function useSection${nn}Motion(): void {
 `;
 };
 
+const nextPageHook = (manifest: MotionManifest): string => {
+  if (manifest.pageTriggers.length === 0) {
+    return `"use client";
+
+import { useEffect } from "react";
+import { prefersReducedMotion } from "./useSectionMotion";
+
+// Page-level motion skeleton — no measured page triggers; author from motion.manifest.json hints.
+export function usePageMotion(): void {
+  useEffect(() => {
+    if (prefersReducedMotion()) return; // prefers-reduced-motion: static first frame
+    // TODO: author steps — page-level timeline for motion.manifest.json pageTriggers.
+  }, []);
+}
+`;
+  }
+  return `"use client";
+
+import { useEffect } from "react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { prefersReducedMotion } from "./useSectionMotion";
+
+// Page-level census triggers no section owned (page scrubs); ranges are viewport pixels.
+const PAGE_TRIGGERS = ${triggerListOf(manifest.pageTriggers)} as const;
+const PAGE_SELECTORS = ${JSON.stringify(manifest.pageAnimatedSelectors)} as const;
+
+export function usePageMotion(): void {
+  useEffect(() => {
+    if (prefersReducedMotion()) return; // prefers-reduced-motion: static first frame
+    gsap.registerPlugin(ScrollTrigger);
+    const ctx = gsap.context(() => {
+      // TODO: author steps — one page-level timeline per PAGE_TRIGGERS entry.
+      void PAGE_TRIGGERS;
+      void PAGE_SELECTORS;
+      ScrollTrigger.refresh();
+    });
+    return () => ctx.revert();
+  }, []);
+}
+`;
+};
+
 const nextMotionRoot = (sections: SectionMotion[]): string => {
   const imports = sections
     .map((s) => `import { useSection${sectionNN(s)}Motion } from "../hooks/useSection${sectionNN(s)}Motion";`)
     .join("\n");
-  const calls = sections.map((s) => `  useSection${sectionNN(s)}Motion();`).join("\n");
+  const calls = ["  usePageMotion();", ...sections.map((s) => `  useSection${sectionNN(s)}Motion();`)].join("\n");
   return `"use client";
 
+import { usePageMotion } from "../hooks/usePageMotion";
 ${imports}
 
-// Runs the measured section hooks in document order after mount. Each hook owns
-// one gsap.context and reverts it on unmount.
+// Page motion mounts before the measured section hooks; each hook owns one
+// gsap.context and reverts it on unmount.
 export default function MotionRoot() {
 ${calls}
   return null;
@@ -86,14 +130,19 @@ ${calls}
 };
 
 export function nextMotionSkeletons(manifest: MotionManifest): SkeletonFile[] {
-  const files: SkeletonFile[] = [{ path: "hooks/useSectionMotion.ts", content: nextGuardHook() }];
+  const files: SkeletonFile[] = [
+    { path: "hooks/useSectionMotion.ts", content: nextGuardHook() },
+    { path: "hooks/usePageMotion.ts", content: nextPageHook(manifest) },
+  ];
   for (const section of manifest.sections) {
     if (section.triggers.length === 0) continue;
     const nn = sectionNN(section);
     files.push({ path: `hooks/useSection${nn}Motion.ts`, content: nextSectionHook(section) });
   }
   const sections = wired(manifest);
-  if (sections.length > 0) files.push({ path: "components/MotionRoot.tsx", content: nextMotionRoot(sections) });
+  if (sections.length > 0 || manifest.pageTriggers.length > 0) {
+    files.push({ path: "components/MotionRoot.tsx", content: nextMotionRoot(sections) });
+  }
   return files;
 }
 
@@ -129,15 +178,50 @@ export function init${section.component}() {
 `;
 };
 
+const webPageModule = (manifest: MotionManifest): string => {
+  if (manifest.pageTriggers.length === 0) {
+    return `// Page motion skeleton — no measured page triggers; author from motion.manifest.json hints.
+const PAGE_TRIGGERS = [];
+
+export function initPageMotion() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
+  // TODO: author steps for page-level motion (see motion.manifest.json pageTriggers).
+  void PAGE_TRIGGERS;
+  return () => {};
+}
+`;
+  }
+  return `// Page motion skeleton — census triggers with no section owner (page scrubs); inert until authored.
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+const PAGE_TRIGGERS = ${triggerListOf(manifest.pageTriggers)};
+const PAGE_SELECTORS = ${JSON.stringify(manifest.pageAnimatedSelectors)};
+
+export function initPageMotion() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
+  gsap.registerPlugin(ScrollTrigger);
+  const ctx = gsap.context(() => {
+    // TODO: author steps — one page-level timeline per PAGE_TRIGGERS entry.
+    for (const trigger of PAGE_TRIGGERS) void trigger;
+    void PAGE_SELECTORS;
+    ScrollTrigger.refresh();
+  });
+  return () => ctx.revert();
+}
+`;
+};
+
 const webRegistry = (sections: SectionMotion[]): string => {
   const imports = sections
     .map((s) => `import { init${s.component} } from "./section${sectionNN(s)}.js";`)
     .join("\n");
   const inits = sections.map((s) => `init${s.component}`).join(", ");
-  return `// Ordered registry: sections run in document order; each returns a cleanup.
+  return `// Ordered registry: page motion first, then sections in document order; each returns a cleanup.
+import { initPageMotion } from "./page.js";
 ${imports}
 
-const SECTIONS = [${inits}];
+const SECTIONS = [initPageMotion${inits ? `, ${inits}` : ""}];
 
 export function initAnimations() {
   const cleanups = SECTIONS.map((init) => init());
@@ -147,13 +231,16 @@ export function initAnimations() {
 };
 
 export function webMotionSkeletons(manifest: MotionManifest): SkeletonFile[] {
-  const files: SkeletonFile[] = manifest.sections.map((section) => ({
-    path: `src/animations/section${sectionNN(section)}.js`,
-    content: webSectionModule(section),
-  }));
+  const files: SkeletonFile[] = [
+    { path: "src/animations/page.js", content: webPageModule(manifest) },
+    ...manifest.sections.map((section) => ({
+      path: `src/animations/section${sectionNN(section)}.js`,
+      content: webSectionModule(section),
+    })),
+  ];
   files.push({ path: "src/animations/registry.js", content: webRegistry(manifest.sections) });
   return files;
 }
 
 export const motionHasTriggers = (manifest: MotionManifest): boolean =>
-  manifest.sections.some((s) => s.triggers.length > 0);
+  manifest.pageTriggers.length > 0 || manifest.sections.some((s) => s.triggers.length > 0);

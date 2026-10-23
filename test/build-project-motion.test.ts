@@ -72,8 +72,8 @@ describe("motion census validation", () => {
     const direct = normalizeScrollCensus(censusRaw());
     expect("error" in direct).toBe(false);
     if ("error" in direct) return;
-    expect(direct.census.anims).toHaveLength(2);
-    expect(direct.census.gsapTriggers).toHaveLength(1);
+    expect(direct.census.anims).toHaveLength(3);
+    expect(direct.census.gsapTriggers).toHaveLength(2);
     expect(direct.census.scrubCurves).toHaveLength(1);
 
     const nested = normalizeScrollCensus({ scrollCensus: censusRaw() });
@@ -120,6 +120,10 @@ describe("motion.manifest.json", () => {
         },
         { id: "c", component: "Section03", measured: true, triggers: [], initialHidden: [], animatedSelectors: [] },
       ],
+      pageTriggers: [
+        { selector: "#space", start: 0, end: 36000, scrub: true, pin: true, durationMs: 31210, ease: "none" },
+      ],
+      pageAnimatedSelectors: ["#space"],
     });
   });
 
@@ -157,6 +161,8 @@ describe("motion.manifest.json", () => {
           animatedSelectors: ["#b .grid", "#b .slide-up"],
         },
       ],
+      pageTriggers: [],
+      pageAnimatedSelectors: [],
     });
   });
 
@@ -177,7 +183,8 @@ describe("motion.manifest.json", () => {
     const manifest = buildMotionManifest(splitBuild(html), parsed.census);
     expect(manifest.sections[0].triggers.map((t) => t.selector)).toEqual(["section:nth-of-type(1)>h2"]);
     expect(manifest.sections[1].triggers.map((t) => t.selector)).toEqual(["main>section:nth-of-type(2)>h2"]);
-    expect(manifest.unattributed?.map((t) => t.selector)).toEqual(["main>section:nth-of-type(3)>h2"]);
+    expect(manifest.pageTriggers.map((t) => t.selector)).toEqual(["main>section:nth-of-type(3)>h2"]);
+    expect(manifest.pageAnimatedSelectors).toEqual(["main>section:nth-of-type(3)>h2"]);
   });
 
   it("attributes an unowned measured selector to no section (never guesses)", () => {
@@ -188,9 +195,19 @@ describe("motion.manifest.json", () => {
     if ("error" in parsed) throw new Error(parsed.error);
     const manifest = buildMotionManifest(splitBuild(sample4()), parsed.census);
     expect(manifest.sections.every((s) => s.triggers.length === 0)).toBe(true);
-    expect(manifest.unattributed).toEqual([
+    expect(manifest.pageTriggers).toEqual([
       { selector: ".unknown", start: null, end: null, scrub: false, pin: false, durationMs: 10, ease: "linear" },
     ]);
+    expect(manifest.pageAnimatedSelectors).toEqual([".unknown"]);
+  });
+
+  it("keeps page-level scrub triggers from the fixture census", () => {
+    const manifest = measuredManifest();
+    expect(manifest.pageTriggers).toEqual([
+      { selector: "#space", start: 0, end: 36000, scrub: true, pin: true, durationMs: 31210, ease: "none" },
+    ]);
+    expect(manifest.pageAnimatedSelectors).toEqual(["#space"]);
+    expect(manifest.sections.every((s) => s.triggers.every((t) => t.selector !== "#space"))).toBe(true);
   });
 });
 
@@ -198,10 +215,18 @@ describe("motion skeletons", () => {
   const split = splitBuild(sample4());
   const manifest = measuredManifest();
 
-  it("next: guard hook, per-section hooks only for measured sections, ordered MotionRoot", () => {
+  it("next: page hook + per-section hooks, ordered page-first MotionRoot", () => {
     const f = byPath(emitNext(split, "", "x", { manifest, authored: false }).files);
     expect(f["hooks/useSectionMotion.ts"]).toContain('"use client"');
     expect(f["hooks/useSectionMotion.ts"]).toContain("prefers-reduced-motion: reduce");
+    const page = f["hooks/usePageMotion.ts"] ?? "";
+    expect(page).toContain('"use client"');
+    expect(page).toContain("gsap.context");
+    expect(page).toContain("prefersReducedMotion()");
+    expect(page).toContain("prefers-reduced-motion");
+    expect(page).toContain("TODO: author steps");
+    expect(page).toContain("#space");
+    expect(page).toContain("ScrollTrigger.refresh()");
     expect(f["hooks/useSection01Motion.ts"]).toContain("gsap.context");
     expect(f["hooks/useSection02Motion.ts"]).toContain("gsap.context");
     expect(f["hooks/useSection03Motion.ts"]).toBeUndefined();
@@ -215,13 +240,20 @@ describe("motion skeletons", () => {
       expect(text).not.toContain("app.js");
     }
     const root = f["components/MotionRoot.tsx"] ?? "";
+    expect(root.indexOf("usePageMotion();")).toBeGreaterThan(-1);
+    expect(root.indexOf("usePageMotion();")).toBeLessThan(root.indexOf("useSection01Motion();"));
     expect(root.indexOf("useSection01Motion();")).toBeLessThan(root.indexOf("useSection02Motion();"));
     expect(root).toContain("return null;");
   });
 
-  it("vite/astro: one init module per section + ordered registry, inert by default", () => {
+  it("vite/astro: page module + one init per section + page-first registry, inert by default", () => {
     for (const emitted of [emitVite(split, "", "x", { manifest, authored: false }), emitAstro(split, "", "x", { manifest, authored: false })]) {
       const f = byPath(emitted.files);
+      const page = f["src/animations/page.js"] ?? "";
+      expect(page).toContain("export function initPageMotion()");
+      expect(page).toContain("prefers-reduced-motion: reduce");
+      expect(page).toContain("gsap.context");
+      expect(page).toContain("#space");
       for (let i = 1; i <= 3; i++) {
         const text = f[`src/animations/section0${i}.js`] ?? "";
         expect(text).toContain(`export function initSection0${i}()`);
@@ -229,6 +261,8 @@ describe("motion skeletons", () => {
       }
       expect(f["src/animations/section01.js"]).toContain("TODO: author steps");
       const registry = f["src/animations/registry.js"] ?? "";
+      expect(registry.indexOf("./page.js")).toBeLessThan(registry.indexOf("./section01.js"));
+      expect(registry.indexOf("initPageMotion")).toBeLessThan(registry.indexOf("initSection01"));
       expect(registry.indexOf("./section01.js")).toBeLessThan(registry.indexOf("./section02.js"));
       expect(registry.indexOf("./section02.js")).toBeLessThan(registry.indexOf("./section03.js"));
       expect(registry).toContain("export function initAnimations()");
@@ -238,6 +272,7 @@ describe("motion skeletons", () => {
     expect(vite["src/main.js"]).not.toContain("initAnimations");
     const astro = byPath(emitAstro(split, "", "x", { manifest, authored: false }).files);
     expect(astro["src/components/Section01.astro"]).not.toContain("animations/");
+    expect(astro["src/pages/index.astro"]).not.toContain("initPageMotion");
   });
 });
 
@@ -320,8 +355,18 @@ describe("--authored", () => {
 
       expect(trees.next?.["app/layout.tsx"]).toContain("<SiteScripts />");
       expect(trees.next?.["app/layout.tsx"]).toContain("<MotionRoot />");
-      expect(trees.next?.["components/MotionRoot.tsx"]).toContain("useSection01Motion();");
+      const nextRoot = trees.next?.["components/MotionRoot.tsx"] ?? "";
+      expect(nextRoot.indexOf("usePageMotion();")).toBeGreaterThan(-1);
+      expect(nextRoot.indexOf("usePageMotion();")).toBeLessThan(nextRoot.indexOf("useSection01Motion();"));
+      expect(trees.next?.["hooks/usePageMotion.ts"]).toContain("#space");
       expect(trees.vite?.["src/main.js"]).toContain("initAnimations();");
+      const viteRegistry = trees.vite?.["src/animations/registry.js"] ?? "";
+      expect(viteRegistry.indexOf("initPageMotion")).toBeLessThan(viteRegistry.indexOf("initSection01"));
+      expect(trees.vite?.["src/animations/page.js"]).toContain("#space");
+      expect(trees.astro?.["src/pages/index.astro"]).toContain("initPageMotion();");
+      expect(trees.astro?.["src/pages/index.astro"]?.indexOf("initPageMotion")).toBeLessThan(
+        trees.astro?.["src/pages/index.astro"]?.indexOf("<Section01 />") ?? -1,
+      );
       expect(trees.astro?.["src/components/Section01.astro"]).toContain('from "../animations/section01.js"');
       expect(trees.astro?.["src/components/Section01.astro"]).toContain("initSection01();");
     } finally {

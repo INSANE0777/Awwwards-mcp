@@ -2,7 +2,7 @@
   "url": "https://example.test/native",
   "capturedAt": 1760000000000,
   "counts": {
-    "gsap-scrolltrigger": 1,
+    "gsap-scrolltrigger": 2,
     "css-scroll-timeline": 0,
     "css-view-timeline": 0,
     "data-attr": 0,
@@ -38,6 +38,18 @@
       "scrub": false,
       "pin": false,
       "svgStroke": false
+    },
+    {
+      "selector": "#space",
+      "tag": "div",
+      "props": ["transform"],
+      "durationMs": 31210,
+      "delayMs": 0,
+      "easing": "none",
+      "trigger": "gsap-scrolltrigger",
+      "scrub": true,
+      "pin": false,
+      "svgStroke": false
     }
   ],
   "gsapTriggers": [
@@ -49,6 +61,15 @@
       "endPx": 900,
       "progress": 0.5,
       "vars": { "ease": "power2.out" }
+    },
+    {
+      "selector": "#space",
+      "scrub": true,
+      "pin": true,
+      "startPx": 0,
+      "endPx": 36000,
+      "progress": 0.5,
+      "vars": { "ease": "none" }
     }
   ],
   "scrubCurves": [

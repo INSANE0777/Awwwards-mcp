@@ -32,7 +32,8 @@ export interface MotionManifest {
   version: 1;
   measured: boolean;
   sections: SectionMotion[];
-  unattributed?: MotionTrigger[]; // measured triggers whose selector owned no section
+  pageTriggers: MotionTrigger[]; // measured triggers whose selector owned no section
+  pageAnimatedSelectors: string[];
 }
 
 export interface MotionEmitOptions {
@@ -320,7 +321,7 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
     animatedSelectors: census ? [] : scans[i]?.animatedSelectors ?? [],
   }));
 
-  if (!census) return { version: 1, measured: false, sections: result };
+  if (!census) return { version: 1, measured: false, sections: result, pageTriggers: [], pageAnimatedSelectors: [] };
 
   const owner = (selector: string): number => {
     const tokens = selectorTokens(selector);
@@ -341,7 +342,9 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
     return hit;
   };
 
-  const unattributed: MotionTrigger[] = [];
+  const pageTriggers: MotionTrigger[] = [];
+  const pageAnimatedSelectors: string[] = [];
+  const pageAnimatedSeen = new Set<string>();
   const animatedSeen = new Set<string>();
   const addAnimated = (section: SectionMotion, selector: string) => {
     if (section.animatedSelectors.length >= MAX_SELECTORS || animatedSeen.has(`${section.id}::${selector}`)) return;
@@ -350,7 +353,11 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
   };
   const add = (index: number, trigger: MotionTrigger) => {
     if (index === -1) {
-      pushTrigger(unattributed, trigger);
+      pushTrigger(pageTriggers, trigger);
+      if (pageAnimatedSelectors.length < MAX_SELECTORS && !pageAnimatedSeen.has(trigger.selector)) {
+        pageAnimatedSeen.add(trigger.selector);
+        pageAnimatedSelectors.push(trigger.selector);
+      }
       return;
     }
     const section = result[index];
@@ -416,7 +423,8 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
     version: 1,
     measured: true,
     sections: result,
-    ...(unattributed.length > 0 ? { unattributed } : {}),
+    pageTriggers,
+    pageAnimatedSelectors,
   };
 }
 
