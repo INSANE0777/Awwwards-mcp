@@ -2066,6 +2066,57 @@ describe("award filters (Theme A)", () => {
   });
 });
 
+describe("technology aliases in matchesFilters (review I1)", () => {
+  it("serves cached display-tag rows for alias tokens without refetching", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "warm-a", tags: ["Next.js", "3D"], createdAt: 1789516801, thumbnailPath: "submissions/warm-a.jpg" }),
+      site({ slug: "warm-b", tags: ["Next.js", "3D"], createdAt: 1789516800, thumbnailPath: "submissions/warm-b.jpg" }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ tags: ["3d", "nextjs"], count: 2 });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("(slug: warm-a)");
+    expect(body).toContain("(slug: warm-b)");
+    expect(fetchFn).not.toHaveBeenCalled(); // page window filled from cache alone
+  });
+
+  it("serves cache for technology: 'nextjs' against display tags", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "nexty", tags: ["Three.js", "Next.js", "Sanity"], thumbnailPath: "submissions/nexty.jpg" })]);
+    const { client, fetchFn } = fakeClient();
+    vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+    const h = createHandlers({ client, cache });
+    // count: 1 exactly fills the page window — a partially filled window
+    // would top-up-scrape by design (that path is pinned elsewhere).
+    const res = await h.search_sites({ technology: "nextjs", count: 1 });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("(slug: nexty)");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("combined color + alias technology keeps matching scraped rows", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ color: "#404040", technology: "nextjs", count: 6 });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("(slug: aspen-search)"); // fixture card tagged Next.js
+    expect(body).not.toContain("(slug: l-i-s-a)"); // non-Next.js cards dropped client-side
+  });
+
+  it("combined tags+alias and award+alias keep matching scraped rows", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const tagsRes = await h.search_sites({ tags: ["3d", "nextjs"], count: 6 });
+    expect((tagsRes.content[0] as { type: "text"; text: string }).text).toContain("(slug: warm-fuzzy)");
+    const awardRes = await h.search_sites({ award: "sotd", technology: "nextjs", count: 6 });
+    expect((awardRes.content[0] as { type: "text"; text: string }).text).toContain("(slug: aspen-search)");
+  });
+});
 describe("list_categories v2 (awards + technologies)", () => {
   it("reports every award filter with its label and the technology facets", async () => {
     const cache = new Cache(tmpDir());
@@ -2101,5 +2152,20 @@ describe("list_categories v2 (awards + technologies)", () => {
     expect(body.technologiesNote).toContain("Technology facets were not crawled");
     expect(body.filters).toEqual(["3d", "webgl"]);
     expect(fetchFn).not.toHaveBeenCalled(); // served from the meta cache
+  });
+});
+
+describe("list_categories technology drift note (review M2)", () => {
+  it("notes crawl-time drift when a taxonomy carries an empty technology section", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", { colors: ["#404040"], filters: ["3d"], technologies: [] });
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as { type: "text"; text: string }).text);
+    expect(body.technologies).toEqual([]);
+    expect(body.technologiesNote).toContain("Technology section not found");
+    expect(body.technologiesNote).toContain("crawl-time drift");
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });

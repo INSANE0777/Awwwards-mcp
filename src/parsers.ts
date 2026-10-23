@@ -202,7 +202,7 @@ export function parseJuryDimensions(html: string): JuryDimensions | undefined {
   };
 }
 
-const NON_FILTERS = new Set(["sites_of_the_day"]);
+const NON_FILTERS = new Set(["sites_of_the_day", "developer", "honorable", "nominees"]);
 
 // Slugs of one nav-bar filter section (Awards/Category/Tag/Technology/…).
 // Each section is a `nav-filters__item` label span whose dropdown follows it;
@@ -229,9 +229,10 @@ function navSectionSlugs(html: string, sectionLabel: string): string[] {
 
 // Filter taxonomy from listing-page sidebars: color filters link to
 // /websites/%23<HEX>/ and tag/technology filters to /websites/<slug>/. Award
-// collections (sites_of_the_day — underscore slugs, which the slug regex
-// below never matches by design) are not tags — they are exposed via the
-// `award` argument on the search tool instead.
+// collections are not tags — they are exposed via the `award` argument on the
+// search tool instead. sites_of_the_* and winner_category_* slugs never match
+// this regex (underscores); developer, honorable and nominees ARE slug-shaped
+// award pages, so they are excluded by name in NON_FILTERS above.
 export function parseCategories(html: string): Categories {
   const colors = [
     ...new Set(

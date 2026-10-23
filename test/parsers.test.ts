@@ -118,7 +118,13 @@ describe("parseCategories", () => {
 
   it("excludes award collections from the filter list", () => {
     const cats = parseCategories(listing());
+    // sites_of_the_* / winner_category_* carry underscores the slug regex
+    // never matches; developer, honorable and nominees are slug-shaped award
+    // pages (review M1) and are excluded by name.
     expect(cats.filters).not.toContain("sites_of_the_day");
+    expect(cats.filters).not.toContain("developer");
+    expect(cats.filters).not.toContain("honorable");
+    expect(cats.filters).not.toContain("nominees");
   });
 
   // Nav-bar section slicing, fixture-pinned (verified live 2026-10-23: same

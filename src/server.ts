@@ -5,6 +5,7 @@ import {
   AWARD_FILTERS,
   BlockedError,
   buildFilterUrl,
+  canonicalizeTechnology,
   elementPosterPath,
   elementUrl,
 } from "./awwwards.js";
@@ -477,16 +478,21 @@ export function createHandlers(deps: {
     skipQueryCheck = false,
   ): boolean {
     const source = urlSource(f);
+    // Alias canonicalization mirrors buildFilterUrl (review I1): a combined
+    // filter never wins the URL, so its tokens are applied here — an alias
+    // like "nextjs" must match the site's display tag "Next.js" exactly the
+    // way the URL filter would have. Site tags are display names; a raw
+    // "nextjs" token is not a substring of the slug "next-js".
     if (f.tags?.length) {
       const tagsToCheck =
         honorUrlSource && source === "tag" ? f.tags.slice(1) : f.tags;
       for (const t of tagsToCheck) {
-        const slug = t.toLowerCase();
+        const slug = canonicalizeTechnology(t.toLowerCase());
         if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
       }
     }
     if (f.technology && !(honorUrlSource && source === "technology")) {
-      const slug = f.technology.toLowerCase();
+      const slug = canonicalizeTechnology(f.technology.toLowerCase());
       if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
     }
     if (f.award && !(honorUrlSource && source === "award")) {
@@ -1179,13 +1185,16 @@ export function createHandlers(deps: {
         label: AWARD_FILTER_LABELS[filter],
       }));
       // Technology facets entered the taxonomy later; a cache written by an
-      // older version has none — report that instead of pretending the list
-      // is complete.
+      // older version has none (undefined) — report that instead of pretending
+      // the list is complete. An empty list on a current crawl is different:
+      // the Technology nav section wasn't found, which is crawl-time drift.
       const technologies = cats.technologies ?? [];
       const technologiesNote =
         cats.technologies === undefined
           ? "Technology facets were not crawled yet — these slugs are missing; re-crawl the taxonomy to fill them."
-          : undefined;
+          : cats.technologies.length === 0
+            ? "Technology section not found — crawl-time drift."
+            : undefined;
       return {
         content: [
           text(

@@ -258,6 +258,11 @@ export class Cache {
 
   upsertSites(sites: SiteSummary[]): void {
     this.withDb((db) => {
+      // `nominee` overwrites (current-state semantics): a nominee that later
+      // wins is re-crawled from an award listing, and a sticky-true flag
+      // would keep claiming nominee forever. `studio` COALESCEs instead — it
+      // is an attribution that older crawls lacked, so the first known value
+      // wins over a later crawl's null.
       const stmt = db.prepare(
         `INSERT INTO sites (slug, id, title, createdAt, tags, thumbnailPath, liveUrl, detailPath, awards, studio, nominee, fetchedAt)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
