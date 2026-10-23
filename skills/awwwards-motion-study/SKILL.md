@@ -231,6 +231,13 @@ at. Run them BEFORE recording - then record only what they can't express:
   When the census says WHAT animates but not HOW (e.g. an on-hover
   letter-swap driven by imperative tweens), this reads the mechanism from
   the site's own bundle.
+- `build_project --motion <census.json>` - the study's hand-off artifact:
+  `motion.manifest.json` (measured per-section triggers, `pageTriggers` for
+  unattributed rows, initial-hidden hints) + inert per-section/page motion
+  hooks. Under `--authored` the site's own scripts are dropped and the hooks
+  become the only motion source — author them from the manifest (see
+  `motion-authoring`). "Measured" means generator-emitted; never hand-write
+  rows and keep the flag.
 
 Video keeps what data cannot express: feel, choreography, sequencing, where
 the eye goes. The study order is: censuses first, recording second, then

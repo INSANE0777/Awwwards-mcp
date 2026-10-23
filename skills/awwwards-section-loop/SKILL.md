@@ -118,6 +118,13 @@ continuity, one easing family across sections (or an intentional
 break). Fix coherence issues at the page level (tokens, shared CSS),
 not by re-opening sections unless a band regressed.
 
+### Step 6 — Convert what you locked
+
+Locked sections are exactly what `build_project --target vite|astro|next` needs: the
+band split becomes components. Then `--authored --motion census.json` and author the
+motion per section (see `motion-authoring`), keeping the same lock discipline: author
+section N, verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
+
 ## Failure modes this skill prevents
 
 | Failure | What you'd see | The rule that prevents it |
@@ -148,9 +155,11 @@ not by re-opening sections unless a band regressed.
 - `build_gsap_stub` - turns the captured censuses into a runnable
   GSAP+ScrollTrigger stub (durations, easings, scrub/pin, camera from
   `capture_pose_3d`, reduced-motion guard) — step 2's motion wiring, generated.
-- `build_project` — build → convert: once a band/page rebuild file is finished
-  as a single local `.html`, turn it into a runnable Vite/Astro/Next project
-  (sections as components, wired timelines); pair with `verify_build`'s gate.
+- `build_project` — build → convert → own the motion: `--target vite|astro|next`
+  gives native structure (section components, shell, split CSS, ordered libs);
+  `--authored --motion census.json` drops site logic and emits
+  `motion.manifest.json` + per-section/page motion hooks to author against (pair
+  with `motion-authoring`); always re-verify after conversion.
 - `analyze_bundle` - mechanism recovery (step 2 escape hatch): when a
   section's effect can't be explained from the census evidence, grep the
   section site's script bundle for mechanism keywords; the censuses say

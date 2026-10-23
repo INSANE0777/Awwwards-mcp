@@ -174,9 +174,10 @@ Dependency injection is the pattern everywhere a hard dependency exists:
 
 ## Skills & showcase
 
-- `skills/` ships three agent skills (`awwwards-inspiration`,
-  `awwwards-motion-study`, `awwwards-doctor`). Shipped copies change only via
-  human PRs; local copies self-improve through the skill-memory flywheel.
+- `skills/` ships seven agent skills (`awwwards-inspiration`,
+  `awwwards-motion-study`, `awwwards-section-loop`, `awwwards-doctor`,
+  `awwwards-setup`, `recreate`, `motion-authoring`). Shipped copies change only
+  via human PRs; local copies self-improve through the skill-memory flywheel.
 - `showcase/` holds real sites built through the loop (`ridge`,
   `afjal-portfolio`, `fallow-press`), each with `_qa/` capture evidence. They
   double as regression demos for the capture/structure/motion tools.

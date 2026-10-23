@@ -168,13 +168,13 @@ package automatically if present.
 
 ## Skills
 
-This package ships six agent skills. Any agent that follows the
+This package ships seven agent skills. Any agent that follows the
 [Agent Skills standard](https://agentskills.io) can load them; copy them into
 your agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate ~/.agents/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate node_modules/awwwards-mcp/skills/motion-authoring ~/.agents/skills/
 ```
 
 | Skill | What it teaches |
@@ -184,7 +184,8 @@ mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-ins
 | `awwwards-motion-study` | The full video chain: what to record from a live site (and what to skip), frame-by-frame review (video input or tile-per-element), the motion inventory, and build verification by re-recording. Now opens with an instrument-first pass: scroll/hover censuses, motion DNA, and pose capture before (and instead of) recording. |
 | `awwwards-doctor` | Repair: run `npm run doctor`, apply its fixes, re-anchor parsers after real awwwards.com drift, recover the in-flight task that surfaced the failure. |
 | `awwwards-section-loop` | Section-by-section rebuilding: band map → per-section capture → build → verify that band's score → lock → next; selector fallback rules, shared-canvas one-unit rule, and the lock-before-next discipline. |
-| `recreate` | `/recreate <url>` — the full link-to-site playbook: study-build disclaimer gate → evidence capture (bands, components, censuses, motion DNA, pose, bundle) → hand build with exact assets → scroll-anchor QA gate → optional `build_project` conversion to Vite/Astro/Next → handoff. |
+| `recreate` | `/recreate <url>` — the full link-to-site playbook: study-build disclaimer gate → evidence capture (bands, components, censuses, motion DNA, pose, bundle) → hand build with exact assets → scroll-anchor QA gate → project conversion (`build_project`, native structure + authored motion) → handoff. |
+| `motion-authoring` | `/authored` conversions: topology (master scrub vs independent triggers), manifest contract (evidence, never hand-marked measured), intent mapping, per-target surfaces (no double GSAP), and the desktop + 390 mobile parity gate. |
 
 | Agent | Skills directory |
 |-------|------------------|

@@ -45,9 +45,12 @@ Scope: whole page or specific sections? A continuous scroll-narrative (fixed sta
 - Reduced-motion pass at 1440: stacked layout, no overflow.
 - If anything drifts from the evidence, fix and re-shoot — one anchor at a time (section-loop discipline).
 
-## Phase 4 — Optional project conversion
+## Phase 4 — Project conversion + authored motion
 
-`awwwards-build-project <file.html> --target vite|astro|next --out <dir>` then `npm install && npm run build`, serve, and re-run the Phase 3 gate against the converted build. Never hand over an unconverted 2000-line file when the user asked for a project.
+1. `awwwards-build-project <file.html> --target vite|astro|next --out <dir>` → native project: real section components, shell chrome, split CSS (`tokens.css` + `site.css`), ordered libs, head metadata/boot replayed.
+2. Convert with `--authored --motion <census.json>`: site logic scripts are dropped, head boot + animation libs (gsap/ScrollTrigger/lenis/split-type/circletype/lottie/three) stay, and `motion.manifest.json` carries measured per-section + page triggers.
+3. **Author the motion** (see `motion-authoring`): fill the generated hooks/modules from the manifest + the reference's readable JS; page-level motion first, then sections. Do not hand-edit manifest rows and call them measured — record any authored rows explicitly.
+4. Gate: `npm install && npm run build` per target, serve, then re-run Phase 3 desktop anchors **plus a 390×844 mobile smoke** and reduced-motion; zero errors/404s. Never hand over an unconverted 2000-line file when the user asked for a project.
 
 ## Phase 5 — Handoff
 
@@ -58,5 +61,7 @@ If a build was produced: README with run instructions, the **mandatory study-bui
 ## Known limits (say them out loud)
 
 - WebGL/canvas interiors are opacity: reference frames only.
-- Webflow IX2 / JS-driven initial states are recoverable as behavior evidence but not as their runtime — re-implement with your own JS.
+- Webflow IX2 / JS-driven initial states are recoverable as behavior evidence but not as their runtime — re-implement with your own JS (N2 authored mode proves the shape; vendor-bundle interpretation stays manual).
+- `--authored` keeps head inline scripts even if they may be site logic (warned when >2 KB or animation-looking) — verify before shipping.
+- Generator `pageTriggers` cover unattributed census rows; a page-level hook still needs authoring before it animates.
 - Fonts: only ship if owned → self-host; otherwise match the closest licensed face.
