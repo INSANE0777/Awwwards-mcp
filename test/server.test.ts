@@ -2004,3 +2004,102 @@ describe("build_project handler (v1.12 — first local-write tool)", () => {
     expect(existsSync(join(dir, "proj", "index.html"))).toBe(true);
   });
 });
+
+describe("award filters (Theme A)", () => {
+  const listingCalls = (fetchFn: { mock: { calls: unknown[][] } }) =>
+    fetchFn.mock.calls.filter((c) => String(c[0]).includes("/websites/")).length;
+
+  it("flags nominee rows on scrape, persists the flag, and re-serves nominees from cache without refetching", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ award: "nominees", count: 6 });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("[nominee]");
+    // The flag persisted through the sites table — the persisted marker is
+    // the only client-checkable filter for nominee rows (no card badges).
+    expect(cache.getSite("l-i-s-a", 7 * 24 * 60 * 60 * 1000)?.nominee).toBe(true);
+    const second = await h.search_sites({ award: "nominees", count: 6 });
+    expect((second.content[0] as { type: "text"; text: string }).text).toContain("[nominee]");
+    expect(listingCalls(fetchFn)).toBe(1); // second call served from cache
+  });
+
+  it("does not serve unflagged cache rows for award=nominees (re-scrapes instead)", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "unflagged" })]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ award: "nominees", count: 6 });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).not.toContain("(slug: unflagged)");
+    expect(body).toContain("[nominee]");
+    expect(listingCalls(fetchFn)).toBe(1);
+  });
+
+  it("re-scrapes winner-category filters — cards carry no verifiable category label", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    await h.search_sites({ award: "ecommerce", count: 6 });
+    expect(listingCalls(fetchFn)).toBe(1);
+    // Cached rows fail the label check (winner pages stamp no distinct badge),
+    // so the empty page window triggers a conservative re-scrape.
+    await h.search_sites({ award: "ecommerce", count: 6 });
+    expect(listingCalls(fetchFn)).toBe(2);
+  });
+
+  it("soty/sotm stay card-verifiable through the expanded award labels", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "soty-winner", awards: ["Site of the Year", "Site of the Day"] }),
+      site({ slug: "untagged", awards: [] }),
+    ]);
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ award: "soty", count: 6 });
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    expect(body).toContain("(slug: soty-winner)");
+    // The cache row matching the card label passes; a badge-less row never
+    // does (the top-up merge may add freshly scraped URL-filter rows, but the
+    // untagged cache row itself is filtered out by the client-side check).
+    expect(body).not.toContain("(slug: untagged)");
+  });
+});
+
+describe("list_categories v2 (awards + technologies)", () => {
+  it("reports every award filter with its label and the technology facets", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as { type: "text"; text: string }).text);
+    expect(body.awards).toHaveLength(12);
+    expect(body.awards).toEqual(expect.arrayContaining([
+      { filter: "sotd", label: "Site of the Day" },
+      { filter: "soty", label: "Site of the Year" },
+      { filter: "nominees", label: "Nominee" },
+      { filter: "ecommerce", label: "Winners — E-commerce" },
+      { filter: "noCode", label: "Winners — No Code" },
+    ]));
+    // Technologies come from the crawled taxonomy's Technology nav section,
+    // in page (usage) order.
+    expect(body.technologies[0]).toBe("11ty");
+    expect(body.technologies).toContain("next-js");
+    expect(body.technologies).toContain("webgl");
+    expect(body.technologiesNote).toBeUndefined();
+    expect((res.content[0] as { type: "text"; text: string }).text).toContain('"technologies"');
+  });
+
+  it("reports an empty technology list + hint on a pre-Theme-A cache entry", async () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("categories", { colors: ["#404040"], filters: ["3d", "webgl"] });
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.list_categories();
+    const body = JSON.parse((res.content[0] as { type: "text"; text: string }).text);
+    expect(body.technologies).toEqual([]);
+    expect(body.technologiesNote).toContain("Technology facets were not crawled");
+    expect(body.filters).toEqual(["3d", "webgl"]);
+    expect(fetchFn).not.toHaveBeenCalled(); // served from the meta cache
+  });
+});

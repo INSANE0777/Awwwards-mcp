@@ -120,6 +120,55 @@ describe("parseCategories", () => {
     const cats = parseCategories(listing());
     expect(cats.filters).not.toContain("sites_of_the_day");
   });
+
+  // Nav-bar section slicing, fixture-pinned (verified live 2026-10-23: same
+  // 115-slug Technology section on the live /websites/ page).
+  it("extracts the Technology nav section in page (usage) order", () => {
+    const cats = parseCategories(listing());
+    expect(cats.technologies).toHaveLength(115);
+    expect(cats.technologies![0]).toBe("11ty");
+    for (const t of ["next-js", "three-js", "webgl", "gsap", "tailwind", "11ty"]) {
+      expect(cats.technologies).toContain(t);
+    }
+    // Tag-section slugs must not leak into the technology list.
+    expect(cats.technologies).not.toContain("3d");
+    expect(cats.technologies).not.toContain("portfolio");
+  });
+});
+
+// Award-listing fixtures (Theme A), captured live 2026-10-23 — see
+// test/fixtures/awards/README.md for URLs and the trimming that was applied.
+describe("award listing fixtures", () => {
+  const readAwardFixture = (name: string) =>
+    readFileSync(join(FIXTURES, "awards", `${name}.html`), "utf8").replace(/\r\n/g, "\n");
+
+  it("sites_of_the_year cards parse with their mapped award labels", () => {
+    const rows = parseListing(readAwardFixture("sites_of_the_year"));
+    expect(rows.length).toBe(6);
+    for (const r of rows) expect(r.detailPath).toMatch(/^\/sites\//);
+    const labels = rows.flatMap((r) => r.awards);
+    expect(labels).toContain("Site of the Year"); // budget-tag--soty
+    expect(labels).toContain("Developer Award"); // budget-tag--dev
+  });
+
+  it("winner_category_ecommerce cards parse (no category marker on cards)", () => {
+    const rows = parseListing(readAwardFixture("winner_category_ecommerce"));
+    expect(rows.length).toBe(6);
+    const labels = new Set(rows.flatMap((r) => r.awards));
+    // Cards carry only underlying award badges — no "winner category" badge —
+    // so these award filters are URL-verified only (server re-scrapes).
+    expect(labels.has("Site of the Day") || labels.has("Developer Award")).toBe(true);
+  });
+
+  it("nominees cards parse with empty award lists (nominee flag is server-side)", () => {
+    const rows = parseListing(readAwardFixture("nominees"));
+    expect(rows.length).toBe(6);
+    for (const r of rows) {
+      expect(r.awards).toEqual([]);
+      expect(r.detailPath).toMatch(/^\/sites\//);
+      expect(r.liveUrl).toMatch(/^https?:\/\//);
+    }
+  });
 });
 
 describe("parseElements", () => {

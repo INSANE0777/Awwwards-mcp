@@ -92,6 +92,11 @@ defaults" is a valid answer:
    does trend research, note that opening sessions with `new_winners` keeps
    the winner baseline fresh and feeds any watches.
 
+Mention while onboarding: annual-awards questions run through the three
+`get_annual_*` tools, and `search_sites`' award filter extends past the daily
+winners to `sotm`/`soty`/`nominees` and the winner-category cuts (`ecommerce`,
+`portfolio`, `product`, `typography`, `businessServices`, `noCode`).
+
 Persist the answers to the preferences file as one JSON object, creating
 `~/.awwwards-mcp/` if needed:
 

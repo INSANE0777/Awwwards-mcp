@@ -14,7 +14,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS sites (
     slug TEXT PRIMARY KEY, id INTEGER, title TEXT, createdAt INTEGER,
     tags TEXT, thumbnailPath TEXT, liveUrl TEXT, detailPath TEXT,
-    awards TEXT, studio TEXT, fetchedAt INTEGER
+    awards TEXT, studio TEXT, nominee INTEGER, fetchedAt INTEGER
   );
   CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY, value TEXT, fetchedAt INTEGER
@@ -101,6 +101,7 @@ interface SiteRow {
   detailPath: string;
   awards: string;
   studio: string | null;
+  nominee: number | null;
   fetchedAt: number;
 }
 
@@ -116,6 +117,7 @@ function rowToSite(r: SiteRow): SiteSummary {
     detailPath: r.detailPath,
     awards: JSON.parse(r.awards),
     studio: r.studio ?? null,
+    nominee: r.nominee === 1 ? true : undefined,
   };
 }
 
@@ -193,9 +195,15 @@ export class Cache {
       } catch {
         /* column already exists */
       }
-      // Same lazy migration for sites.studio (monitoring feature).
+      // Same lazy migration for sites.studio (monitoring feature) and
+      // sites.nominee (nominees-listing flag).
       try {
         db.exec("ALTER TABLE sites ADD COLUMN studio TEXT");
+      } catch {
+        /* column already exists */
+      }
+      try {
+        db.exec("ALTER TABLE sites ADD COLUMN nominee INTEGER");
       } catch {
         /* column already exists */
       }
@@ -251,14 +259,14 @@ export class Cache {
   upsertSites(sites: SiteSummary[]): void {
     this.withDb((db) => {
       const stmt = db.prepare(
-        `INSERT INTO sites (slug, id, title, createdAt, tags, thumbnailPath, liveUrl, detailPath, awards, studio, fetchedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sites (slug, id, title, createdAt, tags, thumbnailPath, liveUrl, detailPath, awards, studio, nominee, fetchedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(slug) DO UPDATE SET
            id=excluded.id, title=excluded.title, createdAt=excluded.createdAt,
            tags=excluded.tags, thumbnailPath=excluded.thumbnailPath,
            liveUrl=excluded.liveUrl, detailPath=excluded.detailPath,
            awards=excluded.awards, studio=COALESCE(excluded.studio, sites.studio),
-           fetchedAt=excluded.fetchedAt`,
+           nominee=excluded.nominee, fetchedAt=excluded.fetchedAt`,
       );
       const t = this.now();
       // One transaction for the whole batch: each autocommitted INSERT pays a
@@ -270,7 +278,7 @@ export class Cache {
           stmt.run(
             s.slug, s.id, s.title, s.createdAt, JSON.stringify(s.tags),
             s.thumbnailPath, s.liveUrl, s.detailPath, JSON.stringify(s.awards),
-            s.studio ?? null, t,
+            s.studio ?? null, s.nominee === true ? 1 : 0, t,
           );
         }
         db.exec("COMMIT");

@@ -76,7 +76,15 @@ server.tool(
       .optional(),
     tags: z.array(z.string()).describe("Tag slugs, e.g. ['3d', 'portfolio']").optional(),
     technology: z.string().describe("Technology slug, e.g. 'webgl', 'gsap', 'astro'").optional(),
-    award: z.enum(["sotd", "developer", "honorable"]).optional(),
+    award: z
+      .enum([
+        "sotd", "sotm", "soty", "nominees", "developer", "honorable",
+        "ecommerce", "portfolio", "product", "typography", "businessServices", "noCode",
+      ])
+      .optional()
+      .describe(
+        "Award collection: sotd | developer | honorable | sotm | soty | nominees, or an annual winner category: ecommerce | portfolio | product | typography | businessServices | noCode",
+      ),
     sortBy: z
       .enum(["score", "newest"])
       .default("newest")
@@ -186,7 +194,7 @@ server.tool(
 
 server.tool(
   "list_categories",
-  "List the filter taxonomy available on Awwwards: color hexes and tag/technology slugs usable with search_sites.",
+  "List the filter taxonomy available on Awwwards: award collections, color hexes, tag/technology slugs usable with search_sites, and the annual winner categories.",
   {},
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   () => asMcpResult(handlers.list_categories()),

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { parseCategories, parseDetail, parseElements, parseListing } from "./parsers.js";
 import {
   AwwwardsClient,
+  AWARD_FILTERS,
   BlockedError,
   buildFilterUrl,
   elementPosterPath,
@@ -35,8 +36,17 @@ import type {
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
+  sotm: "Site of the Month",
+  soty: "Site of the Year",
+  nominees: "Nominee",
   developer: "Developer Award",
   honorable: "Honorable Mention",
+  ecommerce: "Winners — E-commerce",
+  portfolio: "Winners — Portfolio",
+  product: "Winners — Product",
+  typography: "Winners — Typography",
+  businessServices: "Winners — Business Services",
+  noCode: "Winners — No Code",
 };
 
 export const SITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -267,7 +277,8 @@ function text(t: string): Block {
 
 function summarizeSite(s: SiteSummary): string {
   const award = s.awards.length ? ` [${s.awards.join(", ")}]` : "";
-  return `- ${s.title} (slug: ${s.slug})${award}\n  live: ${s.liveUrl ?? "unknown"}\n  awwwards: https://www.awwwards.com${s.detailPath}\n  tags: ${s.tags.join(", ")}`;
+  const nominee = s.nominee ? " [nominee]" : "";
+  return `- ${s.title} (slug: ${s.slug})${nominee}${award}\n  live: ${s.liveUrl ?? "unknown"}\n  awwwards: https://www.awwwards.com${s.detailPath}\n  tags: ${s.tags.join(", ")}`;
 }
 
 function formatCompactSite(s: SiteSummary, number: number): string {
@@ -276,6 +287,7 @@ function formatCompactSite(s: SiteSummary, number: number): string {
   return [
     `${number}. ${s.title} (slug: ${s.slug})`,
     s.liveUrl ? `live: ${s.liveUrl}` : null,
+    s.nominee ? "status: nominee" : null,
     s.awards.length ? `awards: ${s.awards.join(", ")}` : null,
     tags.length ? `tags: ${tags.join(", ")}${extra > 0 ? ` +${extra}` : ""}` : null,
   ].filter(Boolean).join(" | ").replace(/\s+/g, " ").trim();
@@ -478,7 +490,17 @@ export function createHandlers(deps: {
       if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
     }
     if (f.award && !(honorUrlSource && source === "award")) {
-      if (!s.awards.includes(AWARD_FILTER_LABELS[f.award])) return false;
+      // nominees: listing cards carry no award tags, so the persisted
+      // nominee flag (set when rows were scraped from /websites/nominees/)
+      // is the only client-checkable marker. The winner_category_* filters
+      // have no card marker at all — cache rows fail their label check and
+      // an empty page window makes the search re-scrape the filter page,
+      // which is the correct (conservative) outcome.
+      if (f.award === "nominees") {
+        if (s.nominee !== true) return false;
+      } else if (!s.awards.includes(AWARD_FILTER_LABELS[f.award])) {
+        return false;
+      }
     }
     if (f.query && !skipQueryCheck) {
       const queryTokens = tokenizeQuery(f.query);
@@ -594,6 +616,9 @@ export function createHandlers(deps: {
             isError: true,
           };
         }
+        // Nominees-listing rows are flagged (and the flag persisted) — their
+        // cards carry no award tags, so this is the only marker they get.
+        if (args.award === "nominees") for (const s of parsed) s.nominee = true;
         cache.upsertSites(parsed);
         // Freshly parsed rows carry the URL filter by construction
         // (honorUrlSource: true); serve only those, newest-first like getSites.
@@ -609,6 +634,7 @@ export function createHandlers(deps: {
           const html = await client.getHtml(buildFilterUrl(args));
           const parsed = parseListing(html);
           if (parsed.length > 0) {
+            if (args.award === "nominees") for (const s of parsed) s.nominee = true;
             cache.upsertSites(parsed);
             const fresh = parsed.filter((s) => matchesFilters(s, args, true));
             if (ftsRows) {
@@ -1148,6 +1174,18 @@ export function createHandlers(deps: {
         }
         cache.setMeta("categories", cats);
       }
+      const awards = (Object.keys(AWARD_FILTERS) as AwardFilter[]).map((filter) => ({
+        filter,
+        label: AWARD_FILTER_LABELS[filter],
+      }));
+      // Technology facets entered the taxonomy later; a cache written by an
+      // older version has none — report that instead of pretending the list
+      // is complete.
+      const technologies = cats.technologies ?? [];
+      const technologiesNote =
+        cats.technologies === undefined
+          ? "Technology facets were not crawled yet — these slugs are missing; re-crawl the taxonomy to fill them."
+          : undefined;
       return {
         content: [
           text(
@@ -1157,8 +1195,11 @@ export function createHandlers(deps: {
                 colors: cats.colors,
                 filterCount: cats.filters.length,
                 filters: cats.filters,
+                awards,
+                technologies,
+                ...(technologiesNote ? { technologiesNote } : {}),
                 usage:
-                  "Pass one of: color (hex), award (sotd|developer|honorable), technology or a tag slug to search_sites. Combine at most one URL filter with client-side tags.",
+                  "Pass one of: color (hex), award (any filter from awards), technology or a tag slug to search_sites. Run list_categories first when unsure of a slug. Combine at most one URL filter with client-side tags.",
               },
               null,
               1,

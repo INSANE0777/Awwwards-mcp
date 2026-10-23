@@ -6,8 +6,17 @@ export const USER_AGENT =
 
 export const AWARD_FILTERS = {
   sotd: "websites/sites_of_the_day",
+  sotm: "websites/sites_of_the_month",
+  soty: "websites/sites_of_the_year",
+  nominees: "websites/nominees",
   developer: "websites/developer",
   honorable: "websites/honorable",
+  ecommerce: "websites/winner_category_ecommerce",
+  portfolio: "websites/winner_category_portfolio",
+  product: "websites/winner_category_product",
+  typography: "websites/winner_category_typography",
+  businessServices: "websites/winner_category_business-services",
+  noCode: "websites/winner_category_no-code",
 } as const;
 
 export type AwardFilter = keyof typeof AWARD_FILTERS;
@@ -20,6 +29,32 @@ export interface SearchFilters {
   query?: string;
 }
 
+// Technology alias canonicalization for the technology/tags[0] URL filter.
+// Every entry was verified against the live /websites/ tag list on 2026-10-23:
+// the target slug exists there and the source token does not (so exact slugs
+// always win and are never rewritten). Unknown tokens pass through unchanged.
+export const TECHNOLOGY_ALIASES: Record<string, string> = {
+  nextjs: "next-js",
+  "next.js": "next-js",
+  nuxtjs: "nuxt-js",
+  "nuxt.js": "nuxt-js",
+  vuejs: "vue-js",
+  "vue.js": "vue-js",
+  reactjs: "react",
+  threejs: "three-js",
+  "three.js": "three-js",
+  tailwindcss: "tailwind",
+  eleventy: "11ty",
+  nodejs: "node-js",
+  "node.js": "node-js",
+  greensock: "gsap",
+  sveltejs: "svelte",
+};
+
+export function canonicalizeTechnology(token: string): string {
+  return TECHNOLOGY_ALIASES[token.toLowerCase()] ?? token;
+}
+
 // Combined filter URLs return 404 on awwwards.com (verified 2026-09-17), so
 // exactly one filter is used in the URL — the most specific one. The caller
 // applies the remaining filters client-side over the parsed results.
@@ -29,7 +64,7 @@ export function buildFilterUrl(filters: SearchFilters): string {
   }
   if (filters.award) return `${BASE_URL}/${AWARD_FILTERS[filters.award]}/`;
   const tag = filters.technology ?? filters.tags?.[0];
-  if (tag) return `${BASE_URL}/websites/${encodeURIComponent(tag.toLowerCase())}/`;
+  if (tag) return `${BASE_URL}/websites/${encodeURIComponent(canonicalizeTechnology(tag).toLowerCase())}/`;
   return `${BASE_URL}/websites/`;
 }
 

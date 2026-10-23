@@ -54,6 +54,12 @@ Repair sequence — keep it mechanical, verify at each step:
 7. Commit as `fix: re-anchor <parser> after awwwards.com markup change`,
    reference the tracking issue.
 
+Note: the annual-award tools (`get_annual_*`) come from the official JSON API
+(`src/annual.ts`), not the parsers, and the expanded award-cut listings
+(`sites_of_the_month`/`year`, `nominees`, `winner_category_*`) have their own
+trimmed fixtures under `test/fixtures/awards/` — refresh those when their
+anchors drift, alongside the daily listing's.
+
 ## 3. End users (installed via npm, not a repo checkout)
 
 The doctor scripts live in the repo, so for an npm-installed server:

@@ -11,6 +11,10 @@ export interface SiteSummary {
   // Studio/author name from the card's avatar-name block (listing pages
   // only). Undefined on rows parsed before this field existed.
   studio?: string | null;
+  // true on rows scraped from the /websites/nominees/ listing (nominee cards
+  // carry no award tags, so this is the only marker they have). Undefined
+  // elsewhere.
+  nominee?: boolean;
 }
 
 export interface SiteDetails {
@@ -42,6 +46,9 @@ export interface SiteDetails {
 export interface Categories {
   colors: string[]; // hex codes, uppercase
   filters: string[]; // tag/technology slugs, e.g. "3d", "webgl"
+  // Slugs from the nav bar's Technology section, in page (usage) order.
+  // Undefined on taxonomies crawled before this field existed.
+  technologies?: string[];
 }
 
 export interface ElementMedia {

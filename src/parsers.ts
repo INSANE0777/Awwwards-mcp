@@ -19,6 +19,7 @@ const AWARD_LABELS: Record<string, string> = {
   dev: "Developer Award",
   hm: "Honorable Mention",
   sotm: "Site of the Month",
+  soty: "Site of the Year",
   mobile: "Mobile Excellence",
   ecom: "E-Commerce Award",
 };
@@ -203,9 +204,33 @@ export function parseJuryDimensions(html: string): JuryDimensions | undefined {
 
 const NON_FILTERS = new Set(["sites_of_the_day"]);
 
+// Slugs of one nav-bar filter section (Awards/Category/Tag/Technology/…).
+// Each section is a `nav-filters__item` label span whose dropdown follows it;
+// the slice between this label and the next item label holds its links.
+// Anchor note: the item span carries attributes containing `>` inside quoted
+// values ("click->grid#toggleFilter"), so the tag body must be quote-aware,
+// not [^>]* (same lesson as parseElementGalleryPage's author anchor). Verified
+// live 2026-10-23 and against test/fixtures/listing.html: 7 sections and, for
+// Technology, 115 slugs on both.
+function navSectionSlugs(html: string, sectionLabel: string): string[] {
+  const re =
+    /<span class="[^"]*nav-filters__item[^"]*"[^>"]*(?:"[^"]*"[^>"]*)*>\s*<span>([^<]+)<\/span>/g;
+  const labels = [...html.matchAll(re)];
+  const idx = labels.findIndex((m) => m[1] === sectionLabel);
+  if (idx < 0) return [];
+  const start = labels[idx].index + labels[idx][0].length;
+  const end = idx + 1 < labels.length ? labels[idx + 1].index : start;
+  return [
+    ...new Set(
+      [...html.slice(start, end).matchAll(/href="\/websites\/([a-z0-9-]{2,60})\/"/g)].map((m) => m[1]),
+    ),
+  ];
+}
+
 // Filter taxonomy from listing-page sidebars: color filters link to
 // /websites/%23<HEX>/ and tag/technology filters to /websites/<slug>/. Award
-// collections (sites_of_the_day) are not tags — they are exposed via the
+// collections (sites_of_the_day — underscore slugs, which the slug regex
+// below never matches by design) are not tags — they are exposed via the
 // `award` argument on the search tool instead.
 export function parseCategories(html: string): Categories {
   const colors = [
@@ -222,7 +247,7 @@ export function parseCategories(html: string): Categories {
   ]
     .filter((s) => !NON_FILTERS.has(s))
     .sort();
-  return { colors, filters };
+  return { colors, filters, technologies: navSectionSlugs(html, "Technology") };
 }
 
 // Elements section highlights: null means the page has no Elements section

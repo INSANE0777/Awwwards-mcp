@@ -30,8 +30,11 @@ Run this loop before building anything visual:
    mood, color, technology, and industry terms. "Make it feel premium" becomes
    e.g. "dark, elegant, WebGL, agency portfolio".
 2. **Ground your vocabulary.** If unsure which filters exist, call
-   `list_categories` first — it returns every color hex and tag/technology
-   slug you can search by.
+   `list_categories` first — it returns every color hex, award filter
+   (`sotd`, `soty`, `nominees`, winner categories, …) and tag/technology
+   slug you can search by. For annual "of the Year" questions, the
+   `get_annual_*` tools cover the six official annual categories (see
+   Award discovery below).
 3. **Search.** Call `search_sites` with 1–3 filters (e.g.
    `{ color: "#404040", tags: ["3d", "portfolio"] }`). Judge the results from
    the inline screenshots, not just titles. Shortlist 2–3 candidates.
@@ -84,6 +87,23 @@ Run this loop before building anything visual:
 
 9. **Close the flywheel:** end every loop pass by recording what the verification caught — `node scripts/skill-memory.mjs record --skill awwwards-inspiration --phase <phase> --symptom "..." --rule "..." [--evidence path]`. "Nothing new learned" is a recorded negative. Then `distill` folds rules seen ≥2× into your installed copy’s managed section; `recall` prints them at loop start. When promoting a confirmed rule into the shipped copy (human PR), `promote --skill awwwards-inspiration` prints it with machine-local evidence paths stripped.
 
+## Award discovery
+
+Beyond the daily listing sweep, Awwwards exposes an annual-awards layer and
+finer winner cuts:
+
+- **Annual awards (official API)** — for "Site of the Year"-style questions,
+  start with `get_annual_categories`, then `get_annual_nominees` (per category,
+  hydrated at 1 req/s) and `get_annual_nominee` for full structured nominee
+  detail. These cover the six official annual categories.
+- **Daily / monthly / yearly / nominee cuts** — `search_sites` with
+  `award: "sotd" | "sotm" | "soty" | "nominees"` (plus `developer` /
+  `honorable`).
+- **Annual winner categories** — `search_sites` with `award: "ecommerce" |
+  "portfolio" | "product" | "typography" | "businessServices" | "noCode"`.
+- **Unsure of a slug?** Call `list_categories` first — it returns every award
+  filter with its label plus the current technology slugs.
+
 ### Anti-patterns
 
 - **Vague single-word searches** ("modern", "nice") — use concrete color/tag/
@@ -111,10 +131,10 @@ Run this loop before building anything visual:
 
 | Tool | Key params | Returns | Gotchas |
 |------|-----------|---------|---------|
-| `search_sites` | `query` (free text vs titles/tags), `color` (hex like `#404040`), `tags` (array of slugs), `technology` (slug), `award` (`sotd`\|`developer`\|`honorable`), `count` (1–12, default 6), `page` (default 1), `responseMode` (`"full"` default or `"compact"`) | Full: text site cards + inline JPEG screenshots for each result. Compact: concise cards + up to two inline previews for the requested page. | Awwwards applies only one URL filter — priority color > award > technology > first tag; the rest are checked client-side. Color searches always scrape live (never cached). Deep pagination is unavailable by design (robots.txt). On live-request failure, stale cache is served when present. Compact is opt-in for broad exploration; use default full results to judge screenshots and details/motion tools for shortlisted sites. |
+| `search_sites` | `query` (free text vs titles/tags), `color` (hex like `#404040`), `tags` (array of slugs), `technology` (slug), `award` (`sotd`\|`sotm`\|`soty`\|`nominees`\|`developer`\|`honorable`\|`ecommerce`\|`portfolio`\|`product`\|`typography`\|`businessServices`\|`noCode`), `count` (1–12, default 6), `page` (default 1), `responseMode` (`"full"` default or `"compact"`) | Full: text site cards + inline JPEG screenshots for each result. Compact: concise cards + up to two inline previews for the requested page. | Awwwards applies only one URL filter — priority color > award > technology > first tag; the rest are checked client-side (common technology spellings like `nextjs`/`three.js` are canonicalized to the live slugs). Winner-category and nominee filters verify by URL only: they always scrape fresh. Color searches always scrape live (never cached). Deep pagination is unavailable by design (robots.txt). On live-request failure, stale cache is served when present. Compact is opt-in for broad exploration; use default full results to judge screenshots and details/motion tools for shortlisted sites. |
 | `get_site_details` | `slug` (from `search_sites`, e.g. `l-i-s-a`) | Title, live URL, awards, color palette, technologies, design elements, description, full-size screenshot URL; inline screenshot when available | Cached 7 days; a parse that comes back all-empty is an error, not a quiet empty result. |
 | `get_site_elements` | `slug` | Numbered element list (image or video, with video URLs) + up to 8 inline poster JPEGs | Videos are mp4 URLs (posters only are shown inline). Elements feed from the same fetch as `get_site_details`. |
-| `list_categories` | none | JSON: every color hex and filter/tag slug, plus usage guidance | Cached 30 days. Call this whenever filter vocabulary is uncertain. |
+| `list_categories` | none | JSON: award filters (with labels), every color hex and filter/tag slug, technology slugs, plus usage guidance | Cached 30 days. Call this whenever filter vocabulary is uncertain — awards and technology slugs included. |
 | `capture_live_site` | `url` (absolute URL) | Full-page PNG saved to disk + inline image | Requires the optional playwright dependency (`npm install -g playwright && npx playwright install chromium`). |
 | `analyze_page_structure` | `url` (absolute URL or `file://` path), `maxBands` (cap on returned bands, default 40) | JSON: `title`, `totalHeight`, and an ordered band map (`index`, `tag`, `label`, `background`, `offsetTop`, `height`, `textStart` (first ~60 chars of the band's text) per band) | Requires playwright. Run it on BOTH the reference and your build (step 8) and compare band maps — count, order, backgrounds, heights — never just total height. |
 | `record_site_motion` | `url` (absolute URL), `frames` (filmstrip tile count, 4–36, default 16 → a 4x4 grid) | Inline filmstrip JPEG of a motion-through pass (preloader dwell, slow scroll, hover/cursor interactions) + the saved .webm path as text | Requires playwright + ffmpeg-static. Runs a ~30 s scripted pass — heavier than a capture, use when motion matters (step on from static captures). |

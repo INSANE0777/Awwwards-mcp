@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AwwwardsClient,
   BlockedError,
+  canonicalizeTechnology,
   RateLimiter,
   buildFilterUrl,
   elementPosterPath,
@@ -52,6 +53,75 @@ describe("buildFilterUrl", () => {
       "https://www.awwwards.com/websites/3d/",
     );
     expect(buildFilterUrl({})).toBe("https://www.awwwards.com/websites/");
+  });
+
+  // Expanded award collections, each URL live-verified 2026-10-23 (robots.txt
+  // allows the plain /websites/<slug>/ paths; every page parses site cards).
+  it("builds the expanded award-collection URLs", () => {
+    expect(buildFilterUrl({ award: "sotm" })).toBe("https://www.awwwards.com/websites/sites_of_the_month/");
+    expect(buildFilterUrl({ award: "soty" })).toBe("https://www.awwwards.com/websites/sites_of_the_year/");
+    expect(buildFilterUrl({ award: "nominees" })).toBe("https://www.awwwards.com/websites/nominees/");
+    expect(buildFilterUrl({ award: "ecommerce" })).toBe("https://www.awwwards.com/websites/winner_category_ecommerce/");
+    expect(buildFilterUrl({ award: "portfolio" })).toBe("https://www.awwwards.com/websites/winner_category_portfolio/");
+    expect(buildFilterUrl({ award: "product" })).toBe("https://www.awwwards.com/websites/winner_category_product/");
+    expect(buildFilterUrl({ award: "typography" })).toBe("https://www.awwwards.com/websites/winner_category_typography/");
+    expect(buildFilterUrl({ award: "businessServices" })).toBe("https://www.awwwards.com/websites/winner_category_business-services/");
+    expect(buildFilterUrl({ award: "noCode" })).toBe("https://www.awwwards.com/websites/winner_category_no-code/");
+  });
+
+  it("canonicalizes only the URL filter (technology, else first tag)", () => {
+    expect(buildFilterUrl({ technology: "NextJS" })).toBe(
+      "https://www.awwwards.com/websites/next-js/",
+    );
+    expect(buildFilterUrl({ tags: ["nextjs", "3d"] })).toBe(
+      "https://www.awwwards.com/websites/next-js/",
+    );
+    // The first tag wins the URL; aliases apply to it, later tags are client-checked.
+    expect(buildFilterUrl({ technology: "reactjs", tags: ["threejs"] })).toBe(
+      "https://www.awwwards.com/websites/react/",
+    );
+    expect(buildFilterUrl({ tags: ["3d", "nextjs"] })).toBe(
+      "https://www.awwwards.com/websites/3d/",
+    );
+  });
+});
+
+describe("canonicalizeTechnology", () => {
+  // Each pair verified against the live /websites/ tag list on 2026-10-23:
+  // the target slug exists there and the source token does not, so exact
+  // slugs always win. Unverified candidates were dropped, not guessed.
+  const pairs: [string, string][] = [
+    ["nextjs", "next-js"],
+    ["next.js", "next-js"],
+    ["nuxtjs", "nuxt-js"],
+    ["nuxt.js", "nuxt-js"],
+    ["vuejs", "vue-js"],
+    ["vue.js", "vue-js"],
+    ["reactjs", "react"],
+    ["threejs", "three-js"],
+    ["three.js", "three-js"],
+    ["tailwindcss", "tailwind"],
+    ["eleventy", "11ty"],
+    ["nodejs", "node-js"],
+    ["node.js", "node-js"],
+    ["greensock", "gsap"],
+    ["sveltejs", "svelte"],
+  ];
+
+  it("maps every verified alias to its live slug (case-insensitively)", () => {
+    for (const [alias, slug] of pairs) {
+      expect(canonicalizeTechnology(alias)).toBe(slug);
+      expect(canonicalizeTechnology(alias.toUpperCase())).toBe(slug);
+    }
+  });
+
+  it("passes exact slugs and unknown tokens through", () => {
+    // Targets exist under their own slug: never rewritten.
+    for (const exact of ["next-js", "react", "webgl", "gsap", "11ty", "tailwind", "three-js"]) {
+      expect(canonicalizeTechnology(exact)).toBe(exact);
+    }
+    expect(canonicalizeTechnology("some-unknown-tech")).toBe("some-unknown-tech");
+    expect(canonicalizeTechnology("WebGL")).toBe("WebGL"); // passthrough keeps casing; buildFilterUrl lowercases after
   });
 });
 
