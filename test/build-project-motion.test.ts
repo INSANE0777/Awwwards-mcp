@@ -166,6 +166,36 @@ describe("motion.manifest.json", () => {
     });
   });
 
+  it("reads exact id/class attributes only, never data-id/data-class", () => {
+    const html = `<!doctype html><html><body><main id="main">
+      <section data-id="fake" data-class="fake"><h1 data-class="reveal">A</h1></section>
+    </main></body></html>`;
+    const manifest = buildMotionManifest(splitBuild(html));
+    expect(manifest.sections[0]?.id).toBe("section-1");
+    expect(manifest.sections[0]?.animatedSelectors).toEqual([]);
+    expect(manifest.sections[0]?.initialHidden).toEqual([]);
+  });
+
+  it("requires unique token ownership; a conflicting explicit #id goes page-level", () => {
+    const html = `<!doctype html><html><body><main id="main">
+      <section id="a"><h2 class="title">A</h2></section>
+      <section id="b"><div class="grid"><span class="cell">B</span></div></section>
+    </main></body></html>`;
+    const parsed = normalizeScrollCensus({
+      anims: [
+        { selector: "#a .grid .cell", durationMs: 10, easing: "linear", scrub: false, pin: false },
+        { selector: ".title .grid", durationMs: 20, easing: "linear", scrub: false, pin: false },
+        { selector: "#b .grid", durationMs: 30, easing: "linear", scrub: false, pin: false },
+      ],
+      gsapTriggers: [],
+    });
+    if ("error" in parsed) throw new Error(parsed.error);
+    const manifest = buildMotionManifest(splitBuild(html), parsed.census);
+    expect(manifest.sections[0].triggers).toEqual([]);
+    expect(manifest.sections[1].triggers.map((t) => t.selector)).toEqual(["#b .grid"]);
+    expect(manifest.pageTriggers.map((t) => t.selector)).toEqual(["#a .grid .cell", ".title .grid"]);
+  });
+
   it("attributes structural section:nth-of-type paths, never out-of-range ones", () => {
     const html = `<!doctype html><html><body><main id="main">
       <section id="a"><h2 class="title">A</h2></section>
@@ -291,6 +321,7 @@ describe("--authored", () => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-n2-authored-libs-"));
     try {
       const trees: Record<string, Record<string, string>> = {};
+      const warnings: Record<string, string[]> = {};
       for (const target of ["vite", "astro", "next"] as const) {
         const out = join(dir, target);
         const res = await buildProject({
@@ -302,9 +333,10 @@ describe("--authored", () => {
         });
         if ("error" in res) throw new Error(res.error);
         trees[target] = readTree(out);
+        warnings[target] = res.warnings;
       }
 
-      // (a) head inline boot survives pre-paint, after the remote head script.
+      // (a) head inline boot survives pre-paint; the CDN site bundle is dropped.
       const heads: Record<string, string> = {
         next: trees.next?.["app/layout.tsx"] ?? "",
         astro: trees.astro?.["src/pages/index.astro"] ?? "",
@@ -312,9 +344,11 @@ describe("--authored", () => {
       };
       for (const [target, head] of Object.entries(heads)) {
         expect(`${target}:${/classList\.add\(\\?"rm\\?"\)/.test(head)}`).toBe(`${target}:true`);
-        expect(head.indexOf("https://cdn.test/extra.js")).toBeGreaterThan(-1);
-        expect(head.indexOf("https://cdn.test/extra.js")).toBeLessThan(head.indexOf("classList.add"));
+        expect(head).not.toContain("https://cdn.test/extra.js");
         expect(head.indexOf("classList.add")).toBeLessThan(head.indexOf("</head>"));
+        expect(warnings[target]?.join("\n")).toContain(
+          "authored: dropped external script https://cdn.test/extra.js (not a known animation library)",
+        );
       }
 
       // (b) animation libraries keep their file + ordered reference.
@@ -353,8 +387,10 @@ describe("--authored", () => {
         }
       }
 
-      expect(trees.next?.["app/layout.tsx"]).toContain("<SiteScripts />");
-      expect(trees.next?.["app/layout.tsx"]).toContain("<MotionRoot />");
+      const nextLayout = trees.next?.["app/layout.tsx"] ?? "";
+      expect(nextLayout).toContain("<SiteScripts />");
+      expect(nextLayout).toContain("<MotionRoot />");
+      expect(nextLayout.indexOf("<SiteScripts />")).toBeLessThan(nextLayout.indexOf("<MotionRoot />"));
       const nextRoot = trees.next?.["components/MotionRoot.tsx"] ?? "";
       expect(nextRoot.indexOf("usePageMotion();")).toBeGreaterThan(-1);
       expect(nextRoot.indexOf("usePageMotion();")).toBeLessThan(nextRoot.indexOf("useSection01Motion();"));
@@ -371,6 +407,37 @@ describe("--authored", () => {
       expect(trees.astro?.["src/components/Section01.astro"]).toContain("initSection01();");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps known CDN animation libs + inline head boot, drops other externals with warnings", () => {
+    const html = `<!doctype html><html><head>
+      <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+      <script src="https://cdn.example.test/site-bundle.js"></script>
+      <script>gsap.registerPlugin(ScrollTrigger); addEventListener("load", () => {});</script>
+    </head><body><main id="main"><section id="a"><h1 class="title">A</h1></section></main>
+      <script src="https://cdn.example.test/runtime.js"></script>
+    </body></html>`;
+    const split = splitBuild(html);
+    const manifest = buildMotionManifest(split);
+    const emitted = [
+      emitNext(split, "", "x", { manifest, authored: true }),
+      emitVite(split, "", "x", { manifest, authored: true }),
+      emitAstro(split, "", "x", { manifest, authored: true }),
+    ];
+    for (const result of emitted) {
+      const text = Object.values(byPath(result.files)).join("\n");
+      expect(text).toContain("https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js");
+      expect(text).toContain("gsap.registerPlugin");
+      expect(text).not.toContain("site-bundle.js");
+      expect(text).not.toContain("runtime.js");
+      expect(result.warnings).toContain(
+        "authored: dropped external script https://cdn.example.test/site-bundle.js (not a known animation library)",
+      );
+      expect(result.warnings).toContain(
+        "authored: dropped external script https://cdn.example.test/runtime.js (not a known animation library)",
+      );
+      expect(result.warnings).toContain("kept head inline script that may be site logic — verify");
     }
   });
 
@@ -505,6 +572,12 @@ describe("CLI flags", () => {
       motion: "c.json",
     });
     expect(parseBuildArgs(["a.html", "--target", "next", "--out", "o", "--motion"])).toEqual({
+      error: expect.stringContaining("usage: awwwards-build-project"),
+    });
+    expect(parseBuildArgs(["a.html", "--target", "next", "--out", "o", "--motion="])).toEqual({
+      error: expect.stringContaining("usage: awwwards-build-project"),
+    });
+    expect(parseBuildArgs(["a.html", "--target", "next", "--out", "o", "--motion", ""])).toEqual({
       error: expect.stringContaining("usage: awwwards-build-project"),
     });
   });

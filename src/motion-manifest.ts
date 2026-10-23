@@ -182,7 +182,7 @@ export function normalizeScrollCensus(raw: unknown): CensusParse | { error: stri
 }
 
 const attr = (tag: string, name: string): string => {
-  const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
+  const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
   return m ? (m[1] ?? m[2] ?? m[3] ?? "") : "";
 };
 
@@ -232,6 +232,7 @@ interface DomScan {
   initialHidden: HiddenHint[];
   animatedSelectors: string[];
   tokens: Set<string>; // ids + classes, for census-selector attribution
+  ids: Set<string>; // explicit #id ownership checks
 }
 
 const scanSectionDom = (section: RebuildSection): DomScan => {
@@ -240,6 +241,7 @@ const scanSectionDom = (section: RebuildSection): DomScan => {
   const hidden: HiddenHint[] = [];
   const animated: string[] = [];
   const tokens = new Set<string>();
+  const ids = new Set<string>();
   const hiddenSeen = new Set<string>();
   const animatedSeen = new Set<string>();
   const addHidden = (selector: string, hint: string) => {
@@ -254,7 +256,10 @@ const scanSectionDom = (section: RebuildSection): DomScan => {
     animated.push(selector);
   };
   for (const el of elements) {
-    if (el.id) tokens.add(el.id);
+    if (el.id) {
+      tokens.add(el.id);
+      ids.add(el.id);
+    }
     for (const cls of el.classes) tokens.add(cls);
     const selector = elementSelector(el, scope);
     if (/opacity\s*:\s*0(?:[;\s!]|$)/i.test(el.style)) addHidden(selector, "opacity:0");
@@ -264,7 +269,7 @@ const scanSectionDom = (section: RebuildSection): DomScan => {
     if (/transition\s*:\s*(?!none\b)[^;]+/i.test(el.style)) addAnimated(selector);
     if (el.classes.some((cls) => MOTION_CLASS.test(cls))) addAnimated(selector);
   }
-  return { initialHidden: hidden, animatedSelectors: animated, tokens };
+  return { initialHidden: hidden, animatedSelectors: animated, tokens, ids };
 };
 
 const selectorTokens = (selector: string): string[] => {
@@ -323,21 +328,21 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
 
   if (!census) return { version: 1, measured: false, sections: result, pageTriggers: [], pageAnimatedSelectors: [] };
 
+  const explicitIds = (selector: string): string[] =>
+    [...selector.matchAll(/#([A-Za-z_][\w-]*)/g)].flatMap((m) => (m[1] ? [m[1]] : []));
+
   const owner = (selector: string): number => {
     const tokens = selectorTokens(selector);
     if (tokens.length === 0) return structuralOwner(selector, scans.length);
-    let best = 0;
-    let hit = -1;
-    for (let i = 0; i < scans.length; i++) {
-      const found = scans[i];
-      if (!found) continue;
-      const score = tokens.filter((t) => found.tokens.has(t)).length;
-      if (score > best) {
-        best = score;
-        hit = i;
-      } else if (score === best && score > 0) {
-        hit = -1; // ambiguous: never guess a section
-      }
+    // Unique ownership only: any token shared with another section makes the
+    // selector ambiguous, even when one section contains more of its tokens.
+    const hits = scans.flatMap((found, i) => (found && tokens.some((t) => found.tokens.has(t)) ? [i] : []));
+    if (hits.length !== 1) return -1;
+    const hit = hits[0] ?? -1;
+    // An explicit #id owned by another section contradicts the winning tokens
+    // (e.g. #a .grid .cell with .grid/.cell in #b): page-level, never guess.
+    for (const id of explicitIds(selector)) {
+      if (scans.some((found, i) => i !== hit && found?.ids.has(id))) return -1;
     }
     return hit;
   };

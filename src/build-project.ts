@@ -140,7 +140,7 @@ const mentions = (selector: string, cls: string): boolean =>
   new RegExp(`(?:^|[^\\w-])${cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(selector);
 
 const attr = (startTag: string, name: string): string => {
-  const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(startTag);
+  const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(startTag);
   return m ? (m[1] ?? m[2] ?? m[3] ?? "") : "";
 };
 
@@ -713,28 +713,32 @@ const stripShellAssets = (html: string): string =>
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
     .replace(SCRIPT_RE, (full: string, open: string) => (attr(open, "src") !== "" || JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full));
 
-// `--authored` keeps the page's third-party animation libraries (remote/CDN
-// tags and local vendor bundles the skeletons import) plus head inline boot
-// scripts; site logic (app.js etc.) and body inline scripts are dropped.
-const VENDOR_MOTION_LIB =
-  /(?:^|\/)vendor\/(?:gsap|scrolltrigger|lenis|split-type|circletype|lottie)[^/]*\.js$/i;
+// `--authored` keeps the page's third-party animation libraries (known
+// basenames on local/CDN paths, plus npm-CDN package segments) and head inline
+// boot scripts; other external scripts and body inline scripts are dropped.
+// Basename covers gsap.min.js / three.module.js; the package form covers CDNs
+// whose file is generic (split-type@x/umd/index.min.js).
+const MOTION_LIB_NAME = "(?:gsap|scrolltrigger|lenis|split-?type|circletype|lottie|three)";
+const MOTION_LIB_BASENAME = new RegExp(`^${MOTION_LIB_NAME}(?:[.@_-][\\w.-]*)?\\.m?js$`, "i");
+const MOTION_LIB_PACKAGE = new RegExp(`(?:^|/)${MOTION_LIB_NAME}@[^/]+(?:/|$)`, "i");
 
-export const isVendorMotionLibrary = (src: string): boolean =>
-  VENDOR_MOTION_LIB.test((src.split(/[?#]/)[0] ?? "").replace(/\\/g, "/"));
+export const isMotionLibraryScript = (src: string): boolean => {
+  const path = (src.split(/[?#]/)[0] ?? "").replace(/\\/g, "/");
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  return MOTION_LIB_BASENAME.test(base) || MOTION_LIB_PACKAGE.test(path);
+};
 
-export const keepAuthoredExternalScript = (src: string, local: boolean): boolean =>
-  !local || isVendorMotionLibrary(src);
+export const keepAuthoredExternalScript = (src: string): boolean => isMotionLibraryScript(src);
 
 export const keepAuthoredBodyScript = (
-  entry: { kind: "external"; src: string; local: boolean } | { kind: "inline" },
-): boolean => entry.kind === "external" && keepAuthoredExternalScript(entry.src, entry.local);
+  entry: { kind: "external"; src: string } | { kind: "inline" },
+): boolean => entry.kind === "external" && keepAuthoredExternalScript(entry.src);
 
 export const keepAuthoredHeadScript = (entry: LoaderScript): boolean =>
-  entry.kind === "inline" || keepAuthoredExternalScript(entry.src, entry.local);
+  entry.kind === "inline" || keepAuthoredExternalScript(entry.src);
 
 export const keepAuthoredHeadTag = (tag: HeadTag): boolean =>
-  tag.kind !== "external" ||
-  keepAuthoredExternalScript(attr(tag.tag, "src"), isLocalRef(attr(tag.tag, "src")));
+  tag.kind !== "external" || keepAuthoredExternalScript(attr(tag.tag, "src"));
 
 export const stripExecutableScripts = (html: string): string =>
   html.replace(SCRIPT_RE, (full: string, open: string) => {
@@ -743,8 +747,36 @@ export const stripExecutableScripts = (html: string): string =>
       // body inline JS is site logic; data scripts (ld+json/importmap) are metadata
       return JS_TYPES.has(attr(open, "type").toLowerCase().trim()) ? "" : full;
     }
-    return keepAuthoredExternalScript(src, isLocalRef(src)) ? full : "";
+    return keepAuthoredExternalScript(src) ? full : "";
   });
+
+const HEAD_LOGIC = /gsap\.|ScrollTrigger|new\s+Lenis|addEventListener\(/;
+const MAX_SAFE_HEAD_INLINE = 2048;
+
+// One warning per dropped/external src plus one when a kept head inline script
+// looks like page logic (pre-paint boot is kept regardless).
+export const authoredScriptWarnings = (split: Split): string[] => {
+  const warnings: string[] = [];
+  const externals = split.rehost
+    ? [...split.rehost.headScripts, ...split.rehost.scripts].flatMap((s) => (s.kind === "external" ? [s.src] : []))
+    : [
+        ...split.headTags.flatMap((t) => (t.kind === "external" ? [attr(t.tag, "src")] : [])),
+        ...split.scripts.bodyScripts.flatMap((b) => (b.kind === "external" ? [b.src] : [])),
+      ];
+  const seen = new Set<string>();
+  for (const src of externals) {
+    if (src === "" || seen.has(src) || keepAuthoredExternalScript(src)) continue;
+    seen.add(src);
+    warnings.push(`authored: dropped external script ${src} (not a known animation library)`);
+  }
+  const headInline = split.rehost
+    ? split.rehost.headScripts.flatMap((s) => (s.kind === "inline" ? [s.js] : []))
+    : split.headTags.flatMap((t) => (t.kind === "inline" ? [t.js] : []));
+  if (headInline.some((js) => Buffer.byteLength(js, "utf8") > MAX_SAFE_HEAD_INLINE || HEAD_LOGIC.test(js))) {
+    warnings.push("kept head inline script that may be site logic — verify");
+  }
+  return warnings;
+};
 
 interface RehostContainer {
   start: number; // inner start in the document
@@ -966,6 +998,7 @@ export function parseBuildArgs(argv: string[]): BuildProjectArgs | { error: stri
   if (target !== "vite" && target !== "astro" && target !== "next") return { error: BUILD_ARGS_USAGE };
   const name = flags.get("name");
   const motion = flags.get("motion");
+  if (flags.has("motion") && !motion) return { error: BUILD_ARGS_USAGE };
   return {
     html: positional[0] ?? "",
     target,
@@ -1385,6 +1418,7 @@ export function emitAstro(split: Split, outDir: string, name: string, motion?: M
   const add = (path: string, content: string) => files.push({ path, content });
   const manifest = motion?.manifest ?? buildMotionManifest(split);
   const authored = motion?.authored === true;
+  if (authored) warnings.push(...authoredScriptWarnings(split));
   const hasMotionTriggers = motionHasTriggers(manifest);
   add("motion.manifest.json", motionManifestJson(manifest));
   for (const file of webMotionSkeletons(manifest)) add(file.path, file.content);
@@ -1534,6 +1568,7 @@ export function emitVite(split: Split, outDir: string, name: string, motion?: Mo
   const add = (path: string, content: string) => files.push({ path, content });
   const manifest = motion?.manifest ?? buildMotionManifest(split);
   const authored = motion?.authored === true;
+  if (authored) warnings.push(...authoredScriptWarnings(split));
   const hasMotionTriggers = motionHasTriggers(manifest);
   add("motion.manifest.json", motionManifestJson(manifest));
   for (const file of webMotionSkeletons(manifest)) add(file.path, file.content);
@@ -1757,7 +1792,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
           (s): s is Extract<LoaderScript, { kind: "external" }> => s.kind === "external",
         );
   const keptScripts = authored
-    ? legacyScripts.filter((s) => keepAuthoredExternalScript(s.src, s.local))
+    ? legacyScripts.filter((s) => keepAuthoredExternalScript(s.src))
     : legacyScripts;
   const rehostScripts = keptScripts.filter((s) => s.local);
   const skipRefs = [

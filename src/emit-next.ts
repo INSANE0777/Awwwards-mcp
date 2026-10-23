@@ -14,6 +14,7 @@
 
 import {
   attributeBlocks,
+  authoredScriptWarnings,
   bodyBounds,
   cssTo,
   keepAuthoredBodyScript,
@@ -293,7 +294,7 @@ const layoutHeadTags = (tags: string[]): string =>
 
 // Head attribute read (head tags are never rewritten by htmlToJsx before this).
 const headAttr = (tag: string, name: string): string =>
-  new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find(Boolean) ?? "";
+  new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find(Boolean) ?? "";
 
 const escapeHtmlText = (text: string): string =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -525,7 +526,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>${layoutHeadTags(headTags)}</head>
-      <body>{children}${motion ? "\n        <MotionRoot />" : ""}${layoutBodyScripts(bodyScripts)}</body>
+      <body>{children}${layoutBodyScripts(bodyScripts)}${motion ? "\n        <MotionRoot />" : ""}</body>
     </html>
   );
 }
@@ -662,6 +663,7 @@ export function emitNext(split: Split, outDir: string, name: string, motion?: Mo
   const add = (path: string, content: string) => files.push({ path, content });
   const manifest = motion?.manifest ?? buildMotionManifest(split);
   const authored = motion?.authored === true;
+  if (authored) warnings.push(...authoredScriptWarnings(split));
   add("motion.manifest.json", motionManifestJson(manifest));
   const motionFiles = nextMotionSkeletons(manifest);
   for (const file of motionFiles) add(file.path, file.content);
