@@ -118,15 +118,6 @@ describe("parseCssColor / contrastRatio", () => {
     expect(ratio).toBeLessThan(11.6);
     expect(ratio).not.toBeCloseTo(21, 1); // naive first-opaque-ancestor result
   });
-
-  it("applies ancestor opacity per layer", () => {
-    const ratio = contrastRatioOverLayers("rgb(0, 0, 0)", [
-      { color: "rgb(255, 255, 255)", opacity: 0.5 },
-      { color: "rgb(0, 0, 0)", opacity: 1 },
-    ]);
-    // Opaque white at 50% opacity over black = #808080 → ≈5.32.
-    expect(ratio).toBeCloseTo(5.32, 1);
-  });
 });
 
 describe("reduceA11y", () => {
@@ -142,11 +133,16 @@ describe("reduceA11y", () => {
     expect(evidence.focus.outlineRules).toHaveLength(1);
     expect(evidence.forms.unlabeled[0].type).toBe("email");
     expect(evidence.document).toEqual({ lang: "en", titlePresent: true });
-    expect(coverage).toEqual({ textNodesSampled: 3, images: 5, focusables: 12 });
+    expect(coverage).toEqual({
+      textNodesSampled: 3,
+      images: 5,
+      focusables: 12,
+      skippedOpacityGroups: 0,
+    });
   });
 
   it("reports the composited background for layered samples", () => {
-    const { evidence } = reduceA11y(rawScan({
+    const { evidence, coverage } = reduceA11y(rawScan({
       textSamples: [{
         text: "Layered",
         color: "rgb(0, 0, 0)",
@@ -163,6 +159,41 @@ describe("reduceA11y", () => {
     expect(pair.background).toBe("rgb(191, 191, 191)");
     expect(pair.ratio).toBeGreaterThan(11.3);
     expect(pair.ratio).toBeLessThan(11.6);
+    expect(coverage.skippedOpacityGroups).toBe(0);
+  });
+
+  it("skips samples under a translucent ancestor group instead of approximating", () => {
+    // White background + opacity:.5 on an ancestor dims the black text too:
+    // the real ratio is ~3.95, not the 21:1 a background-only model reports.
+    const { evidence, coverage } = reduceA11y(rawScan({
+      textSamples: [
+        {
+          text: "Dimmed",
+          color: "rgb(0, 0, 0)",
+          backgroundLayers: [
+            { color: "rgb(255, 255, 255)", opacity: 1 },
+            { color: "rgb(255, 255, 255)", opacity: 0.5 },
+          ],
+          selector: ".dimmed",
+          fontSize: 16,
+          bold: false,
+        },
+        {
+          text: "Solid",
+          color: "rgb(0, 0, 0)",
+          backgroundLayers: [{ color: "rgb(255, 255, 255)", opacity: 1 }],
+          selector: ".solid",
+          fontSize: 16,
+          bold: false,
+        },
+      ],
+    }));
+    expect(evidence.contrast.sampled).toBe(1);
+    expect(evidence.contrast.unparseable).toBe(0);
+    expect(evidence.contrast.worstPairs.map((p) => p.selector)).toEqual([".solid"]);
+    expect(evidence.contrast.worstPairs[0].ratio).toBe(21);
+    expect(coverage.skippedOpacityGroups).toBe(1);
+    expect(coverage.textNodesSampled).toBe(2);
   });
 
   it("caps text samples at the requested limit and at 200", () => {

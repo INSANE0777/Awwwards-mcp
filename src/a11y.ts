@@ -6,9 +6,11 @@
  * is pure and computes contrast ratios from the raw colors the snippet
  * collects. Nothing here grades the page: the result carries `heuristic: true`
  * and the fixed note "Evidence only — not a WCAG pass/fail". Contrast
- * composites the ancestor background stack (color alpha × per-ancestor
- * opacity); background images, gradients and pseudo-elements are not modelled,
- * so contrast stays heuristic wherever those paint the real backing.
+ * composites the ancestor background stack for fully opaque chains; a sample
+ * with any ancestor opacity group (<0.999) is skipped and counted in
+ * `coverage.skippedOpacityGroups`, never approximated. Background images,
+ * gradients and pseudo-elements are not modelled either, so contrast stays
+ * heuristic wherever those paint the real backing.
  *
  * Bounds (plan W2): ≤200 text samples, ≤300 images, ≤100 focusables for
  * per-element evidence, ≤200 form controls, ≤5000 CSS rules inspected.
@@ -30,7 +32,7 @@ export const A11Y_NOTE = "Evidence only — not a WCAG pass/fail";
 export interface RawBackgroundLayer {
   /** Computed backgroundColor, including its own alpha. */
   color: string;
-  /** Computed opacity of that ancestor (1 when unset). */
+  /** Computed opacity of that ancestor (1 when unset); <0.999 means the whole subtree group is unsupported for ratios. */
   opacity: number;
 }
 
@@ -382,7 +384,13 @@ export interface AccessibilityResult {
   url: string;
   viewport: ViewportName;
   evidence: A11yEvidence;
-  coverage: { textNodesSampled: number; images: number; focusables: number };
+  coverage: {
+    textNodesSampled: number;
+    images: number;
+    focusables: number;
+    /** Samples under an ancestor opacity group; no ratio is emitted for them. */
+    skippedOpacityGroups: number;
+  };
   heuristic: true;
   note: string;
 }
@@ -446,25 +454,33 @@ function luminance(c: Rgba): number {
 }
 
 /**
+ * True when any ancestor in the stack has a CSS opacity group (<0.999).
+ * Opacity applies to the whole subtree (text AND backgrounds), so the
+ * background-only model here cannot produce an honest ratio for such samples;
+ * the reducer counts them as skipped instead of approximating.
+ */
+export function hasOpacityGroup(layers: RawBackgroundLayer[]): boolean {
+  for (const layer of layers) {
+    if (Number.isFinite(layer.opacity) && layer.opacity < 0.999) return true;
+  }
+  return false;
+}
+
+/**
  * Composite an element-first background stack bottom-up over the white
- * browser canvas. Each layer's effective alpha is its color alpha times its
- * computed opacity. Returns null when a layer color cannot be parsed (for
- * example a modern color function outside rgb()/rgba()); transparent layers
- * are skipped. Background images, gradients and pseudo-elements are not
- * modelled — the ratio stays a heuristic for those.
+ * browser canvas. Callers must reject opacity groups first (`hasOpacityGroup`):
+ * this models color alpha layers only. Returns null when a layer color cannot
+ * be parsed (for example a modern color function outside rgb()/rgba());
+ * transparent layers are skipped. Background images, gradients and
+ * pseudo-elements are not modelled — the ratio stays a heuristic for those.
  */
 export function compositeBackground(layers: RawBackgroundLayer[]): Rgba | null {
   let bg: Rgba = { r: 255, g: 255, b: 255, a: 1 };
   for (let i = layers.length - 1; i >= 0; i--) {
-    const layer = layers[i];
-    const color = parseCssColor(layer.color);
+    const color = parseCssColor(layers[i].color);
     if (!color) return null;
-    const opacity = Number.isFinite(layer.opacity)
-      ? Math.min(1, Math.max(0, layer.opacity))
-      : 1;
-    const alpha = color.a * opacity;
-    if (alpha <= 0) continue;
-    bg = blend({ ...color, a: alpha }, bg);
+    if (color.a <= 0) continue;
+    bg = blend(color, bg);
   }
   return bg;
 }
@@ -483,12 +499,14 @@ function ratioOn(fg: Rgba, bg: Rgba): number {
 
 /**
  * WCAG contrast ratio of a text color over a composited ancestor stack, or
- * null when the text color or any layer cannot be parsed.
+ * null when the text color or any layer cannot be parsed, or when an ancestor
+ * opacity group makes the background-only model unsupported.
  */
 export function contrastRatioOverLayers(
   fg: string,
   layers: RawBackgroundLayer[],
 ): number | null {
+  if (hasOpacityGroup(layers)) return null;
   const f = parseCssColor(fg);
   const b = compositeBackground(layers);
   if (!f || !b) return null;
@@ -518,7 +536,12 @@ export function reduceA11y(
   const samples = raw.textSamples.slice(0, clamp(limit, 1, MAX_TEXT_SAMPLES));
   const pairs: ContrastPair[] = [];
   let unparseable = 0;
+  let skippedOpacityGroups = 0;
   for (const s of samples) {
+    if (hasOpacityGroup(s.backgroundLayers)) {
+      skippedOpacityGroups++;
+      continue;
+    }
     const fg = parseCssColor(s.color);
     const bg = compositeBackground(s.backgroundLayers);
     if (!fg || !bg) {
@@ -554,6 +577,7 @@ export function reduceA11y(
       textNodesSampled: samples.length,
       images: raw.images.scanned,
       focusables: raw.focus.scanned,
+      skippedOpacityGroups,
     },
   };
 }
