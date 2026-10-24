@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildDirectoryPath,
+  DIRECTORY_COUNTRIES,
   DIRECTORY_TTL_MS,
   parseDirectory,
   searchDirectory,
@@ -82,14 +83,52 @@ describe("directory parser", () => {
   });
 });
 
-describe("directory filters + PII", () => {
-  it("builds one path filter with page and reports ignored filters", () => {
-    expect(buildDirectoryPath({ country: "United States" }).path).toBe(
-      "/directory/United%20States/",
+describe("directory country canonicalization", () => {
+  it("ships the live canonical country list", () => {
+    expect(DIRECTORY_COUNTRIES.length).toBe(82);
+    expect(DIRECTORY_COUNTRIES).toContain("United States");
+    expect(DIRECTORY_COUNTRIES).toContain("Réunion");
+    expect(DIRECTORY_COUNTRIES).toContain("Hong Kong - Macau");
+  });
+
+  it("accepts a canonical country and builds its path", () => {
+    expect(buildDirectoryPath({ country: "United States" })).toMatchObject({
+      path: "/directory/United%20States/",
+      applied: [{ kind: "country", value: "United States" }],
+      ignored: [],
+    });
+  });
+
+  it("rejects lowercase, hyphenated and unknown countries with examples", () => {
+    expect(() => buildDirectoryPath({ country: "united states" })).toThrow(
+      /Unknown directory country: united states\..*United States/,
     );
+    expect(() => buildDirectoryPath({ country: "united-states" })).toThrow(
+      /Unknown directory country/,
+    );
+    expect(() => buildDirectoryPath({ country: "Atlantis" })).toThrow(
+      /Unknown directory country: Atlantis\..*Canada/,
+    );
+    expect(() => buildDirectoryPath({ country: "../../etc" })).toThrow(
+      /Invalid directory country/,
+    );
+  });
+
+  it("never falls back to a wrong-country page", async () => {
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn);
+    await expect(searchDirectory({ country: "united states" }, d)).rejects.toThrow(
+      /Unknown directory country/,
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("directory filters + PII", () => {
+  it("builds one path filter with page and machine-readable applied/ignored arrays", () => {
     expect(buildDirectoryPath({ budget: "Over $100,000" })).toMatchObject({
       path: "/directory/over_hundred_thousand/",
-      applied: { kind: "budget", value: "over_hundred_thousand" },
+      applied: [{ kind: "budget", value: "over_hundred_thousand" }],
       ignored: [],
     });
     expect(buildDirectoryPath({ category: "App Development", page: 2 }).path).toBe(
@@ -97,19 +136,19 @@ describe("directory filters + PII", () => {
     );
     expect(buildDirectoryPath({ country: "United States", category: "web-design" })).toMatchObject({
       path: "/directory/United%20States/",
-      applied: { kind: "country", value: "United%20States" },
-      ignored: ["category"],
+      applied: [{ kind: "country", value: "United States" }],
+      ignored: [{ kind: "category", value: "web-design" }],
     });
   });
 
-  it("rejects unknown filters and path injection", () => {
+  it("rejects unknown filters", () => {
     expect(() => buildDirectoryPath({ category: "not-a-category" })).toThrow(/Unknown directory category/);
     expect(() => buildDirectoryPath({ budget: "cheap" })).toThrow(/Unknown directory budget/);
-    expect(() => buildDirectoryPath({ country: "../../etc" })).toThrow(/Invalid directory country/);
   });
 
-  it("strips emails and phone numbers explicitly", () => {
+  it("strips emails and phones with separators but keeps digit-heavy domains", () => {
     expect(stripPii("Jane +1 (555) 123-4567 jane@example.com")).toBe("Jane");
+    expect(stripPii("studio123456789.com")).toBe("studio123456789.com");
     expect(stripPii("United States")).toBe("United States");
     expect(stripPii("2026 awards")).toBe("2026 awards");
   });
@@ -149,6 +188,15 @@ describe("directory cache + blocks", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
+  it("exposes applied/ignored arrays on results", async () => {
+    const d = deps(fixtureFetch());
+    const res = await searchDirectory({ country: "United States", category: "web-design" }, d);
+    expect(res.applied).toEqual([{ kind: "country", value: "United States" }]);
+    expect(res.ignored).toEqual([{ kind: "category", value: "web-design" }]);
+    expect(res.filteredClientSide).toBe(false);
+    expect(res.note).toContain("ignored category");
+  });
+
   it("filters query client-side over the fetched page", async () => {
     const fetchFn = fixtureFetch();
     const d = deps(fetchFn);
@@ -156,6 +204,8 @@ describe("directory cache + blocks", () => {
     const all = await searchDirectory({}, d);
     expect(all.cards).toHaveLength(6);
     expect(all.filteredClientSide).toBe(false);
+    expect(all.applied).toEqual([]);
+    expect(all.ignored).toEqual([]);
 
     const one = await searchDirectory({ query: "Locomotive" }, d);
     expect(one.cards.map((c) => c.slug)).toEqual(["locomotive"]);
@@ -165,13 +215,6 @@ describe("directory cache + blocks", () => {
     const none = await searchDirectory({ query: "zzz" }, d);
     expect(none.cards).toEqual([]);
     expect(none.filteredClientSide).toBe(true);
-  });
-
-  it("notes an ignored second path filter", async () => {
-    const d = deps(fixtureFetch());
-    const res = await searchDirectory({ country: "United States", category: "web-design" }, d);
-    expect(res.note).toContain("ignored category");
-    expect(res.filteredClientSide).toBe(false);
   });
 
   it("serves stale cache with a blocked flag after the 7-day TTL", async () => {
@@ -229,6 +272,8 @@ describe("search_directory handler", () => {
       page: 1,
       hasMore: false,
       filteredClientSide: true,
+      applied: [],
+      ignored: [],
       meta: { cached: false as const },
       note: "note",
     }));
@@ -240,6 +285,8 @@ describe("search_directory handler", () => {
     expect(JSON.parse((res.content[0] as { text: string }).text)).toMatchObject({
       cards: [{ slug: "locomotive" }],
       filteredClientSide: true,
+      applied: [],
+      ignored: [],
     });
   });
 

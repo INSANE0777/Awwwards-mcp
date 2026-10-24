@@ -259,7 +259,9 @@ server.tool(
       .min(1)
       .max(100)
       .default(1)
-      .describe("Collections index page (ignored when slug is set)"),
+      .describe(
+        "Collections index page (1-4 live; page > 4 is rejected). With a slug, page N of that collection",
+      ),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.get_collections(args)),
@@ -274,7 +276,11 @@ server.tool(
       .max(200)
       .optional()
       .describe("Free text matched client-side against name, location and website"),
-    country: z.string().max(100).optional().describe("Country name, e.g. 'United States'"),
+    country: z
+      .string()
+      .max(100)
+      .optional()
+      .describe("Canonical country name, case-sensitive, e.g. 'United States' or 'United Kingdom'"),
     category: z
       .string()
       .max(100)

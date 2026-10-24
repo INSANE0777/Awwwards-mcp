@@ -1313,7 +1313,9 @@ export function createHandlers(deps: {
         deps.getCollectionsFn ??
         ((a: { slug?: string; page?: number }) => {
           if (a.slug) {
-            return import("./collections.js").then((m) => m.getCollection(a.slug!, { cache }));
+            return import("./collections.js").then((m) =>
+              m.getCollection(a.slug!, a.page, { cache }),
+            );
           }
           return import("./collections.js").then((m) => m.getCollections(a.page, { cache }));
         });

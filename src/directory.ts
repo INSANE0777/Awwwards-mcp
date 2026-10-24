@@ -37,6 +37,103 @@ export const DIRECTORY_BUDGETS: Record<string, string> = {
   less_than_five_thousand: "Under $5,000",
 };
 
+// Canonical country names from the /directory/ sidebar, live-verified
+// 2026-10-25 (82 names). Case-sensitive: the site's lowercase
+// /directory/united%20states/ returns 200 with unrelated cards, so accepting
+// non-canonical input silently serves the wrong country. Refresh this list
+// when the directory adds countries.
+export const DIRECTORY_COUNTRIES = [
+  "United States",
+  "United Kingdom",
+  "France",
+  "Canada",
+  "Italy",
+  "Netherlands",
+  "Australia",
+  "Spain",
+  "Germany",
+  "Japan",
+  "India",
+  "Poland",
+  "Ukraine",
+  "Brazil",
+  "Denmark",
+  "Switzerland",
+  "United Arab Emirates",
+  "Austria",
+  "South Africa",
+  "Belgium",
+  "Greece",
+  "Serbia",
+  "New Zealand",
+  "Portugal",
+  "Israel",
+  "Turkey",
+  "Argentina",
+  "Mexico",
+  "Sweden",
+  "Croatia",
+  "Indonesia",
+  "Czech Republic",
+  "Iceland",
+  "South Korea",
+  "Colombia",
+  "Russia",
+  "Bulgaria",
+  "Malaysia",
+  "Singapore",
+  "Uruguay",
+  "Vietnam",
+  "Cyprus",
+  "Finland",
+  "Ireland",
+  "Norway",
+  "Slovakia",
+  "Thailand",
+  "China",
+  "Hong Kong - Macau",
+  "Romania",
+  "Saudi Arabia",
+  "Slovenia",
+  "Sri Lanka",
+  "Bangladesh",
+  "Chile",
+  "Estonia",
+  "Georgia",
+  "Kenya",
+  "Lithuania",
+  "Luxembourg",
+  "Venezuela",
+  "Algeria",
+  "Armenia",
+  "Bolivia",
+  "Cameroon",
+  "Cayman Islands",
+  "Congo",
+  "Hungary",
+  "Isle of Man",
+  "Kosovo",
+  "Latvia",
+  "Lebanon",
+  "Malta",
+  "Mongolia",
+  "Montenegro",
+  "Nepal",
+  "Pakistan",
+  "Peru",
+  "Qatar",
+  "Réunion",
+  "Togo",
+  "Uzbekistan",
+] as const;
+
+export type DirectoryFilterKind = "country" | "category" | "budget";
+
+export interface DirectoryFilter {
+  kind: DirectoryFilterKind;
+  value: string;
+}
+
 export interface SourceMeta {
   cached: boolean;
   stale?: true;
@@ -64,6 +161,10 @@ export interface DirectoryResult {
   // endpoint is robots-disallowed); false when the server-side path filter did
   // the work.
   filteredClientSide: boolean;
+  // Machine-readable path filters: at most one applied per request, the rest
+  // reported as ignored (never silently dropped).
+  applied: DirectoryFilter[];
+  ignored: DirectoryFilter[];
   meta: SourceMeta;
   note: string;
 }
@@ -83,9 +184,7 @@ export interface DirectoryDeps {
   timeoutMs?: number;
 }
 
-type FilterKind = "country" | "category" | "budget";
-
-const FILTER_ORDER: FilterKind[] = ["country", "category", "budget"];
+const FILTER_ORDER: DirectoryFilterKind[] = ["country", "category", "budget"];
 
 const BASE_NOTE =
   "Directory cards from awwwards.com/directory (one page per call). Filters are " +
@@ -113,7 +212,13 @@ function cleanText(value: string): string {
 export function stripPii(value: string): string {
   return value
     .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "")
-    .replace(/\+?\d[\d\s().-]{7,}\d/g, (m) => (m.replace(/\D/g, "").length >= 9 ? "" : m))
+    // A phone-shaped run needs ≥9 digits AND at least one separator. Without
+    // that, a digit-heavy domain like studio123456789.com would be gutted.
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, (m) => {
+      const digits = m.replace(/\D/g, "").length;
+      const hasSeparator = /[\s().-]/.test(m.slice(1, -1));
+      return digits >= 9 && hasSeparator ? "" : m;
+    })
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -200,7 +305,13 @@ function normalizeCountry(value: string): string {
   if (!decoded || /[\\/?#]/.test(decoded) || decoded.includes("..")) {
     throw new Error(`Invalid directory country: "${value}".`);
   }
-  return encodeURIComponent(decoded);
+  if (!(DIRECTORY_COUNTRIES as readonly string[]).includes(decoded)) {
+    throw new Error(
+      `Unknown directory country: ${decoded}. Use a canonical name such as ` +
+        '"United States", "United Kingdom" or "Canada".',
+    );
+  }
+  return decoded;
 }
 
 function normalizeCategory(value: string): string {
@@ -234,23 +345,29 @@ function normalizeBudget(value: string): string {
 export function buildDirectoryPath(args: DirectoryArgs): {
   path: string;
   page: number;
-  applied?: { kind: FilterKind; value: string };
-  ignored: FilterKind[];
+  applied: DirectoryFilter[];
+  ignored: DirectoryFilter[];
 } {
   const page = clampPage(args.page);
-  const supplied: { kind: FilterKind; value: string }[] = [];
+  const supplied: DirectoryFilter[] = [];
   if (args.country?.trim()) supplied.push({ kind: "country", value: normalizeCountry(args.country) });
   if (args.category?.trim()) supplied.push({ kind: "category", value: normalizeCategory(args.category) });
   if (args.budget?.trim()) supplied.push({ kind: "budget", value: normalizeBudget(args.budget) });
 
   supplied.sort((a, b) => FILTER_ORDER.indexOf(a.kind) - FILTER_ORDER.indexOf(b.kind));
-  const applied = supplied[0];
-  const ignored = supplied.slice(1).map((f) => f.kind);
-  const base = applied ? `/directory/${applied.value}/` : "/directory/";
+  const applied = supplied.slice(0, 1);
+  const ignored = supplied.slice(1);
+  const filter = applied[0];
+  const pathValue = filter
+    ? filter.kind === "country"
+      ? encodeURIComponent(filter.value)
+      : filter.value
+    : null;
+  const base = pathValue ? `/directory/${pathValue}/` : "/directory/";
   return {
     path: page === 1 ? base : `${base}?page=${page}`,
     page,
-    ...(applied ? { applied } : {}),
+    applied,
     ignored,
   };
 }
@@ -267,8 +384,8 @@ function filterCards(cards: DirectoryCard[], query: string | undefined): Directo
 function resultNote(args: {
   queryApplied: boolean;
   shown: number;
-  ignored: FilterKind[];
-  applied?: { kind: FilterKind; value: string };
+  applied: DirectoryFilter[];
+  ignored: DirectoryFilter[];
 }): string {
   const parts = [BASE_NOTE];
   if (args.queryApplied) {
@@ -277,8 +394,9 @@ function resultNote(args: {
     );
   }
   if (args.ignored.length) {
+    const kinds = (filters: DirectoryFilter[]) => filters.map((f) => f.kind).join(", ");
     parts.push(
-      `one path filter per request: applied ${args.applied?.kind ?? "none"}; ignored ${args.ignored.join(", ")}.`,
+      `one path filter per request: applied ${kinds(args.applied) || "none"}; ignored ${kinds(args.ignored)}.`,
     );
   }
   return parts.join(" ");
@@ -307,9 +425,11 @@ export async function searchDirectory(
   deps: DirectoryDeps,
 ): Promise<DirectoryResult> {
   const request = buildDirectoryPath(args);
-  const filterKey = request.applied ? `${request.applied.kind}:${request.applied.value}` : "all";
+  const primary = request.applied[0];
+  const filterKey = primary ? `${primary.kind}:${primary.value}` : "all";
   const key = `directory:${filterKey}:${request.page}`;
   const queryApplied = (args.query ?? "").trim().length > 0;
+  const filters = { applied: request.applied, ignored: request.ignored };
 
   const fresh = deps.cache.getMeta<{ cards: DirectoryCard[]; hasMore: boolean }>(
     key,
@@ -322,13 +442,9 @@ export async function searchDirectory(
       page: request.page,
       hasMore: fresh.hasMore,
       filteredClientSide: queryApplied,
+      ...filters,
       meta: { cached: true },
-      note: resultNote({
-        queryApplied,
-        shown: cards.length,
-        ignored: request.ignored,
-        applied: request.applied,
-      }),
+      note: resultNote({ queryApplied, shown: cards.length, ...filters }),
     };
   }
 
@@ -348,13 +464,9 @@ export async function searchDirectory(
       page: request.page,
       hasMore: parsed.hasMore,
       filteredClientSide: queryApplied,
+      ...filters,
       meta: { cached: false },
-      note: resultNote({
-        queryApplied,
-        shown: cards.length,
-        ignored: request.ignored,
-        applied: request.applied,
-      }),
+      note: resultNote({ queryApplied, shown: cards.length, ...filters }),
     };
   } catch (err) {
     const stale = staleRead<{ cards: DirectoryCard[]; hasMore: boolean }>(deps.cache, key);
@@ -365,18 +477,14 @@ export async function searchDirectory(
         page: request.page,
         hasMore: stale.hasMore,
         filteredClientSide: queryApplied,
+        ...filters,
         meta: {
           cached: true,
           stale: true,
           ...(err instanceof BlockedError ? { blocked: true as const } : {}),
           error: message(err),
         },
-        note: resultNote({
-          queryApplied,
-          shown: cards.length,
-          ignored: request.ignored,
-          applied: request.applied,
-        }),
+        note: resultNote({ queryApplied, shown: cards.length, ...filters }),
       };
     }
     throw err;

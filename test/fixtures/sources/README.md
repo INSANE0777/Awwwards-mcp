@@ -10,6 +10,8 @@ parser anchor lives in markup.
 |---|---|---|
 | `collections-index.html` | https://www.awwwards.com/collections/ | 6 of 32 collection cards + real pagination |
 | `collections-brutalism.html` | https://www.awwwards.com/awwwards/collections/brutalism/ | heading, `83 items`, 6 of 10 site cards |
+| `collections-mixed.html` | https://www.awwwards.com/awwwards/collections/brutalism/ | heading, `83 items`, 3 site cards + 2 element cards |
+| `collections-talks.html` | https://www.awwwards.com/awwwards/collections/talks/ | heading, `19 items`, 3 element cards (no site cards) |
 | `directory.html` | https://www.awwwards.com/directory/ | 1 pro card + 6 of 24 ordinary cards + pagination |
 | `directory-united-states.html` | https://www.awwwards.com/directory/United%20States/ | 1 pro card + 6 of 24 US cards + pagination |
 
@@ -23,8 +25,14 @@ parser anchor lives in markup.
   Curated collections link to `/awwwards/collections/<slug>/`; member
   collections link to `/<username>/collections/<slug>/`. The short
   `https://www.awwwards.com/collections/brutalism/` form returned **404**.
-- Collection pages are ordinary site listings: `parseListing` extracted all
-  10 cards on page 1 of brutalism (the page claims `83 items`).
+- Collection pages mix site and element cards. `parseListing` extracted all
+  10 site cards on page 1 of brutalism (the page claims `83 items` total), while
+  brutalism `?page=2` returned 4 more site cards.
+  `awwwards/collections/talks/` returned **19 items and zero site cards** — every
+  card is an element. Its empty `sites` array is real content, not drift: the
+  parser reports `siteCards: 0` / `items: 19` and a clear note. Only pages that
+  contain `/sites/` anchors or submission blobs but parse no cards are treated
+  as drift. `collections-mixed.html` pins the site+element note behavior.
 - The directory renders two grids: a 3-card `card-directory-sp` promo grid
   (featured/PRO rows, duplicated from the ordinary grid) and the paginated
   `card-directory` grid (24 cards per page). Only the latter is parsed.
@@ -36,6 +44,12 @@ parser anchor lives in markup.
   (`/locomotive/`) exposes `Canada - Montréal` but no budget/specialties
   fields; cards expose no contact PII, and the parser strips email/phone
   patterns defensively.
+- Country names must be canonical: the sidebar lists **82** countries. The
+  lowercase `/directory/united%20states/` returns HTTP 200 with unrelated
+  cards (including a United Kingdom row), so non-canonical input is rejected
+  before any request rather than silently serving the wrong country.
+- Page 4 is the last `/collections/` index page; page 5 returns 404. Page 4's
+  pagination has no next link.
 - The free-text directory endpoint `/directory/search/?...` is disallowed by
   robots.txt, so `search_directory` never calls it: `query` is filtered
   client-side over the one fetched page (`filteredClientSide: true`).

@@ -11,7 +11,7 @@ describe("tool annotations", () => {
 
   it("every server.tool declares all four boolean hints", () => {
     const calls = src.match(/server\.tool\(/g) ?? [];
-    expect(calls.length).toBeGreaterThanOrEqual(31);
+    expect(calls.length).toBe(31);
 
     // Slice out each balanced-parens server.tool(...) block and require the
     // four hint keys with explicit boolean values inside it.
