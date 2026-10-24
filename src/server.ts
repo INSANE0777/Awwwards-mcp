@@ -34,6 +34,8 @@ import type {
   AnnualNomineeResult,
   AnnualNomineesResult,
 } from "./annual.js";
+import type { CollectionsListResult, CollectionResult } from "./collections.js";
+import type { DirectoryArgs, DirectoryResult } from "./directory.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -174,6 +176,14 @@ export type AnnualNomineeFn = (args: {
   category?: string;
   slug?: string;
 }) => Promise<AnnualNomineeResult>;
+
+// Collections/directory peers: lazy defaults keep the modules off the hot path
+// and let handler tests inject shapes without network or cache.
+export type GetCollectionsFn = (args: {
+  slug?: string;
+  page?: number;
+}) => Promise<CollectionsListResult | CollectionResult>;
+export type SearchDirectoryFn = (args: DirectoryArgs) => Promise<DirectoryResult>;
 
 // C3 token-diet helpers (plan Task C3): pure compaction for the `compact`
 // flag on get_site_details / capture_component. Heavy per-element detail →
@@ -347,6 +357,8 @@ export interface Handlers {
     category?: string;
     slug?: string;
   }): Promise<ToolResponse>;
+  get_collections(args: { slug?: string; page?: number }): Promise<ToolResponse>;
+  search_directory(args: DirectoryArgs): Promise<ToolResponse>;
   capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -447,6 +459,8 @@ export function createHandlers(deps: {
   annualCategoriesFn?: AnnualCategoriesFn;
   annualNomineesFn?: AnnualNomineesFn;
   annualNomineeFn?: AnnualNomineeFn;
+  getCollectionsFn?: GetCollectionsFn;
+  searchDirectoryFn?: SearchDirectoryFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1286,6 +1300,41 @@ export function createHandlers(deps: {
     }
   }
 
+  // ---- collections + directory (HTML sources) ----
+  // Both are parsed pages under the same 7-day local cache + stale-fallback
+  // contract as annual. No media is downloaded; cards carry public fields only.
+
+  async function get_collections(args: {
+    slug?: string;
+    page?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const get =
+        deps.getCollectionsFn ??
+        ((a: { slug?: string; page?: number }) => {
+          if (a.slug) {
+            return import("./collections.js").then((m) => m.getCollection(a.slug!, { cache }));
+          }
+          return import("./collections.js").then((m) => m.getCollections(a.page, { cache }));
+        });
+      return { content: [text(JSON.stringify(await get(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function search_directory(args: DirectoryArgs): Promise<ToolResponse> {
+    try {
+      const search =
+        deps.searchDirectoryFn ??
+        ((a: DirectoryArgs) =>
+          import("./directory.js").then((m) => m.searchDirectory(a, { cache })));
+      return { content: [text(JSON.stringify(await search(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -1829,6 +1878,8 @@ export function createHandlers(deps: {
     get_annual_categories,
     get_annual_nominees,
     get_annual_nominee,
+    get_collections,
+    search_directory,
     capture_live_site,
     analyze_page_structure,
     analyze_scroll_map,

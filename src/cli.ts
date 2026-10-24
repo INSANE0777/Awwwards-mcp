@@ -244,6 +244,54 @@ server.tool(
 );
 
 server.tool(
+  "get_collections",
+  "Browse Awwwards' curated and member collections. Without a slug, lists collections (paginated); with a slug, returns that collection's first page of site cards. Curated slugs look like 'brutalism'; member collections need 'owner/slug'. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
+  {
+    slug: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe("Collection slug: 'brutalism' (curated) or 'owner/slug' for a member collection"),
+    page: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(1)
+      .describe("Collections index page (ignored when slug is set)"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  (args) => asMcpResult(handlers.get_collections(args)),
+);
+
+server.tool(
+  "search_directory",
+  "Search the Awwwards directory of agencies, studios and freelancers. Filters are path-based, so one of country/category/budget applies per request; query is matched client-side over the fetched page. Returns public profile cards (name, slug, location, website, award counts) — contact details are stripped. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
+  {
+    query: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("Free text matched client-side against name, location and website"),
+    country: z.string().max(100).optional().describe("Country name, e.g. 'United States'"),
+    category: z
+      .string()
+      .max(100)
+      .optional()
+      .describe("Category or type slug/label, e.g. 'web-design', 'Agency & Studio', 'freelance'"),
+    budget: z
+      .string()
+      .max(100)
+      .optional()
+      .describe("Budget filter slug or label, e.g. 'over_hundred_thousand' or 'Over $100,000'"),
+    page: z.number().int().min(1).max(100).default(1).describe("Directory page"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  (args) => asMcpResult(handlers.search_directory(args)),
+);
+
+server.tool(
   "capture_live_site",
   "Take a fresh full-page screenshot of a live website URL using a headless browser. Requires the optional playwright dependency.",
   {
