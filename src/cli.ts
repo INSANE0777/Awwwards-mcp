@@ -154,7 +154,7 @@ server.tool(
 
 server.tool(
   "get_index_stats",
-  "Aggregate metrics over the LOCAL cache only (zero network): sites, cached details, elements, technology frequency, palette colour frequency, jury score stats and motion-DNA library frequency. Every metric carries coverage {detailsCached, sitesTotal, windowDays} and is labelled 'locally cached subset' - aggregates only, no site slugs or titles. windowDays defaults to 90 (1-3650); top defaults to 10 (1-50). Personal, non-commercial use.",
+  "Aggregate metrics over the LOCAL cache only (zero network). ALL-TIME: site count, element count and technology/tag frequency. WINDOWED by windowDays (default 90, 1-3650): cached details, palette colour frequency and jury score stats from at most the 500 most recently fetched detail rows, plus Motion DNA library frequency. Each metric carries coverage labelled 'locally cached subset'; windowDays/detailsCached/detailParseCap appear only on windowed metrics (sites/elements/technologies are explicitly all-time). top caps each frequency list (default 10, 1-50). Aggregates only - no site slugs or titles. Personal, non-commercial use.",
   {
     windowDays: z
       .number()
@@ -162,7 +162,7 @@ server.tool(
       .min(1)
       .max(3650)
       .default(90)
-      .describe("Only count rows fetched within this window (days)"),
+      .describe("Window for detail-derived metrics only (details, colours, scores, motion DNA); sites/elements/technologies are all-time"),
     top: z
       .number()
       .int()
@@ -322,7 +322,7 @@ server.tool(
 
 server.tool(
   "audit_url",
-  "Audit any live page as evidence, not a grade: runtime frame/long-task/layout-thrash measurement via an installed Chrome/Edge over raw CDP (no playwright), plus static animation anti-patterns scanned over the page HTML and up to 8 same-origin CSS/JS assets (bounded: 8 assets, 2MB each, 1 request/second shared limiter, default 10s timeouts). Degrades honestly - perf carries {error} when no browser is available and the static scan reports its own error; neither suppresses the other. Personal, non-commercial use; audit only URLs you are authorised to inspect.",
+  "Audit any live page as evidence, not a grade: runtime frame/long-task/layout-thrash measurement via an installed Chrome/Edge over raw CDP (no playwright), plus static animation anti-patterns scanned over the page HTML and up to 8 same-origin CSS/JS assets (bounded: 8 assets, 2MB each, 1 request/second shared limiter, default 10s timeouts). Asset refs resolve against the final post-redirect page URL; asset redirects leaving that origin are rejected. Findings are severity-sorted before the 50-item cap, so `worst` is always present. Degrades honestly - perf carries {error} when no browser is available and the static scan reports its own error; neither suppresses the other. Personal, non-commercial use; audit only URLs you are authorised to inspect.",
   {
     url: z.string().url().describe("Absolute http(s) URL of the page to audit"),
     viewport: z
@@ -343,7 +343,7 @@ server.tool(
 
 server.tool(
   "analyze_accessibility",
-  "Collect accessibility EVIDENCE from a live page - not a WCAG pass/fail grade. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour, resolved effective background and contrast ratio (worst pairs with selector paths); image alt coverage; heading ladder (skipped levels, multiple h1); focusable/positive-tabindex counts plus outline:none stylesheet rules; unlabeled form controls; document lang/title. Result carries coverage and heuristic:true. Requires the optional playwright dependency; degrades to {error}. Personal, non-commercial use.",
+  "Collect accessibility EVIDENCE from a live page - not a WCAG pass/fail grade. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background composited bottom-up from the ancestor stack (each layer's colour alpha x computed opacity; reported as final rgb()), then the contrast ratio (worst pairs with selector paths). Background images, gradients and pseudo-elements are not composited, so contrast stays heuristic there. Also: image alt coverage; heading ladder (skipped levels, multiple h1); focusable/positive-tabindex counts plus outline:none stylesheet rules; unlabeled form controls; document lang/title. Result carries coverage and heuristic:true. http(s) URLs only; requires the optional playwright dependency and degrades to {error}. Personal, non-commercial use.",
   {
     url: z.string().url().describe("Absolute http(s) URL of the page to inspect"),
     viewport: viewportSchema,

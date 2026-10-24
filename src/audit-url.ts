@@ -2,7 +2,10 @@
  * Standalone audit of an arbitrary live URL: runtime measurement
  * (perf-live.measureRuntime — installed Chrome/Edge over raw CDP, no
  * playwright) plus a static anti-pattern scan (audit-rules.scanAntiPatterns)
- * over the page HTML and up to 8 same-origin CSS/JS assets.
+ * over the page HTML and up to 8 same-origin CSS/JS assets. The final
+ * post-redirect page URL is the asset base; an asset redirect that leaves the
+ * final page origin is rejected. Findings are severity-sorted (worst first)
+ * before the output cap.
  *
  * Evidence only — nothing here grades the page. Every failure degrades:
  * runtime → `perf: { error }`, static fetch → `antiPatterns.error` + note,
@@ -61,6 +64,8 @@ export interface AuditUrlOpts {
   timeoutMs?: number;
   fetchFn?: typeof fetch;
   perfFn?: PerfFn;
+  /** DI seam for offline tests; defaults to scanAntiPatterns. */
+  scanFn?: (inputs: { css?: string; html?: string; js?: string }) => AntiPatternFinding[];
   /** DI seam for offline tests; defaults to one 1 req/s limiter per run. */
   limiter?: { acquire(): Promise<void> };
 }
@@ -71,14 +76,32 @@ const msg = (err: unknown): string =>
 const clampTimeout = (n?: number): number =>
   Math.min(MAX_TIMEOUT_MS, Math.max(1000, typeof n === "number" && Number.isFinite(n) ? n : DEFAULT_TIMEOUT_MS));
 
-/** One polite text fetch. Returns null on HTTP error, timeout, or oversize. */
+async function cancelBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    /* already closed */
+  }
+}
+
+interface FetchedText {
+  text: string;
+  /** URL after redirects (falls back to the request URL). */
+  finalUrl: string;
+}
+
+/**
+ * One polite text fetch. Returns null on HTTP error, timeout, oversize body,
+ * or — when `allowedOrigin` is set — a redirect that leaves that origin.
+ */
 async function fetchText(
   fetchFn: typeof fetch,
   limiter: { acquire(): Promise<void> },
   url: string,
   timeoutMs: number,
   maxBytes: number,
-): Promise<string | null> {
+  allowedOrigin?: string,
+): Promise<FetchedText | null> {
   await limiter.acquire();
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -89,19 +112,28 @@ async function fetchText(
       redirect: "follow",
     });
     if (!res.ok) return null;
+    const finalUrl = res.url || url;
+    if (allowedOrigin !== undefined) {
+      let finalOrigin = "";
+      try {
+        finalOrigin = new URL(finalUrl).origin;
+      } catch {
+        /* unparseable final URL — treated as a different origin */
+      }
+      if (finalOrigin !== allowedOrigin) {
+        await cancelBody(res);
+        return null;
+      }
+    }
     const declared = Number(res.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxBytes) {
-      try {
-        await res.body?.cancel();
-      } catch {
-        /* already closed */
-      }
+      await cancelBody(res);
       return null;
     }
     const reader = res.body?.getReader();
     if (!reader) {
       const text = await res.text();
-      return Buffer.byteLength(text) > maxBytes ? null : text;
+      return Buffer.byteLength(text) > maxBytes ? null : { text, finalUrl };
     }
     const chunks: Uint8Array[] = [];
     let total = 0;
@@ -120,7 +152,7 @@ async function fetchText(
       }
       chunks.push(value);
     }
-    return Buffer.concat(chunks).toString("utf8");
+    return { text: Buffer.concat(chunks).toString("utf8"), finalUrl };
   } catch {
     return null;
   } finally {
@@ -167,15 +199,12 @@ export function collectAuditAssets(
   return { css, js };
 }
 
-function pickWorst(findings: AntiPatternFinding[]): string | null {
-  if (findings.length === 0) return null;
-  let worst = findings[0];
-  for (const f of findings) {
-    if (SEVERITY_WEIGHTS[f.severity ?? "INFO"] > SEVERITY_WEIGHTS[worst.severity ?? "INFO"]) {
-      worst = f;
-    }
-  }
-  return worst.ruleId;
+function sortBySeverity(findings: AntiPatternFinding[]): AntiPatternFinding[] {
+  // Stable sort: severity desc, original scan order within a severity.
+  return [...findings].sort(
+    (a, b) =>
+      SEVERITY_WEIGHTS[b.severity ?? "INFO"] - SEVERITY_WEIGHTS[a.severity ?? "INFO"],
+  );
 }
 
 interface StaticScan {
@@ -189,42 +218,54 @@ async function scanStatic(
   fetchFn: typeof fetch,
   limiter: { acquire(): Promise<void> },
   timeoutMs: number,
+  scanFn: (inputs: { css?: string; html?: string; js?: string }) => AntiPatternFinding[],
 ): Promise<StaticScan> {
   const empty = { findings: [] as AntiPatternFinding[], coverage: { assetsScanned: 0, failed: 0 } };
-  const html = await fetchText(
+  const page = await fetchText(
     fetchFn,
     limiter,
     pageUrl,
     timeoutMs,
     MAX_AUDIT_ASSET_BYTES,
   );
-  if (html === null) {
+  if (page === null) {
     return {
       ...empty,
       error: "Page HTML could not be fetched (HTTP error, timeout, or over 2MB).",
     };
   }
-  const assets = collectAuditAssets(html, pageUrl);
+  // Relative asset refs resolve against where the page ENDED, not where the
+  // audit started; the final page origin is also the redirect boundary for
+  // every asset fetch below.
+  const pageOrigin = new URL(page.finalUrl).origin;
+  const assets = collectAuditAssets(page.text, page.finalUrl);
   const css: string[] = [];
   const js: string[] = [];
   let scanned = 0;
   let failed = 0;
   for (const [kind, urls] of [["css", assets.css], ["js", assets.js]] as const) {
     for (const url of urls) {
-      const text = await fetchText(fetchFn, limiter, url, timeoutMs, MAX_AUDIT_ASSET_BYTES);
-      if (text === null) {
+      const fetched = await fetchText(
+        fetchFn,
+        limiter,
+        url,
+        timeoutMs,
+        MAX_AUDIT_ASSET_BYTES,
+        pageOrigin,
+      );
+      if (fetched === null) {
         failed++;
         continue;
       }
       scanned++;
-      (kind === "css" ? css : js).push(text);
+      (kind === "css" ? css : js).push(fetched.text);
     }
   }
   return {
     // Concatenated per source: scanAntiPatterns takes one string per input;
     // joining with newlines keeps line numbers relative to the asset bundle,
     // not the original file. Findings carry source + line only (house shape).
-    findings: scanAntiPatterns({ html, css: css.join("\n"), js: js.join("\n") }),
+    findings: scanFn({ html: page.text, css: css.join("\n"), js: js.join("\n") }),
     coverage: { assetsScanned: scanned, failed },
   };
 }
@@ -255,7 +296,13 @@ export async function auditUrl(
   const perfPromise = perfFn(pageUrl.href, { viewport: opts.viewport }).catch(
     (err): { error: string } => ({ error: msg(err) }),
   );
-  const staticPromise = scanStatic(pageUrl.href, fetchFn, limiter, timeoutMs).catch(
+  const staticPromise = scanStatic(
+    pageUrl.href,
+    fetchFn,
+    limiter,
+    timeoutMs,
+    opts.scanFn ?? scanAntiPatterns,
+  ).catch(
     (err): StaticScan => ({
       findings: [],
       coverage: { assetsScanned: 0, failed: 0 },
@@ -265,7 +312,8 @@ export async function auditUrl(
   const [perf, scan] = await Promise.all([perfPromise, staticPromise]);
 
   const { coverage, error, ...bounded } = scan;
-  const findings = bounded.findings.slice(0, MAX_AUDIT_FINDINGS);
+  const sorted = sortBySeverity(bounded.findings);
+  const findings = sorted.slice(0, MAX_AUDIT_FINDINGS);
   const notes: string[] = ["Evidence only — not a performance grade."];
   if ("error" in perf) notes.push(`Runtime not measured: ${perf.error}`);
   if (error) notes.push(`Static scan: ${error}`);
@@ -275,8 +323,8 @@ export async function auditUrl(
     url: pageUrl.href,
     perf,
     antiPatterns: {
-      count: bounded.findings.length,
-      worst: pickWorst(bounded.findings),
+      count: sorted.length,
+      worst: sorted[0]?.ruleId ?? null,
       findings,
       ...(error ? { error } : {}),
     },

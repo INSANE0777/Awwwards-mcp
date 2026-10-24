@@ -5,7 +5,10 @@
  * no arrow functions) so page.evaluate can re-serialize it; the Node reducer
  * is pure and computes contrast ratios from the raw colors the snippet
  * collects. Nothing here grades the page: the result carries `heuristic: true`
- * and the fixed note "Evidence only — not a WCAG pass/fail".
+ * and the fixed note "Evidence only — not a WCAG pass/fail". Contrast
+ * composites the ancestor background stack (color alpha × per-ancestor
+ * opacity); background images, gradients and pseudo-elements are not modelled,
+ * so contrast stays heuristic wherever those paint the real backing.
  *
  * Bounds (plan W2): ≤200 text samples, ≤300 images, ≤100 focusables for
  * per-element evidence, ≤200 form controls, ≤5000 CSS rules inspected.
@@ -24,10 +27,18 @@ export const A11Y_PLAYWRIGHT_HINT =
 
 export const A11Y_NOTE = "Evidence only — not a WCAG pass/fail";
 
+export interface RawBackgroundLayer {
+  /** Computed backgroundColor, including its own alpha. */
+  color: string;
+  /** Computed opacity of that ancestor (1 when unset). */
+  opacity: number;
+}
+
 export interface RawTextSample {
   text: string;
   color: string;
-  background: string;
+  /** Element-first ancestor background stack; reducer composites it bottom-up. */
+  backgroundLayers: RawBackgroundLayer[];
   selector: string;
   fontSize: number;
   bold: boolean;
@@ -105,25 +116,21 @@ export const A11Y_SNIPPET = function (args: { limit?: number }): RawA11yScan {
     return parts.join(" > ").slice(0, 160);
   }
 
-  function hasVisibleBackground(color: string): boolean {
-    if (!color || color === "transparent") return false;
-    const m = /rgba?\(([^)]+)\)/.exec(color);
-    if (!m) return true; // opaque modern color function or keyword
-    const parts = m[1].replace(/\//g, " ").split(/[\s,]+/).filter(Boolean);
-    if (parts.length < 4) return true;
-    return parseFloat(parts[3]) > 0;
-  }
-
-  function effectiveBackground(el: any): string {
+  function backgroundLayers(el: any): RawBackgroundLayer[] {
+    const layers: RawBackgroundLayer[] = [];
     let cur = el;
     let depth = 0;
     while (cur && cur.nodeType === 1 && depth < 20) {
-      const bg = String(g.getComputedStyle(cur).backgroundColor || "");
-      if (hasVisibleBackground(bg)) return bg;
+      const st = g.getComputedStyle(cur);
+      const opacity = parseFloat(st.opacity);
+      layers.push({
+        color: String(st.backgroundColor || ""),
+        opacity: Number.isFinite(opacity) ? opacity : 1,
+      });
       cur = cur.parentElement;
       depth++;
     }
-    return "rgb(255, 255, 255)"; // browser canvas default
+    return layers;
   }
 
   // ---- contrast samples ----
@@ -151,7 +158,7 @@ export const A11Y_SNIPPET = function (args: { limit?: number }): RawA11yScan {
               textSamples.push({
                 text: text.slice(0, 80),
                 color: String(st.color || ""),
-                background: effectiveBackground(parent),
+                backgroundLayers: backgroundLayers(parent),
                 selector: selectorFor(parent),
                 fontSize: Math.round(fontSize * 10) / 10,
                 bold: Number(st.fontWeight) >= 600,
@@ -350,6 +357,7 @@ export const A11Y_SNIPPET = function (args: { limit?: number }): RawA11yScan {
 export interface ContrastPair {
   ratio: number;
   color: string;
+  /** Final background after compositing every ancestor layer, as rgb(). */
   background: string;
   selector: string;
   text: string;
@@ -385,7 +393,7 @@ export interface A11yOpts {
   limit?: number;
 }
 
-interface Rgba {
+export interface Rgba {
   r: number;
   g: number;
   b: number;
@@ -438,21 +446,66 @@ function luminance(c: Rgba): number {
 }
 
 /**
+ * Composite an element-first background stack bottom-up over the white
+ * browser canvas. Each layer's effective alpha is its color alpha times its
+ * computed opacity. Returns null when a layer color cannot be parsed (for
+ * example a modern color function outside rgb()/rgba()); transparent layers
+ * are skipped. Background images, gradients and pseudo-elements are not
+ * modelled — the ratio stays a heuristic for those.
+ */
+export function compositeBackground(layers: RawBackgroundLayer[]): Rgba | null {
+  let bg: Rgba = { r: 255, g: 255, b: 255, a: 1 };
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layer = layers[i];
+    const color = parseCssColor(layer.color);
+    if (!color) return null;
+    const opacity = Number.isFinite(layer.opacity)
+      ? Math.min(1, Math.max(0, layer.opacity))
+      : 1;
+    const alpha = color.a * opacity;
+    if (alpha <= 0) continue;
+    bg = blend({ ...color, a: alpha }, bg);
+  }
+  return bg;
+}
+
+const cssRgb = (c: Rgba): string =>
+  `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`;
+
+function ratioOn(fg: Rgba, bg: Rgba): number {
+  const opaqueFg = blend(fg, bg);
+  const l1 = luminance(opaqueFg);
+  const l2 = luminance(bg);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * WCAG contrast ratio of a text color over a composited ancestor stack, or
+ * null when the text color or any layer cannot be parsed.
+ */
+export function contrastRatioOverLayers(
+  fg: string,
+  layers: RawBackgroundLayer[],
+): number | null {
+  const f = parseCssColor(fg);
+  const b = compositeBackground(layers);
+  if (!f || !b) return null;
+  return ratioOn(f, b);
+}
+
+/**
  * WCAG contrast ratio between two CSS colors, or null when either cannot be
  * parsed. Translucent backgrounds composite over the white browser canvas;
- * translucent text composites over the resulting background.
+ * translucent text composites over the resulting background. For a layered
+ * page background use contrastRatioOverLayers.
  */
 export function contrastRatio(fg: string, bg: string): number | null {
   const f = parseCssColor(fg);
   const b = parseCssColor(bg);
   if (!f || !b) return null;
-  const opaqueBg = blend(b, { r: 255, g: 255, b: 255, a: 1 });
-  const opaqueFg = blend(f, opaqueBg);
-  const l1 = luminance(opaqueFg);
-  const l2 = luminance(opaqueBg);
-  const lighter = Math.max(l1, l2);
-  const darker = Math.min(l1, l2);
-  return (lighter + 0.05) / (darker + 0.05);
+  return ratioOn(f, blend(b, { r: 255, g: 255, b: 255, a: 1 }));
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -466,15 +519,17 @@ export function reduceA11y(
   const pairs: ContrastPair[] = [];
   let unparseable = 0;
   for (const s of samples) {
-    const ratio = contrastRatio(s.color, s.background);
-    if (ratio === null) {
+    const fg = parseCssColor(s.color);
+    const bg = compositeBackground(s.backgroundLayers);
+    if (!fg || !bg) {
       unparseable++;
       continue;
     }
+    const ratio = ratioOn(fg, bg);
     pairs.push({
       ratio: round2(ratio),
       color: s.color,
-      background: s.background,
+      background: cssRgb(bg),
       selector: s.selector,
       text: s.text,
       fontSize: s.fontSize,
@@ -515,6 +570,15 @@ export async function analyzeAccessibility(
   opts: A11yOpts = {},
   loader: () => Promise<any> = () => import("playwright" as string),
 ): Promise<AccessibilityResult | { error: string }> {
+  let pageUrl: URL;
+  try {
+    pageUrl = new URL(url);
+  } catch {
+    return { error: `Invalid URL: ${url}` };
+  }
+  if (pageUrl.protocol !== "http:" && pageUrl.protocol !== "https:") {
+    return { error: "analyze_accessibility only accepts http(s) URLs" };
+  }
   let chromium: any;
   try {
     ({ chromium } = await loader());
@@ -532,12 +596,12 @@ export async function analyzeAccessibility(
     const { width, height, ...contextOpts } = resolveViewport(opts.viewport);
     const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
     await installSnippetShims(page);
-    await page.goto(url, { waitUntil: "load", timeout: 45_000 });
+    await page.goto(pageUrl.href, { waitUntil: "load", timeout: 45_000 });
     await page.waitForTimeout(3000);
     const raw = (await page.evaluate(A11Y_SNIPPET, { limit })) as RawA11yScan;
     const viewport = opts.viewport ?? "desktop";
     const { evidence, coverage } = reduceA11y(raw, limit);
-    return { url: raw.url || url, viewport, evidence, coverage, heuristic: true, note: A11Y_NOTE };
+    return { url: raw.url || pageUrl.href, viewport, evidence, coverage, heuristic: true, note: A11Y_NOTE };
   } catch (err) {
     return { error: msg(err) };
   } finally {

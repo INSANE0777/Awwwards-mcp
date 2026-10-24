@@ -1,12 +1,14 @@
 /**
  * get_index_stats: aggregate metrics over the LOCAL cache only — zero network.
  *
- * Every metric carries the same coverage block (details cached in the window,
- * total sites, window length, "locally cached subset") so an agent can never
- * mistake these numbers for the whole Awwwards catalogue. Output is aggregates
- * only: no site slugs or titles ever appear.
+ * Every metric carries a coverage block labelled "locally cached subset" so
+ * an agent can never mistake these numbers for the whole Awwwards catalogue.
+ * Sites, elements and technology/tag frequency are ALL-TIME counts over the
+ * cache. The window (default 90 days) applies only to detail-derived metrics:
+ * cached details, palette colours, jury scores and Motion DNA. Output is
+ * aggregates only: no site slugs or titles ever appear.
  *
- * Bounds: detail rows parsed for colors/scores ≤500 (most recently fetched),
+ * Bounds: detail rows parsed for palettes/scores ≤500 (most recently fetched),
  * output arrays ≤ top (default 10, max 50), window 1..3650 days (default 90).
  */
 import type { Cache } from "./cache.js";
@@ -22,38 +24,43 @@ export const MAX_DETAILS_PARSED = 500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface IndexCoverage {
-  detailsCached: number;
   sitesTotal: number;
-  windowDays: number;
   note: "locally cached subset";
+}
+
+/** Coverage for the detail-derived metrics, the only windowed numbers. */
+export interface WindowedCoverage extends IndexCoverage {
+  detailsCached: number;
+  windowDays: number;
+  detailParseCap: number;
 }
 
 export interface IndexStatsResult {
   windowDays: number;
   top: number;
   sites: { total: number; coverage: IndexCoverage };
-  details: { cached: number; coverage: IndexCoverage };
+  details: { cached: number; coverage: WindowedCoverage };
   elements: { total: number; coverage: IndexCoverage };
   technologies: {
-    items: Array<{ slug: string; count: number }>;
+    items: Array<{ tag: string; count: number }>;
     distinct: number;
     coverage: IndexCoverage;
   };
   colors: {
     items: Array<{ hex: string; count: number }>;
     detailsParsed: number;
-    coverage: IndexCoverage;
+    coverage: WindowedCoverage;
   };
   scores: {
     n: number;
     avg: number | null;
     median: number | null;
-    coverage: IndexCoverage;
+    coverage: WindowedCoverage;
   };
   motionLibs: {
     items: Array<{ lib: string; count: number }>;
     rows: number;
-    coverage: IndexCoverage;
+    coverage: WindowedCoverage;
   };
   note: string;
 }
@@ -116,10 +123,14 @@ export function getIndexStats(
     const elementsTotal = count("SELECT COUNT(*) AS n FROM elements");
 
     const coverage: IndexCoverage = {
-      detailsCached,
       sitesTotal,
-      windowDays,
       note: "locally cached subset",
+    };
+    const windowCoverage: WindowedCoverage = {
+      ...coverage,
+      detailsCached,
+      windowDays,
+      detailParseCap: MAX_DETAILS_PARSED,
     };
 
     // Technologies: site tags, slug-normalized. Aggregates only.
@@ -142,7 +153,7 @@ export function getIndexStats(
         tech.set(slug, (tech.get(slug) ?? 0) + 1);
       }
     }
-    const techTop = topCounts(tech, top).map((t) => ({ slug: t.key, count: t.count }));
+    const techTop = topCounts(tech, top).map((t) => ({ tag: t.key, count: t.count }));
 
     // Detail-derived metrics: palettes + scores over the most recent ≤500
     // detail rows inside the window.
@@ -195,6 +206,7 @@ export function getIndexStats(
       .prepare("SELECT data FROM motion_dna WHERE capturedAt >= ?")
       .all(cutoff) as Array<{ data: string }>;
     const libs = new Map<string, number>();
+    let dnaRowsParsed = 0;
     for (const row of dnaRows) {
       let dna: Partial<MotionDna>;
       try {
@@ -202,6 +214,8 @@ export function getIndexStats(
       } catch {
         continue;
       }
+      if (!dna || typeof dna !== "object") continue;
+      dnaRowsParsed++;
       const list = dna?.stack?.libs;
       if (!Array.isArray(list)) continue;
       const seen = new Set<string>();
@@ -217,13 +231,13 @@ export function getIndexStats(
       windowDays,
       top,
       sites: { total: sitesTotal, coverage },
-      details: { cached: detailsCached, coverage },
+      details: { cached: detailsCached, coverage: windowCoverage },
       elements: { total: elementsTotal, coverage },
       technologies: { items: techTop, distinct: tech.size, coverage },
-      colors: { items: colorTop, detailsParsed, coverage },
-      scores: { n: scores.length, avg: scoreAvg, median: scoreMedian, coverage },
-      motionLibs: { items: libTop, rows: dnaRows.length, coverage },
-      note: "Aggregates over the local cache only; no network requests and no site slugs or titles.",
+      colors: { items: colorTop, detailsParsed, coverage: windowCoverage },
+      scores: { n: scores.length, avg: scoreAvg, median: scoreMedian, coverage: windowCoverage },
+      motionLibs: { items: libTop, rows: dnaRowsParsed, coverage: windowCoverage },
+      note: "Aggregates over the local cache only; no network requests and no site slugs or titles. Sites, elements and technologies are all-time; details, colours, scores and motion libraries use the window.",
     };
   });
 }

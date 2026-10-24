@@ -4,7 +4,9 @@ import {
   A11Y_PLAYWRIGHT_HINT,
   A11Y_SNIPPET,
   analyzeAccessibility,
+  compositeBackground,
   contrastRatio,
+  contrastRatioOverLayers,
   parseCssColor,
   reduceA11y,
   type RawA11yScan,
@@ -18,7 +20,7 @@ const rawScan = (over: Partial<RawA11yScan> = {}): RawA11yScan => ({
     {
       text: "Low contrast",
       color: "rgb(200, 200, 200)",
-      background: "rgb(255, 255, 255)",
+      backgroundLayers: [{ color: "rgb(255, 255, 255)", opacity: 1 }],
       selector: "main > p",
       fontSize: 14,
       bold: false,
@@ -26,7 +28,7 @@ const rawScan = (over: Partial<RawA11yScan> = {}): RawA11yScan => ({
     {
       text: "High contrast",
       color: "rgb(0, 0, 0)",
-      background: "rgb(255, 255, 255)",
+      backgroundLayers: [{ color: "rgb(255, 255, 255)", opacity: 1 }],
       selector: "#hero > h1",
       fontSize: 32,
       bold: true,
@@ -34,7 +36,7 @@ const rawScan = (over: Partial<RawA11yScan> = {}): RawA11yScan => ({
     {
       text: "Modern color",
       color: "oklch(0.5 0.1 30)",
-      background: "rgb(255, 255, 255)",
+      backgroundLayers: [{ color: "rgb(255, 255, 255)", opacity: 1 }],
       selector: ".modern",
       fontSize: 16,
       bold: false,
@@ -99,6 +101,32 @@ describe("parseCssColor / contrastRatio", () => {
     expect(contrastRatio("rgba(0, 0, 0, 0.5)", "rgb(255, 255, 255)")).toBeCloseTo(3.95, 1);
     expect(contrastRatio("oklch(0.5 0.1 30)", "rgb(255, 255, 255)")).toBeNull();
   });
+
+  it("composites 50%-white over 50%-black bottom-up, not as an opaque layer", () => {
+    const layers = [
+      { color: "rgba(255, 255, 255, 0.5)", opacity: 1 },
+      { color: "rgba(0, 0, 0, 0.5)", opacity: 1 },
+    ];
+    const bg = compositeBackground(layers);
+    expect(bg).not.toBeNull();
+    // 50% black over white canvas = 127.5; 50% white over that = 191.25.
+    expect(bg!.r).toBeCloseTo(191.25, 2);
+    expect(bg!.g).toBeCloseTo(191.25, 2);
+    expect(bg!.b).toBeCloseTo(191.25, 2);
+    const ratio = contrastRatioOverLayers("rgb(0, 0, 0)", layers);
+    expect(ratio).toBeGreaterThan(11.3);
+    expect(ratio).toBeLessThan(11.6);
+    expect(ratio).not.toBeCloseTo(21, 1); // naive first-opaque-ancestor result
+  });
+
+  it("applies ancestor opacity per layer", () => {
+    const ratio = contrastRatioOverLayers("rgb(0, 0, 0)", [
+      { color: "rgb(255, 255, 255)", opacity: 0.5 },
+      { color: "rgb(0, 0, 0)", opacity: 1 },
+    ]);
+    // Opaque white at 50% opacity over black = #808080 → ≈5.32.
+    expect(ratio).toBeCloseTo(5.32, 1);
+  });
 });
 
 describe("reduceA11y", () => {
@@ -108,6 +136,7 @@ describe("reduceA11y", () => {
     expect(evidence.contrast.unparseable).toBe(1);
     expect(evidence.contrast.worstPairs.map((p) => p.selector)).toEqual(["main > p", "#hero > h1"]);
     expect(evidence.contrast.worstPairs[0].ratio).toBeLessThan(1.7);
+    expect(evidence.contrast.worstPairs[0].background).toBe("rgb(255, 255, 255)");
     expect(evidence.images.missingAlt).toBe(2);
     expect(evidence.headings.skipped).toEqual([{ level: 3, previous: 1, selector: "#jump" }]);
     expect(evidence.focus.outlineRules).toHaveLength(1);
@@ -116,12 +145,32 @@ describe("reduceA11y", () => {
     expect(coverage).toEqual({ textNodesSampled: 3, images: 5, focusables: 12 });
   });
 
+  it("reports the composited background for layered samples", () => {
+    const { evidence } = reduceA11y(rawScan({
+      textSamples: [{
+        text: "Layered",
+        color: "rgb(0, 0, 0)",
+        backgroundLayers: [
+          { color: "rgba(255, 255, 255, 0.5)", opacity: 1 },
+          { color: "rgba(0, 0, 0, 0.5)", opacity: 1 },
+        ],
+        selector: ".layered",
+        fontSize: 16,
+        bold: false,
+      }],
+    }));
+    const pair = evidence.contrast.worstPairs[0];
+    expect(pair.background).toBe("rgb(191, 191, 191)");
+    expect(pair.ratio).toBeGreaterThan(11.3);
+    expect(pair.ratio).toBeLessThan(11.6);
+  });
+
   it("caps text samples at the requested limit and at 200", () => {
     const many = rawScan({
       textSamples: Array.from({ length: 250 }, (_, i) => ({
         text: `t${i}`,
         color: "rgb(0, 0, 0)",
-        background: "rgb(255, 255, 255)",
+        backgroundLayers: [{ color: "rgb(255, 255, 255)", opacity: 1 }],
         selector: `p:nth-child(${i})`,
         fontSize: 16,
         bold: false,
@@ -190,6 +239,21 @@ describe("analyzeAccessibility", () => {
       throw new Error("Cannot find module 'playwright'");
     });
     expect(result).toEqual({ error: A11Y_PLAYWRIGHT_HINT });
+  });
+
+  it("rejects unusable URLs without loading playwright", async () => {
+    let loaded = false;
+    const loader = async () => {
+      loaded = true;
+      return {};
+    };
+    expect(await analyzeAccessibility("file:///tmp/page.html", {}, loader)).toEqual({
+      error: "analyze_accessibility only accepts http(s) URLs",
+    });
+    expect(await analyzeAccessibility("not a url", {}, loader)).toEqual({
+      error: "Invalid URL: not a url",
+    });
+    expect(loaded).toBe(false);
   });
 
   it("degrades navigation errors and still closes the browser", async () => {

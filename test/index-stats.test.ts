@@ -70,10 +70,16 @@ const element = (slug: string, fetchedAt: number): ElementRecord => ({
   fetchedAt,
 });
 
-const COVERAGE = {
+const BASE_COVERAGE = {
+  sitesTotal: 3,
+  note: "locally cached subset",
+};
+
+const WINDOW_COVERAGE = {
   detailsCached: 2,
   sitesTotal: 3,
   windowDays: 90,
+  detailParseCap: 500,
   note: "locally cached subset",
 };
 
@@ -111,10 +117,10 @@ describe("getIndexStats", () => {
     expect(stats.elements.total).toBe(1);
 
     expect(stats.technologies.items).toEqual([
-      { slug: "webgl", count: 2 },
-      { slug: "3d", count: 1 },
-      { slug: "next-js", count: 1 },
-      { slug: "portfolio", count: 1 },
+      { tag: "webgl", count: 2 },
+      { tag: "3d", count: 1 },
+      { tag: "next-js", count: 1 },
+      { tag: "portfolio", count: 1 },
     ]);
     expect(stats.technologies.distinct).toBe(4);
 
@@ -133,17 +139,14 @@ describe("getIndexStats", () => {
     ]);
     expect(stats.motionLibs.rows).toBe(2);
 
-    // Mandatory coverage on EVERY metric.
-    for (const metric of [
-      stats.sites,
-      stats.details,
-      stats.elements,
-      stats.technologies,
-      stats.colors,
-      stats.scores,
-      stats.motionLibs,
-    ]) {
-      expect(metric.coverage).toEqual(COVERAGE);
+    // All-time metrics carry all-time coverage; windowed metrics carry the
+    // window and the detail-parse cap.
+    for (const metric of [stats.sites, stats.elements, stats.technologies]) {
+      expect(metric.coverage).toEqual(BASE_COVERAGE);
+      expect("windowDays" in metric.coverage).toBe(false);
+    }
+    for (const metric of [stats.details, stats.colors, stats.scores, stats.motionLibs]) {
+      expect(metric.coverage).toEqual(WINDOW_COVERAGE);
     }
   });
 
@@ -165,7 +168,10 @@ describe("getIndexStats", () => {
     expect(wide.motionLibs.items).toEqual([{ lib: "gsap", count: 3 }]);
     expect(wide.motionLibs.rows).toBe(3);
     expect(wide.technologies.items).toHaveLength(1);
-    for (const metric of [wide.sites, wide.details, wide.colors, wide.scores]) {
+    for (const metric of [wide.sites, wide.elements, wide.technologies]) {
+      expect(metric.coverage).toEqual(BASE_COVERAGE);
+    }
+    for (const metric of [wide.details, wide.colors, wide.scores, wide.motionLibs]) {
       expect(metric.coverage.windowDays).toBe(3650);
       expect(metric.coverage.detailsCached).toBe(3);
     }
@@ -175,9 +181,13 @@ describe("getIndexStats", () => {
     expect(narrow.colors.items).toEqual([]);
     expect(narrow.scores).toMatchObject({ n: 0, avg: null, median: null });
     expect(narrow.motionLibs.rows).toBe(0);
-    // Sites and their tags are not windowed: they describe the local index.
+    expect(narrow.details.coverage.detailsCached).toBe(0);
+    expect(narrow.details.coverage.windowDays).toBe(1);
+    // Sites, elements and their tags are all-time: they describe the local index.
     expect(narrow.sites.total).toBe(3);
+    expect(narrow.elements.total).toBe(1);
     expect(narrow.technologies.distinct).toBe(4);
+    expect(narrow.sites.coverage).toEqual(BASE_COVERAGE);
   });
 
   it("clamps windowDays and top to the documented range", () => {
@@ -201,11 +211,55 @@ describe("getIndexStats", () => {
     expect(stats.scores).toMatchObject({ n: 0, avg: null, median: null });
     expect(stats.motionLibs).toMatchObject({ items: [], rows: 0 });
     expect(stats.sites.coverage).toEqual({
+      sitesTotal: 0,
+      note: "locally cached subset",
+    });
+    expect(stats.details.coverage).toEqual({
       detailsCached: 0,
       sitesTotal: 0,
       windowDays: 90,
+      detailParseCap: 500,
       note: "locally cached subset",
     });
+  });
+
+  it("skips malformed JSON rows without failing the aggregates", () => {
+    const cache = seeded();
+    cache.withDbForTest((db) => {
+      db.prepare("INSERT INTO meta (key, value, fetchedAt) VALUES (?, ?, ?)").run(
+        "detail:bad",
+        "{not json",
+        NOW,
+      );
+      db.prepare("INSERT INTO motion_dna (url, data, capturedAt) VALUES (?, ?, ?)").run(
+        "https://bad.example",
+        "not json",
+        NOW,
+      );
+      db.prepare("UPDATE sites SET tags = ? WHERE slug = ?").run("not json", "gamma");
+    });
+    const stats = getIndexStats({}, { cache, now: () => NOW });
+    // The cached row exists (SQL count) but does not contribute evidence.
+    expect(stats.details.cached).toBe(3);
+    expect(stats.colors.detailsParsed).toBe(2);
+    expect(stats.colors.items).toEqual([
+      { hex: "#000000", count: 2 },
+      { hex: "#FF0000", count: 1 },
+      { hex: "#FFFFFF", count: 1 },
+    ]);
+    expect(stats.scores).toMatchObject({ n: 2, avg: 7, median: 7 });
+    // rows counts parsed DNA rows, so the malformed row is not double-counted.
+    expect(stats.motionLibs.rows).toBe(2);
+    expect(stats.motionLibs.items).toEqual([
+      { lib: "gsap", count: 2 },
+      { lib: "three.js", count: 1 },
+    ]);
+    expect(stats.technologies.items).toEqual([
+      { tag: "webgl", count: 2 },
+      { tag: "3d", count: 1 },
+      { tag: "next-js", count: 1 },
+    ]);
+    expect(stats.technologies.distinct).toBe(3);
   });
 
   it("makes zero network requests", () => {
