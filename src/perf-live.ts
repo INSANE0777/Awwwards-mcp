@@ -33,6 +33,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import type { ViewportName } from "./viewport.js";
 
 /** Fields renamed from aegon's collector output — see the header mapping. */
 export interface PerfMeasurement {
@@ -225,6 +226,10 @@ export function clampSeconds(seconds?: number): number {
 
 const WIDTH = 1280;
 const HEIGHT = 800;
+// Mobile profile mirrors viewport.ts's 390x844 phone class; desktop keeps the
+// aegon harness geometry above so existing measurements stay comparable.
+const MOBILE_WIDTH = 390;
+const MOBILE_HEIGHT = 844;
 
 /**
  * In-page collector — byte-identical to aegon's (A:\Motion\src\live.ts). It
@@ -383,6 +388,8 @@ const defaultFetch: FetchFn = (url) => fetch(url);
 export interface MeasureRuntimeOpts {
   /** Capture window in seconds, clamped to (0.05 .. 10]. Default: 4. */
   seconds?: number;
+  /** Measurement viewport: desktop keeps aegon's 1280x800; mobile uses 390x844. */
+  viewport?: ViewportName;
   spawnFn?: SpawnFn;
   fetchFn?: FetchFn;
   connectFn?: (wsUrl: string) => Promise<CdpLike>;
@@ -429,6 +436,9 @@ export async function measureRuntime(
   opts: MeasureRuntimeOpts = {},
 ): Promise<PerfMeasurement | { error: string }> {
   const seconds = clampSeconds(opts.seconds);
+  const mobile = opts.viewport === "mobile";
+  const width = mobile ? MOBILE_WIDTH : WIDTH;
+  const height = mobile ? MOBILE_HEIGHT : HEIGHT;
   const spawnFn = opts.spawnFn ?? defaultSpawn;
   const fetchFn = opts.fetchFn ?? defaultFetch;
   const connectFn = opts.connectFn ?? ((wsUrl: string) => Cdp.connect(wsUrl));
@@ -447,7 +457,7 @@ export async function measureRuntime(
         "--disable-gpu",
         "--no-first-run",
         "--disable-extensions",
-        `--window-size=${WIDTH},${HEIGHT}`,
+        `--window-size=${width},${height}`,
         "--remote-debugging-port=0",
         "about:blank",
       ],
@@ -463,10 +473,10 @@ export async function measureRuntime(
     cdp = await connectFn(target.webSocketDebuggerUrl);
     await cdp.send("Page.enable");
     await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: WIDTH,
-      height: HEIGHT,
+      width,
+      height,
       deviceScaleFactor: 1,
-      mobile: false,
+      mobile,
     });
     // collector must exist before page scripts run — foreign buildUrl pages
     // get it at document-start (aegon only measured its own harness files)

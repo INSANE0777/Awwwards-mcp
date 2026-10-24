@@ -200,6 +200,20 @@ describe("measureRuntime", () => {
     expect(kills).toEqual(["child"]); // browser process reaped
   });
 
+  it("emulates the mobile viewport when requested", async () => {
+    const cdp = new FakeCdp();
+    cdp.metrics = aegonMetrics;
+    const res = await measureRuntime("https://build.example/page", {
+      ...base,
+      viewport: "mobile",
+      connectFn: async () => cdp,
+      findBrowserFn: () => BROWSER,
+    });
+    if ("error" in res) throw new Error(res.error);
+    const emu = cdp.sent.find((s) => s.method === "Emulation.setDeviceMetricsOverride");
+    expect(emu?.params).toEqual({ width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  });
+
   it("degrades when no Chrome/Edge is found — spawn never called", async () => {
     let spawned = false;
     const res = await measureRuntime("https://build.example/page", {

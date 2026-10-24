@@ -36,6 +36,9 @@ import type {
 } from "./annual.js";
 import type { CollectionsListResult, CollectionResult } from "./collections.js";
 import type { DirectoryArgs, DirectoryResult } from "./directory.js";
+import type { AuditUrlResult } from "./audit-url.js";
+import type { AccessibilityResult } from "./a11y.js";
+import type { IndexStatsArgs, IndexStatsResult } from "./index-stats.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -184,6 +187,19 @@ export type GetCollectionsFn = (args: {
   page?: number;
 }) => Promise<CollectionsListResult | CollectionResult>;
 export type SearchDirectoryFn = (args: DirectoryArgs) => Promise<DirectoryResult>;
+
+// W2 inspection peers: every fn is optional so handler tests stay offline.
+export type AuditUrlFn = (args: {
+  url: string;
+  viewport?: ViewportName;
+  timeoutMs?: number;
+}) => Promise<AuditUrlResult | { error: string }>;
+export type AnalyzeAccessibilityFn = (args: {
+  url: string;
+  viewport?: ViewportName;
+  limit?: number;
+}) => Promise<AccessibilityResult | { error: string }>;
+export type IndexStatsFn = (args: IndexStatsArgs) => Promise<IndexStatsResult>;
 
 // C3 token-diet helpers (plan Task C3): pure compaction for the `compact`
 // flag on get_site_details / capture_component. Heavy per-element detail →
@@ -336,6 +352,7 @@ export interface Handlers {
     maxBands?: number;
   }): Promise<ToolResponse>;
   get_index_status(): Promise<ToolResponse>;
+  get_index_stats(args: IndexStatsArgs): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   search_elements(args: {
     query?: string;
@@ -359,6 +376,16 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   get_collections(args: { slug?: string; page?: number }): Promise<ToolResponse>;
   search_directory(args: DirectoryArgs): Promise<ToolResponse>;
+  audit_url(args: {
+    url: string;
+    viewport?: ViewportName;
+    timeoutMs?: number;
+  }): Promise<ToolResponse>;
+  analyze_accessibility(args: {
+    url: string;
+    viewport?: ViewportName;
+    limit?: number;
+  }): Promise<ToolResponse>;
   capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -461,6 +488,9 @@ export function createHandlers(deps: {
   annualNomineeFn?: AnnualNomineeFn;
   getCollectionsFn?: GetCollectionsFn;
   searchDirectoryFn?: SearchDirectoryFn;
+  auditUrlFn?: AuditUrlFn;
+  analyzeAccessibilityFn?: AnalyzeAccessibilityFn;
+  indexStatsFn?: IndexStatsFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -1011,6 +1041,18 @@ export function createHandlers(deps: {
     }
   }
 
+  async function get_index_stats(args: IndexStatsArgs): Promise<ToolResponse> {
+    try {
+      // Local cache only: the module runs SQL over cache.db, never the network.
+      const stats =
+        deps.indexStatsFn ??
+        ((a: IndexStatsArgs) => import("./index-stats.js").then((m) => m.getIndexStats(a, { cache })));
+      return { content: [text(JSON.stringify(await stats(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function get_site_elements(args: { slug: string }): Promise<ToolResponse> {
     try {
       const elementsKey = `elements:${args.slug}`;
@@ -1332,6 +1374,48 @@ export function createHandlers(deps: {
         ((a: DirectoryArgs) =>
           import("./directory.js").then((m) => m.searchDirectory(a, { cache })));
       return { content: [text(JSON.stringify(await search(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  // ---- inspection (W2): evidence-only runtime + a11y + local aggregates ----
+
+  async function audit_url(args: {
+    url: string;
+    viewport?: ViewportName;
+    timeoutMs?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const audit =
+        deps.auditUrlFn ??
+        ((a: { url: string; viewport?: ViewportName; timeoutMs?: number }) =>
+          import("./audit-url.js").then((m) =>
+            m.auditUrl(a.url, { viewport: a.viewport, timeoutMs: a.timeoutMs }),
+          ));
+      const result = await audit(args);
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function analyze_accessibility(args: {
+    url: string;
+    viewport?: ViewportName;
+    limit?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const analyze =
+        deps.analyzeAccessibilityFn ??
+        ((a: { url: string; viewport?: ViewportName; limit?: number }) =>
+          import("./a11y.js").then((m) =>
+            m.analyzeAccessibility(a.url, { viewport: a.viewport, limit: a.limit }),
+          ));
+      const result = await analyze(args);
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1873,6 +1957,7 @@ export function createHandlers(deps: {
     compare_sites,
     create_design_brief,
     get_index_status,
+    get_index_stats,
     get_site_elements,
     search_elements,
     get_element,
@@ -1882,6 +1967,8 @@ export function createHandlers(deps: {
     get_annual_nominee,
     get_collections,
     search_directory,
+    audit_url,
+    analyze_accessibility,
     capture_live_site,
     analyze_page_structure,
     analyze_scroll_map,

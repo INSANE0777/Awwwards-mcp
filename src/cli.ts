@@ -153,6 +153,29 @@ server.tool(
 );
 
 server.tool(
+  "get_index_stats",
+  "Aggregate metrics over the LOCAL cache only (zero network): sites, cached details, elements, technology frequency, palette colour frequency, jury score stats and motion-DNA library frequency. Every metric carries coverage {detailsCached, sitesTotal, windowDays} and is labelled 'locally cached subset' - aggregates only, no site slugs or titles. windowDays defaults to 90 (1-3650); top defaults to 10 (1-50). Personal, non-commercial use.",
+  {
+    windowDays: z
+      .number()
+      .int()
+      .min(1)
+      .max(3650)
+      .default(90)
+      .describe("Only count rows fetched within this window (days)"),
+    top: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(10)
+      .describe("Max rows per frequency list (technologies, colours, motion libs)"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  (args) => asMcpResult(handlers.get_index_stats(args)),
+);
+
+server.tool(
   "get_site_elements",
   "Get the design-element highlights of one Awwwards site: component-level visuals (3D models, video content, mobile layouts, microcopy) with poster images inline and video URLs.",
   {
@@ -295,6 +318,45 @@ server.tool(
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.search_directory(args)),
+);
+
+server.tool(
+  "audit_url",
+  "Audit any live page as evidence, not a grade: runtime frame/long-task/layout-thrash measurement via an installed Chrome/Edge over raw CDP (no playwright), plus static animation anti-patterns scanned over the page HTML and up to 8 same-origin CSS/JS assets (bounded: 8 assets, 2MB each, 1 request/second shared limiter, default 10s timeouts). Degrades honestly - perf carries {error} when no browser is available and the static scan reports its own error; neither suppresses the other. Personal, non-commercial use; audit only URLs you are authorised to inspect.",
+  {
+    url: z.string().url().describe("Absolute http(s) URL of the page to audit"),
+    viewport: z
+      .enum(["desktop", "mobile"])
+      .default("desktop")
+      .describe("Runtime measurement geometry: desktop = 1280x800 (aegon baseline); mobile = 390x844"),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(1000)
+      .max(30000)
+      .default(10000)
+      .describe("Per static request timeout in ms (page HTML + each asset)"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.audit_url(args)),
+);
+
+server.tool(
+  "analyze_accessibility",
+  "Collect accessibility EVIDENCE from a live page - not a WCAG pass/fail grade. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour, resolved effective background and contrast ratio (worst pairs with selector paths); image alt coverage; heading ladder (skipped levels, multiple h1); focusable/positive-tabindex counts plus outline:none stylesheet rules; unlabeled form controls; document lang/title. Result carries coverage and heuristic:true. Requires the optional playwright dependency; degrades to {error}. Personal, non-commercial use.",
+  {
+    url: z.string().url().describe("Absolute http(s) URL of the page to inspect"),
+    viewport: viewportSchema,
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(100)
+      .describe("Text-node sample cap (1-200)"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  (args) => asMcpResult(handlers.analyze_accessibility(args)),
 );
 
 server.tool(
