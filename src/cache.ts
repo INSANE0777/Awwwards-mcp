@@ -256,6 +256,14 @@ export class Cache {
     this.withDb(fn);
   }
 
+  /**
+   * Read-only query seam for derived aggregate modules (index-stats). Same
+   * per-operation open/close contract as every other cache op.
+   */
+  withReadDb<T>(fn: (db: DatabaseSync) => T): T {
+    return this.withDb(fn);
+  }
+
   upsertSites(sites: SiteSummary[]): void {
     this.withDb((db) => {
       // `nominee` overwrites (current-state semantics): a nominee that later

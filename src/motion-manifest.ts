@@ -435,3 +435,129 @@ export function buildMotionManifest(split: Split, census?: NormalizedCensus): Mo
 
 export const motionManifestJson = (manifest: MotionManifest): string =>
   `${JSON.stringify(manifest, null, 2)}\n`;
+
+/** Envelope returned by the build_motion_manifest tool. */
+export interface MotionManifestScaffold {
+  manifest: MotionManifest;
+  measured: false;
+  note: string;
+  censusAnims: number;
+  warnings: string[];
+}
+
+const SCAFFOLD_NOTE = "Scaffold from measured census; author motion before shipping.";
+
+const tokenAfter = (selector: string, sigil: "#" | "."): string => {
+  const m = new RegExp(`\\${sigil}([A-Za-z_][\\w-]*)`).exec(selector);
+  return m?.[1] ?? "";
+};
+
+// The manifest only needs section identity + tag; a band label ("#hero.hero",
+// ".pricing") or an explicit section selector supplies the id/class tokens the
+// census attribution matches on. Markup is never available here, so DOM
+// initial-state scanning has nothing to read — census triggers still attribute.
+function scaffoldSection(label: string, selector: string | undefined, tag: string): RebuildSection {
+  const source = selector ?? label;
+  const id = tokenAfter(source, "#");
+  const className = tokenAfter(source, ".");
+  const safeTag = /^[A-Za-z][A-Za-z0-9-]*$/.test(tag) ? tag.toLowerCase() : "section";
+  const attrs = `${id ? ` id="${id}"` : ""}${className ? ` class="${className}"` : ""}`;
+  return {
+    tag: safeTag,
+    id,
+    className,
+    startTag: `<${safeTag}${attrs}>`,
+    innerHtml: "",
+    closeTag: `</${safeTag}>`,
+    text: "",
+  };
+}
+
+/**
+ * Pure build_motion_manifest core: an analyze_page_structure result + an
+ * analyze_scroll_map payload → motion.manifest.json scaffold. Never throws;
+ * invalid input returns { error }. Best-effort sections use only a tag plus
+ * the first #id/.class token from each band label (or `sections[].selector`).
+ */
+export function scaffoldMotionManifest(input: unknown): MotionManifestScaffold | { error: string } {
+  try {
+    const root = asRecord(input);
+    const bandsRoot = asRecord(root?.bands);
+    if (!bandsRoot || !Array.isArray(bandsRoot.bands)) {
+      return { error: "bands: expected the analyze_page_structure result object with bands[]" };
+    }
+    const explicit = root?.sections;
+    if (explicit !== undefined && explicit !== null && !Array.isArray(explicit)) {
+      return { error: "sections: expected an array of { label, selector? }" };
+    }
+    const sections: RebuildSection[] = [];
+    if (Array.isArray(explicit) && explicit.length > 0) {
+      for (const raw of explicit) {
+        const row = asRecord(raw);
+        const label = text(row?.label);
+        if (!row || label === "") {
+          return { error: "sections: each entry needs a non-empty label" };
+        }
+        sections.push(scaffoldSection(label, text(row.selector) || undefined, "section"));
+      }
+    } else {
+      for (const raw of bandsRoot.bands) {
+        const row = asRecord(raw);
+        if (!row) continue;
+        sections.push(scaffoldSection(text(row.label), undefined, text(row.tag) || "section"));
+      }
+    }
+    if (sections.length === 0) return { error: "bands: no bands to scaffold from" };
+
+    const parsed = normalizeScrollCensus(root?.scrollCensus);
+    if ("error" in parsed) return { error: parsed.error };
+
+    const split: Split = {
+      html: "",
+      sections: { sections, detected: "generic" },
+      styles: {
+        tokensCss: "",
+        headLinks: [],
+        perSection: new Map(),
+        sharedCss: "",
+        siteCss: "",
+        hoistedImports: [],
+      },
+      scripts: {
+        cdns: [],
+        externals: [],
+        inlineJs: "",
+        inlineBlocks: [],
+        headInlineJs: [],
+        headExternal: [],
+        bodyScripts: [],
+        timelineBlocks: [],
+      },
+      headTags: [],
+      warnings: [],
+      assetRefs: [],
+      rehost: null,
+    };
+    const censusAnims = parsed.census.anims.length;
+    const hasMeasurement =
+      censusAnims > 0 ||
+      parsed.census.gsapTriggers.length > 0 ||
+      parsed.census.scrubCurves.length > 0;
+    const warnings = [...parsed.warnings];
+    if (!hasMeasurement) warnings.push("census has no anims or gsapTriggers: manifest.measured stays false");
+    const manifest = buildMotionManifest(split, parsed.census);
+    if (!hasMeasurement) {
+      manifest.measured = false;
+      for (const section of manifest.sections) section.measured = false;
+    }
+    return {
+      manifest,
+      measured: false,
+      note: SCAFFOLD_NOTE,
+      censusAnims,
+      warnings,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}

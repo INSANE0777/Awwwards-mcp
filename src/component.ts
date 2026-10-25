@@ -347,6 +347,155 @@ export function reduceComponent(
   };
 }
 
+/** One captured value and how many nodes used it. */
+export interface ValueCount {
+  value: string;
+  count: number;
+}
+
+/** Typography usage distilled from the pack's computed styles (top 12 each). */
+export interface TypographySummary {
+  sampled: number;
+  families: ValueCount[];
+  sizes: ValueCount[];
+  weights: ValueCount[];
+  lineHeights: ValueCount[];
+  letterSpacings: ValueCount[];
+}
+
+/** Deduped colour usage from node styles + pack.colors (top 24). */
+export interface PaletteSummary {
+  colors: ValueCount[];
+  junkFiltered: number;
+}
+
+const TOP_TYPO_VALUES = 12;
+const TOP_PALETTE_VALUES = 24;
+const PALETTE_KEYS = ["color", "backgroundColor"];
+
+function topCounts(counts: Map<string, number>, limit: number): ValueCount[] {
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([value, count]) => ({ value, count }));
+}
+
+// Counts one occurrence per node that carries the property (not per property
+// byte); returns the number of nodes walked so summaries can state coverage.
+function eachNode(root: ComponentNode, fn: (node: ComponentNode) => void): number {
+  let sampled = 0;
+  const walk = (node: ComponentNode): void => {
+    sampled++;
+    fn(node);
+    for (const child of node.children) walk(child);
+  };
+  walk(root);
+  return sampled;
+}
+
+export function summarizeTypography(pack: ComponentPack): TypographySummary {
+  const families = new Map<string, number>();
+  const sizes = new Map<string, number>();
+  const weights = new Map<string, number>();
+  const lineHeights = new Map<string, number>();
+  const letterSpacings = new Map<string, number>();
+  const add = (map: Map<string, number>, raw: string | undefined): void => {
+    const value = raw?.trim();
+    if (!value) return;
+    map.set(value, (map.get(value) ?? 0) + 1);
+  };
+  const sampled = eachNode(pack.root, (node) => {
+    add(families, node.styles["fontFamily"]);
+    add(sizes, node.styles["fontSize"]);
+    add(weights, node.styles["fontWeight"]);
+    add(lineHeights, node.styles["lineHeight"]);
+    add(letterSpacings, node.styles["letterSpacing"]);
+  });
+  return {
+    sampled,
+    families: topCounts(families, TOP_TYPO_VALUES),
+    sizes: topCounts(sizes, TOP_TYPO_VALUES),
+    weights: topCounts(weights, TOP_TYPO_VALUES),
+    lineHeights: topCounts(lineHeights, TOP_TYPO_VALUES),
+    letterSpacings: topCounts(letterSpacings, TOP_TYPO_VALUES),
+  };
+}
+
+// Palette values must be pure colour tokens. Computed `background` shorthand
+// (e.g. "rgb(1, 2, 3) none repeat scroll ...") and gradients/images are not
+// colours and must not be ranked as palette entries.
+const NAMED_NON_COLORS = new Set([
+  "none",
+  "transparent",
+  "auto",
+  "initial",
+  "inherit",
+  "unset",
+  "revert",
+  "currentcolor",
+]);
+
+function isColorValue(value: string): boolean {
+  const s = value.trim();
+  const lower = s.toLowerCase();
+  if (NAMED_NON_COLORS.has(lower)) return false;
+  if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(s)) return true;
+  if (/^(?:rgb|rgba|hsl|hsla)\([^()]*\)$/i.test(s)) return true;
+  // Bare CSS colour keyword (rebeccapurple, tomato, ...). Reject anything with
+  // spaces or punctuation that is not one of the function forms above.
+  return /^[a-z]+$/i.test(s);
+}
+
+function hexAlphaZero(s: string): boolean {
+  const m = /^#([0-9a-f]{4}|[0-9a-f]{8})$/i.exec(s);
+  if (!m) return false;
+  const hex = m[1]!;
+  const alpha = hex.length === 4 ? hex.slice(3) : hex.slice(6);
+  return /^0+$/.test(alpha);
+}
+
+// `none`/`transparent`/non-colour strings and any alpha-0 colour are noise.
+function isJunkColor(value: string): boolean {
+  if (!isColorValue(value)) return true;
+  const s = value.trim().toLowerCase();
+  if (hexAlphaZero(s)) return true;
+  const m = /^(?:rgba?|hsla?)\(([^)]*)\)$/.exec(s);
+  if (!m) return false;
+  const parts = m[1].replace(/\//g, " ").split(/[\s,]+/).filter(Boolean);
+  const alphaRaw = parts.length >= 4 ? parts[3]! : "1";
+  const alpha = alphaRaw.endsWith("%") ? parseFloat(alphaRaw) / 100 : parseFloat(alphaRaw);
+  return alpha === 0;
+}
+
+export function summarizePalette(pack: ComponentPack): PaletteSummary {
+  const colors = new Map<string, number>();
+  let junkFiltered = 0;
+  const add = (raw: string | undefined): void => {
+    const value = raw?.trim();
+    if (!value) return;
+    if (isJunkColor(value)) {
+      junkFiltered++;
+      return;
+    }
+    colors.set(value, (colors.get(value) ?? 0) + 1);
+  };
+  eachNode(pack.root, (node) => {
+    for (const key of PALETTE_KEYS) add(node.styles[key]);
+  });
+  // The in-page sets are a deduped union; only values not already counted in
+  // node styles contribute one (a pseudo-harvested color, typically).
+  for (const raw of pack.colors) {
+    const value = raw.trim();
+    if (!value) continue;
+    if (isJunkColor(value)) {
+      junkFiltered++;
+      continue;
+    }
+    if (!colors.has(value)) colors.set(value, 1);
+  }
+  return { colors: topCounts(colors, TOP_PALETTE_VALUES), junkFiltered };
+}
+
 // Captures one component subtree: house lifecycle (shims → goto → settle →
 // preScroll → back to top → 500ms so entrance animations land and the
 // component is at rest) then one COMPONENT_SNIPPET evaluate. Mirrors

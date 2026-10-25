@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { collapseBands, analyzePageStructure, splitCollapsedBands, SCAN_SNIPPET } from "../src/structure.js";
-import type { RawBand, PageBand } from "../src/structure.js";
+import { collapseBands, analyzePageStructure, splitCollapsedBands, diffBands, SCAN_SNIPPET } from "../src/structure.js";
+import type { PageBand, PageStructure } from "../src/structure.js";
+import type { RawBand } from "../src/structure.js";
 
 const band = (over: Partial<RawBand> = {}): RawBand => ({
   tag: "section",
@@ -10,6 +11,77 @@ const band = (over: Partial<RawBand> = {}): RawBand => ({
   height: 1000,
   textStart: "",
   ...over,
+});
+
+const pageBand = (label: string, height: number, offsetTop = 0, index = 0): PageBand => ({
+  index,
+  tag: "section",
+  label,
+  background: "rgb(0, 0, 0)",
+  offsetTop,
+  height,
+  textStart: "",
+});
+
+const page = (bands: PageBand[], totalHeight: number): PageStructure => ({
+  url: "https://example.com",
+  title: "T",
+  totalHeight,
+  bands,
+});
+
+describe("diffBands", () => {
+  it("returns zero deltas for identical band maps", () => {
+    const bands = [pageBand(".a", 500), pageBand(".b", 500, 500, 1)];
+    expect(diffBands(page(bands, 1000), page(bands, 1000))).toEqual({
+      heightDelta: 0,
+      bandsAdded: [],
+      bandsRemoved: [],
+      reordered: [],
+    });
+  });
+
+  it("reports mobile-only added bands, desktop-only removed bands and height delta", () => {
+    const desktop = page([pageBand(".a", 500), pageBand(".b", 500, 500, 1), pageBand(".c", 400, 1000, 2)], 1400);
+    const mobile = page([pageBand(".a", 600), pageBand(".c", 300, 600, 1), pageBand(".d", 200, 900, 2)], 1100);
+    expect(diffBands(desktop, mobile)).toEqual({
+      heightDelta: -300,
+      bandsAdded: [".d"],
+      bandsRemoved: [".b"],
+      reordered: [],
+    });
+  });
+
+  it("flags common labels whose relative order changed", () => {
+    const desktop = page([pageBand(".a", 300), pageBand(".b", 300, 300, 1), pageBand(".c", 300, 600, 2)], 900);
+    const mobile = page([pageBand(".c", 300), pageBand(".a", 300, 300, 1), pageBand(".b", 300, 600, 2)], 900);
+    expect(diffBands(desktop, mobile)).toMatchObject({
+      heightDelta: 0,
+      bandsAdded: [],
+      bandsRemoved: [],
+      reordered: [".a", ".b", ".c"],
+    });
+  });
+
+  it("caps added, removed and reordered lists at 60", () => {
+    const many = Array.from({ length: 65 }, (_, i) => pageBand(`.b${i}`, 10, i * 10, i));
+    const baseOne = page([pageBand(".only", 10)], 10);
+    const all = page([pageBand(".only", 10), ...many], 660);
+    expect(diffBands(baseOne, all).bandsAdded).toHaveLength(60);
+    expect(diffBands(all, baseOne).bandsRemoved).toHaveLength(60);
+    expect(diffBands(page(many, 650), page([...many].reverse(), 650)).reordered).toHaveLength(60);
+  });
+
+  it("matches labels case-insensitively and names unlabeled bands", () => {
+    const desktop = page([pageBand("Hero", 500), pageBand("", 500, 500, 1)], 1000);
+    const mobile = page([pageBand("hero", 400), pageBand(".extra", 600, 400, 1)], 1000);
+    expect(diffBands(desktop, mobile)).toEqual({
+      heightDelta: 0,
+      bandsAdded: [".extra"],
+      bandsRemoved: ["(unlabeled)"],
+      reordered: [],
+    });
+  });
 });
 
 describe("collapseBands", () => {

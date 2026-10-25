@@ -11,6 +11,7 @@ import {
 } from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
+import { diffBands } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
@@ -21,6 +22,8 @@ import type { VerifyBuildFn } from "./verify-build.js";
 import type { BuildProjectFn } from "./build-project.js";
 import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
 import type { ComponentNode, ComponentPack } from "./component.js";
+import { summarizePalette, summarizeTypography } from "./component.js";
+import { scaffoldMotionManifest } from "./motion-manifest.js";
 import type { PoseGrid } from "./pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "./pose-stub.js";
 import type { StackFingerprint } from "./stack.js";
@@ -34,6 +37,11 @@ import type {
   AnnualNomineeResult,
   AnnualNomineesResult,
 } from "./annual.js";
+import type { CollectionsListResult, CollectionResult } from "./collections.js";
+import type { DirectoryArgs, DirectoryResult } from "./directory.js";
+import type { AuditUrlResult } from "./audit-url.js";
+import type { AccessibilityResult } from "./a11y.js";
+import type { IndexStatsArgs, IndexStatsResult } from "./index-stats.js";
 
 const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -174,6 +182,27 @@ export type AnnualNomineeFn = (args: {
   category?: string;
   slug?: string;
 }) => Promise<AnnualNomineeResult>;
+
+// Collections/directory peers: lazy defaults keep the modules off the hot path
+// and let handler tests inject shapes without network or cache.
+export type GetCollectionsFn = (args: {
+  slug?: string;
+  page?: number;
+}) => Promise<CollectionsListResult | CollectionResult>;
+export type SearchDirectoryFn = (args: DirectoryArgs) => Promise<DirectoryResult>;
+
+// W2 inspection peers: every fn is optional so handler tests stay offline.
+export type AuditUrlFn = (args: {
+  url: string;
+  viewport?: ViewportName;
+  timeoutMs?: number;
+}) => Promise<AuditUrlResult | { error: string }>;
+export type AnalyzeAccessibilityFn = (args: {
+  url: string;
+  viewport?: ViewportName;
+  limit?: number;
+}) => Promise<AccessibilityResult | { error: string }>;
+export type IndexStatsFn = (args: IndexStatsArgs) => Promise<IndexStatsResult>;
 
 // C3 token-diet helpers (plan Task C3): pure compaction for the `compact`
 // flag on get_site_details / capture_component. Heavy per-element detail →
@@ -326,6 +355,7 @@ export interface Handlers {
     maxBands?: number;
   }): Promise<ToolResponse>;
   get_index_status(): Promise<ToolResponse>;
+  get_index_stats(args: IndexStatsArgs): Promise<ToolResponse>;
   get_site_elements(args: { slug: string }): Promise<ToolResponse>;
   search_elements(args: {
     query?: string;
@@ -347,6 +377,18 @@ export interface Handlers {
     category?: string;
     slug?: string;
   }): Promise<ToolResponse>;
+  get_collections(args: { slug?: string; page?: number }): Promise<ToolResponse>;
+  search_directory(args: DirectoryArgs): Promise<ToolResponse>;
+  audit_url(args: {
+    url: string;
+    viewport?: ViewportName;
+    timeoutMs?: number;
+  }): Promise<ToolResponse>;
+  analyze_accessibility(args: {
+    url: string;
+    viewport?: ViewportName;
+    limit?: number;
+  }): Promise<ToolResponse>;
   capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -357,6 +399,7 @@ export interface Handlers {
     maxBands?: number;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    compare?: "mobile";
   }): Promise<ToolResponse>;
   record_site_motion(args: {
     url: string;
@@ -406,6 +449,11 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   analyze_stack(args: { url: string; timeoutMs?: number }): Promise<ToolResponse>;
   build_gsap_stub(args: { scrollCensus: unknown; poseGrid?: unknown }): Promise<ToolResponse>;
+  build_motion_manifest(args: {
+    bands: unknown;
+    scrollCensus: unknown;
+    sections?: { label: string; selector?: string }[];
+  }): Promise<ToolResponse>;
   build_project(args: { htmlPath: string; target: "vite" | "astro" | "next"; out: string; name?: string }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
@@ -447,6 +495,11 @@ export function createHandlers(deps: {
   annualCategoriesFn?: AnnualCategoriesFn;
   annualNomineesFn?: AnnualNomineesFn;
   annualNomineeFn?: AnnualNomineeFn;
+  getCollectionsFn?: GetCollectionsFn;
+  searchDirectoryFn?: SearchDirectoryFn;
+  auditUrlFn?: AuditUrlFn;
+  analyzeAccessibilityFn?: AnalyzeAccessibilityFn;
+  indexStatsFn?: IndexStatsFn;
   // Injectable clock (ms epoch): defaults to Date.now. Lets tests pin time so
   // date-windowed tools (new_winners) don't break at UTC midnight rollovers.
   now?: () => number;
@@ -997,6 +1050,18 @@ export function createHandlers(deps: {
     }
   }
 
+  async function get_index_stats(args: IndexStatsArgs): Promise<ToolResponse> {
+    try {
+      // Local cache only: the module runs SQL over cache.db, never the network.
+      const stats =
+        deps.indexStatsFn ??
+        ((a: IndexStatsArgs) => import("./index-stats.js").then((m) => m.getIndexStats(a, { cache })));
+      return { content: [text(JSON.stringify(await stats(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function get_site_elements(args: { slug: string }): Promise<ToolResponse> {
     try {
       const elementsKey = `elements:${args.slug}`;
@@ -1286,6 +1351,85 @@ export function createHandlers(deps: {
     }
   }
 
+  // ---- collections + directory (HTML sources) ----
+  // Both are parsed pages under the same 7-day local cache + stale-fallback
+  // contract as annual. No media is downloaded; cards carry public fields only.
+
+  async function get_collections(args: {
+    slug?: string;
+    page?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const get =
+        deps.getCollectionsFn ??
+        ((a: { slug?: string; page?: number }) => {
+          if (a.slug) {
+            return import("./collections.js").then((m) =>
+              m.getCollection(a.slug!, a.page, { cache }),
+            );
+          }
+          return import("./collections.js").then((m) => m.getCollections(a.page, { cache }));
+        });
+      return { content: [text(JSON.stringify(await get(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function search_directory(args: DirectoryArgs): Promise<ToolResponse> {
+    try {
+      const search =
+        deps.searchDirectoryFn ??
+        ((a: DirectoryArgs) =>
+          import("./directory.js").then((m) => m.searchDirectory(a, { cache })));
+      return { content: [text(JSON.stringify(await search(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  // ---- inspection (W2): evidence-only runtime + a11y + local aggregates ----
+
+  async function audit_url(args: {
+    url: string;
+    viewport?: ViewportName;
+    timeoutMs?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const audit =
+        deps.auditUrlFn ??
+        ((a: { url: string; viewport?: ViewportName; timeoutMs?: number }) =>
+          import("./audit-url.js").then((m) =>
+            m.auditUrl(a.url, { viewport: a.viewport, timeoutMs: a.timeoutMs }),
+          ));
+      const result = await audit(args);
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function analyze_accessibility(args: {
+    url: string;
+    viewport?: ViewportName;
+    limit?: number;
+  }): Promise<ToolResponse> {
+    try {
+      const analyze =
+        deps.analyzeAccessibilityFn ??
+        ((a: { url: string; viewport?: ViewportName; limit?: number }) =>
+          import("./a11y.js").then((m) =>
+            m.analyzeAccessibility(a.url, { viewport: a.viewport, limit: a.limit }),
+          ));
+      const result = await analyze(args);
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function capture_live_site(args: {
     url: string;
     waitStrategy?: WaitStrategy;
@@ -1322,6 +1466,7 @@ export function createHandlers(deps: {
     maxBands?: number;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    compare?: "mobile";
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1333,12 +1478,45 @@ export function createHandlers(deps: {
           import("./structure.js").then((m) =>
             m.analyzePageStructure(url, undefined, maxBands, opts),
           ));
+      const viewport = args.viewport ?? "desktop";
       const structure = await analyze(args.url, args.maxBands, {
         waitStrategy: args.waitStrategy,
-        viewport: args.viewport ?? "desktop",
+        viewport,
       });
       if ("error" in structure) return { content: [text(structure.error)], isError: true };
-      return { content: [text(JSON.stringify(structure, null, 1))] };
+      // Desktop default is byte-identical: no new keys unless compare is set.
+      if (args.compare !== "mobile") {
+        return { content: [text(JSON.stringify(structure, null, 1))] };
+      }
+      // compare:"mobile" adds a second capture at 390×844 (a phone capture is
+      // already the mobile side, so it is reused). A failed second capture is
+      // an error response, never a silently desktop-only "diff".
+      const mobile =
+        viewport === "mobile"
+          ? structure
+          : await analyze(args.url, args.maxBands, {
+              waitStrategy: args.waitStrategy,
+              viewport: "mobile",
+            });
+      if ("error" in mobile) {
+        // Keep the valid desktop result; degrade the compare half explicitly.
+        return {
+          content: [
+            text(JSON.stringify({ ...structure, mobileError: mobile.error }, null, 1)),
+          ],
+        };
+      }
+      return {
+        content: [
+          text(
+            JSON.stringify(
+              { ...structure, mobileBands: mobile.bands, diff: diffBands(structure, mobile) },
+              null,
+              1,
+            ),
+          ),
+        ],
+      };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1517,8 +1695,15 @@ export function createHandlers(deps: {
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       // C3: compact=true strips per-node styles/text/svg/anims; the tree's
-      // tag/classes/rect skeleton + fonts/colors stay.
-      return { content: [text(JSON.stringify(args.compact ? compactComponentPack(result) : result, null, 1))] };
+      // tag/classes/rect skeleton + fonts/colors stay (summaries omitted).
+      const payload = args.compact
+        ? compactComponentPack(result)
+        : {
+            ...result,
+            typography: summarizeTypography(result),
+            paletteSummary: summarizePalette(result),
+          };
+      return { content: [text(JSON.stringify(payload, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1592,6 +1777,22 @@ export function createHandlers(deps: {
           stubHtml: buildGsapStub(a.poseGrid, a.scrollCensus),
         }));
       return { content: [text(JSON.stringify(build(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function build_motion_manifest(args: {
+    bands: unknown;
+    scrollCensus: unknown;
+    sections?: { label: string; selector?: string }[];
+  }): Promise<ToolResponse> {
+    try {
+      const result = scaffoldMotionManifest(args);
+      if ("error" in result) {
+        return { content: [text(JSON.stringify(result))], isError: true };
+      }
+      return { content: [text(JSON.stringify(result, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1822,6 +2023,7 @@ export function createHandlers(deps: {
     compare_sites,
     create_design_brief,
     get_index_status,
+    get_index_stats,
     get_site_elements,
     search_elements,
     get_element,
@@ -1829,6 +2031,10 @@ export function createHandlers(deps: {
     get_annual_categories,
     get_annual_nominees,
     get_annual_nominee,
+    get_collections,
+    search_directory,
+    audit_url,
+    analyze_accessibility,
     capture_live_site,
     analyze_page_structure,
     analyze_scroll_map,
@@ -1840,6 +2046,7 @@ export function createHandlers(deps: {
     build_pose_stub,
     analyze_stack,
     build_gsap_stub,
+    build_motion_manifest,
     build_project,
     record_site_motion,
     get_motion_dna,

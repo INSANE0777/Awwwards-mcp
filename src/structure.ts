@@ -285,6 +285,47 @@ export function splitCollapsedBands(bands: PageBand[], landmarks: number[], maxB
   return out.map((b, i) => ({ ...b, index: i }));
 }
 
+/** Desktop→mobile band diff: mobile-only, desktop-only and order-changed labels. */
+export interface BandDiff {
+  heightDelta: number;
+  bandsAdded: string[];
+  bandsRemoved: string[];
+  reordered: string[];
+}
+
+// PURE: compares two band maps by normalized label with the same greedy
+// first-match pool as verify-build's compareBands (one other-side band can
+// absorb only one base band). `heightDelta` is other − base. A label whose
+// rank among greedily matched bands changes is reported once per matched pair.
+export function diffBands(base: PageStructure, other: PageStructure): BandDiff {
+  const norm = (s: string): string => s.trim().toLowerCase().slice(0, 24);
+  const show = (s: string): string => s.trim() || "(unlabeled)";
+  const pool = other.bands.map((b) => ({ key: norm(b.label), label: show(b.label), used: false }));
+  const pairs: { label: string; index: number }[] = [];
+  const removed: string[] = [];
+  for (const band of base.bands) {
+    const key = norm(band.label);
+    const index = pool.findIndex((p) => !p.used && p.key === key);
+    if (index === -1) {
+      removed.push(show(band.label));
+      continue;
+    }
+    pool[index]!.used = true;
+    pairs.push({ label: show(band.label), index });
+  }
+  const added = pool.filter((p) => !p.used).map((p) => p.label);
+  // Rank each matched pair by its order on the other side; a rank that moved
+  // from its base position means the common bands are not in the same order.
+  const otherOrder = pairs.map((_, i) => i).sort((a, b) => pairs[a]!.index - pairs[b]!.index);
+  const reordered = pairs.filter((_, i) => otherOrder.indexOf(i) !== i).map((p) => p.label);
+  return {
+    heightDelta: Math.round(other.totalHeight - base.totalHeight),
+    bandsAdded: added.slice(0, 60),
+    bandsRemoved: removed.slice(0, 60),
+    reordered: reordered.slice(0, 60),
+  };
+}
+
 /** Wait strategy for page.goto: "load" (default, plus a fixed settle) or "networkidle". */
 export type WaitStrategy = "load" | "networkidle";
 
