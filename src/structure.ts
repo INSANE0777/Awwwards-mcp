@@ -410,4 +410,3 @@ export async function analyzePageStructure(
     }
   }
 }
-

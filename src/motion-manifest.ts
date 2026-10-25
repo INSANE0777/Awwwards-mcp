@@ -546,7 +546,10 @@ export function scaffoldMotionManifest(input: unknown): MotionManifestScaffold |
     const warnings = [...parsed.warnings];
     if (!hasMeasurement) warnings.push("census has no anims or gsapTriggers: manifest.measured stays false");
     const manifest = buildMotionManifest(split, parsed.census);
-    if (!hasMeasurement) manifest.measured = false;
+    if (!hasMeasurement) {
+      manifest.measured = false;
+      for (const section of manifest.sections) section.measured = false;
+    }
     return {
       manifest,
       measured: false,

@@ -446,11 +446,20 @@ function isColorValue(value: string): boolean {
   return /^[a-z]+$/i.test(s);
 }
 
+function hexAlphaZero(s: string): boolean {
+  const m = /^#([0-9a-f]{4}|[0-9a-f]{8})$/i.exec(s);
+  if (!m) return false;
+  const hex = m[1]!;
+  const alpha = hex.length === 4 ? hex.slice(3) : hex.slice(6);
+  return /^0+$/.test(alpha);
+}
+
 // `none`/`transparent`/non-colour strings and any alpha-0 colour are noise.
 function isJunkColor(value: string): boolean {
   if (!isColorValue(value)) return true;
   const s = value.trim().toLowerCase();
-  const m = /^(?:rgba|hsla?)\(([^)]*)\)$/.exec(s);
+  if (hexAlphaZero(s)) return true;
+  const m = /^(?:rgba?|hsla?)\(([^)]*)\)$/.exec(s);
   if (!m) return false;
   const parts = m[1].replace(/\//g, " ").split(/[\s,]+/).filter(Boolean);
   const alphaRaw = parts.length >= 4 ? parts[3]! : "1";

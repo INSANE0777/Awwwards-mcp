@@ -251,6 +251,10 @@ describe("component summaries", () => {
         "rgb(1 2 3 / 0.5)",
         "rebeccapurple",
         "rgba(0, 0, 0, 0)",
+        "rgb(0 0 0 / 0)",
+        "rgb(0, 0, 0, 0)",
+        "#0000",
+        "#00000000",
       ],
     };
     const palette = summarizePalette(pack);
@@ -264,7 +268,11 @@ describe("component summaries", () => {
     expect(values).not.toContain(gradient);
     expect(values).not.toContain(image);
     expect(values).not.toContain("rgba(0, 0, 0, 0)");
-    expect(palette.junkFiltered).toBe(5); // style shorthand + 3 pack junk + alpha-0
+    expect(values).not.toContain("rgb(0 0 0 / 0)");
+    expect(values).not.toContain("rgb(0, 0, 0, 0)");
+    expect(values).not.toContain("#0000");
+    expect(values).not.toContain("#00000000");
+    expect(palette.junkFiltered).toBe(9); // style shorthand + 3 pack junk + alpha-0 forms (rgba/rgb/hex)
   });
 });
 

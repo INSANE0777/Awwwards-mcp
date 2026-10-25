@@ -382,7 +382,7 @@ server.tool(
     compare: z
       .enum(["mobile"])
       .optional()
-      .describe("Also capture at 390×844 (mobile): adds mobileBands + diff; absent keeps the desktop response unchanged"),
+      .describe("Also capture at 390×844 (mobile): adds mobileBands + diff; if the mobile capture fails you still get the desktop result plus mobileError; absent keeps the desktop response unchanged"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
@@ -568,7 +568,7 @@ server.tool(
 
 server.tool(
   "build_motion_manifest",
-  "Build a motion.manifest.json scaffold from measured evidence: an analyze_page_structure result (bands) + an analyze_scroll_map census, with optional section overrides. Sections are mapped best-effort from each band's tag + first #id/.class token in its label (or sections[].selector) — no markup is available, so DOM initial-state hints are empty; census triggers still attribute to sections by those tokens. Returns { manifest, measured:false, note } and never throws ({ error } on invalid input). Pure/offline — no page fetches.",
+  "Build a motion.manifest.json scaffold from measured evidence: an analyze_page_structure result (bands) + an analyze_scroll_map census, with optional section overrides. Sections are mapped best-effort from each band's tag + first #id/.class token in its label (or sections[].selector) — no markup is available, so DOM initial-state hints are empty; census triggers still attribute to sections by those tokens. Returns { manifest, measured:false, censusAnims, warnings, note }; manifest.measured stays false when the census has no anims/triggers/curves. Never throws ({ error } on invalid input). Pure/offline — no page fetches.",
   {
     bands: z.any().describe("analyze_page_structure result object (must carry bands[])"),
     scrollCensus: z.any().describe("analyze_scroll_map result object (anims[] + gsapTriggers[] required)"),
