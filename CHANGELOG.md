@@ -3,6 +3,58 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.13.0 - 2026-10-25
+
+Discovery, sources, and inspection: 35 tools, with award data from Awwwards' official API,
+curated collections and the agency directory, plus evidence-only audit surfaces.
+
+### New tools (9) - 26 → 35
+
+- `get_annual_categories`, `get_annual_nominees`, `get_annual_nominee` - Annual Awards
+  via the official public read-only API (`llms.txt` / `openapi.json`): 6 categories,
+  bounded nominee hydration (default 10, max 20 at 1 req/s), site/user detail with
+  country/date/designBy/images/videos. 7-day cache, stale-on-failure marked, 403/429
+  stop all further requests. Media URLs are reference-only (never downloaded).
+- `get_collections`, plus collection detail by slug/page - curated and member collections
+  (`/awwwards/collections/<slug>/`, `/<owner>/collections/<slug>/`), element-only
+  collections reported instead of false parser drift.
+- `search_directory` - agency/studio directory with path filters (82 canonical countries,
+  categories, budgets), client-side free-text query, `applied`/`ignored` arrays,
+  contact PII stripped.
+- `audit_url` - runtime evidence (fps, dropped frames, long tasks, layout thrash) via an
+  installed Chrome/Edge, plus an anti-pattern scan over bounded same-origin CSS/JS.
+  Runtime and static halves degrade independently; evidence only.
+- `analyze_accessibility` - composited contrast (opacity groups skipped and counted, never
+  approximated), alt coverage, heading ladder, focus/tabindex, form labels, lang/title.
+  `heuristic: true`, never a WCAG pass/fail.
+- `get_index_stats` - aggregates over the local cache only: all-time sites/elements/tags
+  vs windowed details/palettes/scores/motion DNA, every metric coverage-disclosed.
+- `build_motion_manifest` - census + band map → `motion.manifest.json` scaffold;
+  `measured` stays false when the census has no animations.
+
+### Extended
+
+- `capture_component` gains `typography` (families/sizes/weights/line-heights/tracking,
+  top 12) and `paletteSummary` (strict colour grammar; background shorthands, gradients,
+  images and alpha-0 values rejected and counted) summaries; inert in compact mode.
+- `analyze_page_structure` gains `compare: "mobile"` (390×844 second pass) returning
+  `mobileBands` + label-matched band diff; a failed mobile pass keeps the desktop result
+  with `mobileError`.
+- Award discovery: 9 new cuts (`sotm`, `soty`, `nominees`, six `winner_category_*`),
+  persisted nominee flag, `list_categories` v2 (12 award filters + technology slugs),
+  15 live-verified technology aliases applied in URLs and client-side filters.
+- Skills and docs: collections/directory discovery, mobile compare in the section loop,
+  motion-manifest hand-off; README "Official Awwwards resources" + non-affiliation note.
+
+### Fixes
+
+- Palette correctness: strict colour parsing, alpha-0 forms rejected, dead style keys removed.
+- Accessibility: ancestor opacity groups excluded from ratios rather than faked.
+- Mobile compare: desktop result preserved when the mobile capture fails.
+- Collections: page-1 404 wording, page-N notes, `owner`/`ref` round-trip, v2 list cache.
+- Directory: canonical-country validation blocks Awwwards' wrong-country 200 fallback.
+- Bundle/index stats: honest all-time vs windowed semantics, severity-sorted findings.
+
 ## v1.12.0 - 2026-10-23
 
 From capture to an owned project: conversion, authored motion, and a sharper audit layer.
