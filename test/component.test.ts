@@ -183,9 +183,6 @@ const summaryPack = (): ComponentPack => ({
         fontFamily: '"Inter", sans-serif',
         fontSize: "48px",
         color: "#fff",
-        borderColor: "transparent",
-        fill: "none",
-        stroke: "rgb(1, 2, 3)",
       },
     },
   ),
@@ -222,18 +219,52 @@ describe("component summaries", () => {
 
   it("counts palette properties + pack colors, filters junk, top 24", () => {
     const palette = summarizePalette(summaryPack());
-    expect(palette.junkFiltered).toBe(4); // alpha-0 rgba, 2× transparent, none
+    expect(palette.junkFiltered).toBe(2); // alpha-0 rgba + transparent pack color
     expect(palette.colors[0]).toEqual({ value: "#fff", count: 2 });
     expect(palette.colors).toContainEqual({ value: "rgb(17, 17, 17)", count: 1 });
     expect(palette.colors).toContainEqual({ value: "rgb(9, 9, 9)", count: 1 });
-    expect(palette.colors).toContainEqual({ value: "rgb(1, 2, 3)", count: 1 });
-    expect(palette.colors).toHaveLength(4);
+    expect(palette.colors).toHaveLength(3);
 
     const children = Array.from({ length: 30 }, (_, i) =>
       n([], { styles: { color: `rgb(${i}, 0, 0)` } }),
     );
     const capped = summarizePalette({ ...summaryPack(), nodeCount: 31, root: n(children) });
     expect(capped.colors).toHaveLength(24);
+  });
+
+  it("rejects shorthands, gradients and images; accepts hex/rgb/hsl/named colors", () => {
+    const shorthand = "rgb(18, 52, 86) none repeat scroll 0% 0% / auto padding-box border-box";
+    const gradient = "linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))";
+    const image = 'url("hero.webp")';
+    const pack: ComponentPack = {
+      ...summaryPack(),
+      nodeCount: 1,
+      root: n([], {
+        styles: { color: "hsl(210 50% 40%)", backgroundColor: shorthand },
+      }),
+      colors: [
+        shorthand,
+        gradient,
+        image,
+        "#abc",
+        "#A1B2C3",
+        "rgb(1 2 3 / 0.5)",
+        "rebeccapurple",
+        "rgba(0, 0, 0, 0)",
+      ],
+    };
+    const palette = summarizePalette(pack);
+    const values = palette.colors.map((c) => c.value);
+    expect(values).toContain("hsl(210 50% 40%)");
+    expect(values).toContain("#abc");
+    expect(values).toContain("#A1B2C3");
+    expect(values).toContain("rgb(1 2 3 / 0.5)");
+    expect(values).toContain("rebeccapurple");
+    expect(values).not.toContain(shorthand);
+    expect(values).not.toContain(gradient);
+    expect(values).not.toContain(image);
+    expect(values).not.toContain("rgba(0, 0, 0, 0)");
+    expect(palette.junkFiltered).toBe(5); // style shorthand + 3 pack junk + alpha-0
   });
 });
 

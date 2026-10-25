@@ -320,9 +320,9 @@ export function diffBands(base: PageStructure, other: PageStructure): BandDiff {
   const reordered = pairs.filter((_, i) => otherOrder.indexOf(i) !== i).map((p) => p.label);
   return {
     heightDelta: Math.round(other.totalHeight - base.totalHeight),
-    bandsAdded: added.slice(0, 40),
-    bandsRemoved: removed.slice(0, 40),
-    reordered: reordered.slice(0, 40),
+    bandsAdded: added.slice(0, 60),
+    bandsRemoved: removed.slice(0, 60),
+    reordered: reordered.slice(0, 60),
   };
 }
 
@@ -410,3 +410,4 @@ export async function analyzePageStructure(
     }
   }
 }
+

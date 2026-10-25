@@ -28,6 +28,8 @@ describe("scaffoldMotionManifest", () => {
     expect(result.measured).toBe(false);
     expect(result.note).toBe("Scaffold from measured census; author motion before shipping.");
     expect(result.manifest.measured).toBe(true);
+    expect(result.censusAnims).toBe(census().anims.length);
+    expect(result.warnings).toEqual([]);
     expect(result.manifest.sections.map((s) => s.id)).toEqual(["a", "b", "section-3"]);
     expect(result.manifest.sections[0]?.triggers.map((t) => t.selector)).toEqual(["#a .title"]);
     expect(result.manifest.sections[1]?.triggers.map((t) => t.selector)).toEqual(["#b .grid"]);
@@ -61,6 +63,18 @@ describe("scaffoldMotionManifest", () => {
     expect(result.manifest.sections).toHaveLength(2);
     expect(result.manifest.sections[0]?.id).toBe("section-1");
     expect(result.manifest.sections[1]?.id).toBe("plain");
+  });
+
+  it("keeps manifest.measured false with warnings when the census has no anims", () => {
+    const result = scaffoldMotionManifest({
+      bands: bands(),
+      scrollCensus: { anims: [], gsapTriggers: [], scrubCurves: [] },
+    });
+    if ("error" in result) throw new Error(result.error);
+    expect(result.measured).toBe(false);
+    expect(result.manifest.measured).toBe(false);
+    expect(result.censusAnims).toBe(0);
+    expect(result.warnings.join(" ")).toContain("no anims or gsapTriggers");
   });
 
   it("returns { error } (never throws) on invalid input", () => {

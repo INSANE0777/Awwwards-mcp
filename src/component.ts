@@ -371,7 +371,7 @@ export interface PaletteSummary {
 
 const TOP_TYPO_VALUES = 12;
 const TOP_PALETTE_VALUES = 24;
-const PALETTE_KEYS = ["color", "backgroundColor", "borderColor", "borderTopColor", "fill", "stroke"];
+const PALETTE_KEYS = ["color", "backgroundColor"];
 
 function topCounts(counts: Map<string, number>, limit: number): ValueCount[] {
   return [...counts.entries()]
@@ -421,11 +421,36 @@ export function summarizeTypography(pack: ComponentPack): TypographySummary {
   };
 }
 
-// `none`/`transparent` and any alpha-0 rgb(a) are noise in a palette.
+// Palette values must be pure colour tokens. Computed `background` shorthand
+// (e.g. "rgb(1, 2, 3) none repeat scroll ...") and gradients/images are not
+// colours and must not be ranked as palette entries.
+const NAMED_NON_COLORS = new Set([
+  "none",
+  "transparent",
+  "auto",
+  "initial",
+  "inherit",
+  "unset",
+  "revert",
+  "currentcolor",
+]);
+
+function isColorValue(value: string): boolean {
+  const s = value.trim();
+  const lower = s.toLowerCase();
+  if (NAMED_NON_COLORS.has(lower)) return false;
+  if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(s)) return true;
+  if (/^(?:rgb|rgba|hsl|hsla)\([^()]*\)$/i.test(s)) return true;
+  // Bare CSS colour keyword (rebeccapurple, tomato, ...). Reject anything with
+  // spaces or punctuation that is not one of the function forms above.
+  return /^[a-z]+$/i.test(s);
+}
+
+// `none`/`transparent`/non-colour strings and any alpha-0 colour are noise.
 function isJunkColor(value: string): boolean {
+  if (!isColorValue(value)) return true;
   const s = value.trim().toLowerCase();
-  if (s === "none" || s === "transparent") return true;
-  const m = /^rgba?\(([^)]*)\)$/.exec(s);
+  const m = /^(?:rgba|hsla?)\(([^)]*)\)$/.exec(s);
   if (!m) return false;
   const parts = m[1].replace(/\//g, " ").split(/[\s,]+/).filter(Boolean);
   const alphaRaw = parts.length >= 4 ? parts[3]! : "1";

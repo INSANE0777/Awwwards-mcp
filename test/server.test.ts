@@ -1226,6 +1226,33 @@ describe("analyze_page_structure", () => {
     });
   });
 
+  it("compare:mobile keeps the desktop result and reports mobileError when the second capture fails", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const desktop = {
+      url: "https://example.com",
+      title: "T",
+      totalHeight: 900,
+      bands: [
+        { index: 0, tag: "section", label: ".a", background: "rgb(0, 0, 0)", offsetTop: 0, height: 900, textStart: "" },
+      ],
+    };
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (_url: string, _maxBands?: number, opts?: { viewport?: string }) =>
+        opts?.viewport === "mobile" ? { error: "mobile boom" } : desktop,
+    });
+    const res = await h.analyze_page_structure({ url: "https://example.com", compare: "mobile" });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.totalHeight).toBe(900);
+    expect(parsed.bands.map((b: any) => b.label)).toEqual([".a"]);
+    expect(parsed.mobileError).toBe("mobile boom");
+    expect("mobileBands" in parsed).toBe(false);
+    expect("diff" in parsed).toBe(false);
+  });
+
   it("compare:mobile reuses a mobile primary capture instead of a second call", async () => {
     const cache = new Cache(tmpDir());
     const { client } = fakeClient();
@@ -1679,6 +1706,8 @@ describe("build_motion_manifest handler", () => {
     expect(parsed.note).toContain("author motion before shipping");
     expect(parsed.manifest.sections.map((s: any) => s.id)).toEqual(["a", "b"]);
     expect(parsed.manifest.pageTriggers.map((t: any) => t.selector)).toEqual(["#space"]);
+    expect(parsed.censusAnims).toBe(census().anims.length);
+    expect(parsed.warnings).toEqual([]);
   });
 
   it("maps invalid input to a { error } isError response, never a throw", async () => {

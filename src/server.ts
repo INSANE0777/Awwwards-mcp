@@ -1499,7 +1499,12 @@ export function createHandlers(deps: {
               viewport: "mobile",
             });
       if ("error" in mobile) {
-        return { content: [text(`mobile compare failed: ${mobile.error}`)], isError: true };
+        // Keep the valid desktop result; degrade the compare half explicitly.
+        return {
+          content: [
+            text(JSON.stringify({ ...structure, mobileError: mobile.error }, null, 1)),
+          ],
+        };
       }
       return {
         content: [

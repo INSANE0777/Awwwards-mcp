@@ -441,6 +441,8 @@ export interface MotionManifestScaffold {
   manifest: MotionManifest;
   measured: false;
   note: string;
+  censusAnims: number;
+  warnings: string[];
 }
 
 const SCAFFOLD_NOTE = "Scaffold from measured census; author motion before shipping.";
@@ -536,7 +538,22 @@ export function scaffoldMotionManifest(input: unknown): MotionManifestScaffold |
       assetRefs: [],
       rehost: null,
     };
-    return { manifest: buildMotionManifest(split, parsed.census), measured: false, note: SCAFFOLD_NOTE };
+    const censusAnims = parsed.census.anims.length;
+    const hasMeasurement =
+      censusAnims > 0 ||
+      parsed.census.gsapTriggers.length > 0 ||
+      parsed.census.scrubCurves.length > 0;
+    const warnings = [...parsed.warnings];
+    if (!hasMeasurement) warnings.push("census has no anims or gsapTriggers: manifest.measured stays false");
+    const manifest = buildMotionManifest(split, parsed.census);
+    if (!hasMeasurement) manifest.measured = false;
+    return {
+      manifest,
+      measured: false,
+      note: SCAFFOLD_NOTE,
+      censusAnims,
+      warnings,
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

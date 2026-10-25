@@ -63,6 +63,15 @@ describe("diffBands", () => {
     });
   });
 
+  it("caps added, removed and reordered lists at 60", () => {
+    const many = Array.from({ length: 65 }, (_, i) => pageBand(`.b${i}`, 10, i * 10, i));
+    const baseOne = page([pageBand(".only", 10)], 10);
+    const all = page([pageBand(".only", 10), ...many], 660);
+    expect(diffBands(baseOne, all).bandsAdded).toHaveLength(60);
+    expect(diffBands(all, baseOne).bandsRemoved).toHaveLength(60);
+    expect(diffBands(page(many, 650), page([...many].reverse(), 650)).reordered).toHaveLength(60);
+  });
+
   it("matches labels case-insensitively and names unlabeled bands", () => {
     const desktop = page([pageBand("Hero", 500), pageBand("", 500, 500, 1)], 1000);
     const mobile = page([pageBand("hero", 400), pageBand(".extra", 600, 400, 1)], 1000);
