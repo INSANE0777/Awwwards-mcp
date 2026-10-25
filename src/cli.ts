@@ -373,12 +373,16 @@ server.tool(
 
 server.tool(
   "analyze_page_structure",
-  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build.",
+  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build. compare:\"mobile\" also captures at 390×844 and returns mobileBands + diff {heightDelta, bandsAdded, bandsRemoved, reordered}.",
   {
     url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
     maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
     waitStrategy: waitStrategySchema,
     viewport: viewportSchema,
+    compare: z
+      .enum(["mobile"])
+      .optional()
+      .describe("Also capture at 390×844 (mobile): adds mobileBands + diff; absent keeps the desktop response unchanged"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
@@ -500,7 +504,7 @@ server.tool(
 
 server.tool(
   "capture_component",
-  "Serialize a page component (structure, computed-style tokens, animations) into a portable pack for rebuild tooling. compact=true returns a token-diet summary. Runs on any URL — does not fetch awwwards.com.",
+  "Serialize a page component (structure, computed-style tokens, animations) into a portable pack for rebuild tooling. Adds typography usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each + sampled node count) and paletteSummary (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). compact=true returns a token-diet summary and omits both. Runs on any URL — does not fetch awwwards.com.",
   {
     url: z.string().url().describe("Absolute page URL whose component to serialize"),
     selector: z
@@ -512,7 +516,7 @@ server.tool(
       .describe("Max DOM nodes to serialize (default 400, clamp 50-2000)"),
     viewport: viewportSchema,
     compact: z.boolean().optional()
-      .describe("token-diet summary: node styles/text/svg/anims dropped; the {tag, classes, rect} tree, fonts and colors stay"),
+      .describe("token-diet summary: node styles/text/svg/anims and the typography/paletteSummary blocks are dropped; the {tag, classes, rect} tree, fonts and colors stay"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.capture_component(args)),
@@ -560,6 +564,22 @@ server.tool(
   { scrollCensus: z.any().describe("ScrollCensus JSON from analyze_scroll_map"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   (args) => asMcpResult(handlers.build_gsap_stub(args)),
+);
+
+server.tool(
+  "build_motion_manifest",
+  "Build a motion.manifest.json scaffold from measured evidence: an analyze_page_structure result (bands) + an analyze_scroll_map census, with optional section overrides. Sections are mapped best-effort from each band's tag + first #id/.class token in its label (or sections[].selector) — no markup is available, so DOM initial-state hints are empty; census triggers still attribute to sections by those tokens. Returns { manifest, measured:false, note } and never throws ({ error } on invalid input). Pure/offline — no page fetches.",
+  {
+    bands: z.any().describe("analyze_page_structure result object (must carry bands[])"),
+    scrollCensus: z.any().describe("analyze_scroll_map result object (anims[] + gsapTriggers[] required)"),
+    sections: z
+      .array(z.object({ label: z.string().min(1), selector: z.string().optional() }))
+      .max(60)
+      .optional()
+      .describe("Optional section overrides in build order; selector supplies the #id/.class tokens instead of the band label"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  (args) => asMcpResult(handlers.build_motion_manifest(args)),
 );
 
 server.tool(

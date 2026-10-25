@@ -11,6 +11,7 @@ import {
 } from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
+import { diffBands } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
 import type { ScrollCensus } from "./census.js";
@@ -21,6 +22,8 @@ import type { VerifyBuildFn } from "./verify-build.js";
 import type { BuildProjectFn } from "./build-project.js";
 import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
 import type { ComponentNode, ComponentPack } from "./component.js";
+import { summarizePalette, summarizeTypography } from "./component.js";
+import { scaffoldMotionManifest } from "./motion-manifest.js";
 import type { PoseGrid } from "./pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "./pose-stub.js";
 import type { StackFingerprint } from "./stack.js";
@@ -396,6 +399,7 @@ export interface Handlers {
     maxBands?: number;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    compare?: "mobile";
   }): Promise<ToolResponse>;
   record_site_motion(args: {
     url: string;
@@ -445,6 +449,11 @@ export interface Handlers {
   }): Promise<ToolResponse>;
   analyze_stack(args: { url: string; timeoutMs?: number }): Promise<ToolResponse>;
   build_gsap_stub(args: { scrollCensus: unknown; poseGrid?: unknown }): Promise<ToolResponse>;
+  build_motion_manifest(args: {
+    bands: unknown;
+    scrollCensus: unknown;
+    sections?: { label: string; selector?: string }[];
+  }): Promise<ToolResponse>;
   build_project(args: { htmlPath: string; target: "vite" | "astro" | "next"; out: string; name?: string }): Promise<ToolResponse>;
   search_motion(args: {
     lib?: string;
@@ -1457,6 +1466,7 @@ export function createHandlers(deps: {
     maxBands?: number;
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
+    compare?: "mobile";
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1468,12 +1478,40 @@ export function createHandlers(deps: {
           import("./structure.js").then((m) =>
             m.analyzePageStructure(url, undefined, maxBands, opts),
           ));
+      const viewport = args.viewport ?? "desktop";
       const structure = await analyze(args.url, args.maxBands, {
         waitStrategy: args.waitStrategy,
-        viewport: args.viewport ?? "desktop",
+        viewport,
       });
       if ("error" in structure) return { content: [text(structure.error)], isError: true };
-      return { content: [text(JSON.stringify(structure, null, 1))] };
+      // Desktop default is byte-identical: no new keys unless compare is set.
+      if (args.compare !== "mobile") {
+        return { content: [text(JSON.stringify(structure, null, 1))] };
+      }
+      // compare:"mobile" adds a second capture at 390×844 (a phone capture is
+      // already the mobile side, so it is reused). A failed second capture is
+      // an error response, never a silently desktop-only "diff".
+      const mobile =
+        viewport === "mobile"
+          ? structure
+          : await analyze(args.url, args.maxBands, {
+              waitStrategy: args.waitStrategy,
+              viewport: "mobile",
+            });
+      if ("error" in mobile) {
+        return { content: [text(`mobile compare failed: ${mobile.error}`)], isError: true };
+      }
+      return {
+        content: [
+          text(
+            JSON.stringify(
+              { ...structure, mobileBands: mobile.bands, diff: diffBands(structure, mobile) },
+              null,
+              1,
+            ),
+          ),
+        ],
+      };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1652,8 +1690,15 @@ export function createHandlers(deps: {
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       // C3: compact=true strips per-node styles/text/svg/anims; the tree's
-      // tag/classes/rect skeleton + fonts/colors stay.
-      return { content: [text(JSON.stringify(args.compact ? compactComponentPack(result) : result, null, 1))] };
+      // tag/classes/rect skeleton + fonts/colors stay (summaries omitted).
+      const payload = args.compact
+        ? compactComponentPack(result)
+        : {
+            ...result,
+            typography: summarizeTypography(result),
+            paletteSummary: summarizePalette(result),
+          };
+      return { content: [text(JSON.stringify(payload, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1727,6 +1772,22 @@ export function createHandlers(deps: {
           stubHtml: buildGsapStub(a.poseGrid, a.scrollCensus),
         }));
       return { content: [text(JSON.stringify(build(args), null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
+  async function build_motion_manifest(args: {
+    bands: unknown;
+    scrollCensus: unknown;
+    sections?: { label: string; selector?: string }[];
+  }): Promise<ToolResponse> {
+    try {
+      const result = scaffoldMotionManifest(args);
+      if ("error" in result) {
+        return { content: [text(JSON.stringify(result))], isError: true };
+      }
+      return { content: [text(JSON.stringify(result, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1980,6 +2041,7 @@ export function createHandlers(deps: {
     build_pose_stub,
     analyze_stack,
     build_gsap_stub,
+    build_motion_manifest,
     build_project,
     record_site_motion,
     get_motion_dna,

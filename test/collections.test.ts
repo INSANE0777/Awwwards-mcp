@@ -124,6 +124,8 @@ describe("collections parsers", () => {
     expect(normalizeCollectionSlug("brutalism")).toMatchObject({
       slug: "brutalism",
       href: "/awwwards/collections/brutalism/",
+      owner: "awwwards",
+      ref: "brutalism",
       key: "awwwards/brutalism",
     });
     expect(normalizeCollectionSlug("awwwards/brutalism")).toMatchObject({
@@ -140,6 +142,7 @@ describe("collections parsers", () => {
       slug: "pastel-colors",
       owner: "Mixallo",
       href: "/Mixallo/collections/pastel-colors/",
+      ref: "Mixallo/pastel-colors",
       key: "Mixallo/pastel-colors",
     });
     expect(normalizeCollectionSlug("../etc")).toBeNull();
@@ -160,6 +163,17 @@ describe("collections cache + blocks", () => {
     const hit = await getCollections(1, d);
     expect(hit.meta).toEqual({ cached: true });
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores legacy v1 list cache rows and writes v2", async () => {
+    const fetchFn = fixtureFetch();
+    const d = deps(fetchFn);
+    d.cache.setMeta("collections:list:1", { collections: [], hasMore: false });
+
+    const res = await getCollections(1, d);
+    expect(res.collections).toHaveLength(6);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(d.cache.getMeta("collections:list:v2:1", Number.POSITIVE_INFINITY)).not.toBeNull();
   });
 
   it("fetches index page N with ?page=N and rejects pages past the live max", async () => {
@@ -207,7 +221,7 @@ describe("collections cache + blocks", () => {
   it("rejects an empty index body instead of caching layout drift", async () => {
     const d = deps(vi.fn(async () => new Response("<html></html>")) as unknown as ReturnType<typeof fixtureFetch>);
     await expect(getCollections(1, d)).rejects.toThrow(/layout may have changed/);
-    expect(d.cache.getMeta("collections:list:1", Number.POSITIVE_INFINITY)).toBeNull();
+    expect(d.cache.getMeta("collections:list:v2:1", Number.POSITIVE_INFINITY)).toBeNull();
   });
 
   it("returns an element-only collection with empty sites and an honest note", async () => {
@@ -230,6 +244,9 @@ describe("collections cache + blocks", () => {
     const res = await getCollection("brutalism", 1, d);
     expect(res.siteCards).toBe(3);
     expect(res.items).toBe(83);
+    expect(res.owner).toBe("awwwards");
+    expect(res.ref).toBe("brutalism");
+    expect(res.note).toContain("Page 1:");
     expect(res.note).toContain("3 site cards");
     expect(res.note).toContain("83 items total");
     expect(res.note).not.toContain("80");
@@ -277,12 +294,34 @@ describe("collections cache + blocks", () => {
     const d = deps(fetchFn);
     const res = await getCollection("Mixallo/collections/pastel-colors", 1, d);
     expect(res.slug).toBe("pastel-colors");
+    expect(res.owner).toBe("Mixallo");
+    expect(res.ref).toBe("Mixallo/pastel-colors");
     expect(String(fetchFn.mock.calls[0]![0])).toBe(
       "https://www.awwwards.com/Mixallo/collections/pastel-colors/",
     );
   });
 
-  it("turns a collection-page 404 into a clear out-of-range error", async () => {
+  it("notes the requested page, not 'first page only'", async () => {
+    const d = deps(fixtureFetch());
+    const p2 = await getCollection("brutalism", 2, d);
+    expect(p2.note).toContain("Page 2:");
+    expect(p2.note).not.toContain("First page only");
+  });
+
+  it("turns a page-1 collection 404 into 'collection not found', not out of range", async () => {
+    const fetchFn = vi.fn(async () => new Response("not found", { status: 404 }));
+    const d: CollectionsDeps = {
+      cache: new Cache(tmpDir()),
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    };
+    const err = await getCollection("missing", 1, d).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/collection not found/i);
+    expect((err as Error).message).not.toMatch(/out of range/i);
+  });
+
+  it("turns a collection-page 404 on page > 1 into an out-of-range error", async () => {
     const fetchFn = vi.fn(async () => new Response("not found", { status: 404 }));
     const d: CollectionsDeps = {
       cache: new Cache(tmpDir()),

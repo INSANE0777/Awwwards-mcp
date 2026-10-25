@@ -46,6 +46,9 @@ export interface CollectionsListResult {
 
 export interface CollectionResult {
   slug: string;
+  // Public owner + round-trip ref (same shape as list rows).
+  owner: string;
+  ref: string;
   title?: string;
   page: number;
   sites: SiteSummary[];
@@ -187,7 +190,7 @@ export function parseCollectionPage(html: string, slug: string): ParsedCollectio
 // Returns null instead of building an unsafe path from caller input.
 export function normalizeCollectionSlug(
   value: string,
-): { slug: string; owner: string; href: string; key: string } | null {
+): { slug: string; owner: string; href: string; ref: string; key: string } | null {
   const raw = value.trim().replace(/^\/+|\/+$/g, "");
   if (!raw || raw.includes("..") || /[\\?#]/.test(raw)) return null;
   const parts = raw.split("/").filter(Boolean);
@@ -219,6 +222,7 @@ export function normalizeCollectionSlug(
     slug,
     owner,
     href: curated ? `/awwwards/collections/${slug}/` : `/${owner}/collections/${slug}/`,
+    ref: curated ? slug : `${owner}/${slug}`,
     key: curated ? `awwwards/${slug}` : `${owner}/${slug}`,
   };
 }
@@ -252,7 +256,8 @@ export async function getCollections(
         `(live-verified 2026-10-25). Use page 1-${COLLECTIONS_INDEX_MAX_PAGE}.`,
     );
   }
-  const key = `collections:list:${p}`;
+  // v2: rows carry owner/ref; v1 rows are ignored rather than served without them.
+  const key = `collections:list:v2:${p}`;
   const fresh = deps.cache.getMeta<{ collections: CollectionSummary[]; hasMore: boolean }>(
     key,
     COLLECTIONS_TTL_MS,
@@ -307,21 +312,23 @@ interface CachedCollection {
 }
 
 function collectionResult(
-  slug: string,
+  ref: { slug: string; owner: string; ref: string },
   page: number,
   data: CachedCollection,
   meta: SourceMeta,
 ): CollectionResult {
   const items = data.items ?? data.total;
   return {
-    slug,
+    slug: ref.slug,
+    owner: ref.owner,
+    ref: ref.ref,
     ...(data.title ? { title: data.title } : {}),
     page,
     sites: data.sites,
     siteCards: data.sites.length,
     ...(items !== undefined ? { items } : {}),
     meta,
-    note: collectionNote(data.sites.length, items),
+    note: collectionNote(page, data.sites.length, items),
   };
 }
 
@@ -340,7 +347,7 @@ export async function getCollection(
   const p = clampPage(page);
   const key = `collections:item:${ref.key}:${p}`;
   const fresh = deps.cache.getMeta<CachedCollection>(key, COLLECTIONS_TTL_MS);
-  if (fresh) return collectionResult(ref.slug, p, fresh, { cached: true });
+  if (fresh) return collectionResult(ref, p, fresh, { cached: true });
 
   try {
     const path = p === 1 ? ref.href : `${ref.href}?page=${p}`;
@@ -363,11 +370,11 @@ export async function getCollection(
       items: parsed.items,
     };
     deps.cache.setMeta(key, cached);
-    return collectionResult(ref.slug, p, cached, { cached: false });
+    return collectionResult(ref, p, cached, { cached: false });
   } catch (err) {
     const stale = staleRead<CachedCollection>(deps.cache, key);
     if (stale) {
-      return collectionResult(ref.slug, p, stale, {
+      return collectionResult(ref, p, stale, {
         cached: true,
         stale: true,
         ...(err instanceof BlockedError ? { blocked: true as const } : {}),
@@ -375,6 +382,12 @@ export async function getCollection(
       });
     }
     if (isHttp404(err)) {
+      if (p === 1) {
+        throw new Error(
+          `Collection not found (check the slug): ${ref.href} returned HTTP 404. ` +
+            "Use a curated slug like 'brutalism' or 'owner/slug' for a member collection.",
+        );
+      }
       throw new Error(
         `Page ${p} is out of range for collection ${ref.slug}: the collection page returned HTTP 404. ` +
           "Use a lower page number.",
@@ -384,18 +397,18 @@ export async function getCollection(
   }
 }
 
-function collectionNote(siteCards: number, items?: number): string {
+function collectionNote(page: number, siteCards: number, items?: number): string {
   const suffix = "Personal, non-commercial inspiration use.";
   if (siteCards === 0) {
     return items !== undefined
-      ? `Collection contains no site cards; ${items} element items. ${suffix}`
-      : `Collection contains no site cards. ${suffix}`;
+      ? `Page ${page}: collection contains no site cards; ${items} element items. ${suffix}`
+      : `Page ${page}: collection contains no site cards. ${suffix}`;
   }
   const cards = `${siteCards} site card${siteCards === 1 ? "" : "s"}`;
-  if (items === undefined) return `First page only: ${cards}. ${suffix}`;
-  if (items === siteCards) return `First page only: ${cards}; ${items} items total. ${suffix}`;
+  if (items === undefined) return `Page ${page}: ${cards}. ${suffix}`;
+  if (items === siteCards) return `Page ${page}: ${cards}; ${items} items total. ${suffix}`;
   return (
-    `First page only: ${cards}; ${items} items total across sites, elements and other collectables. ` +
+    `Page ${page}: ${cards}; ${items} items total across sites, elements and other collectables. ` +
     suffix
   );
 }

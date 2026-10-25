@@ -32,9 +32,12 @@ Run this loop before building anything visual:
 2. **Ground your vocabulary.** If unsure which filters exist, call
    `list_categories` first — it returns every color hex, award filter
    (`sotd`, `soty`, `nominees`, winner categories, …) and tag/technology
-   slug you can search by. For annual "of the Year" questions, the
-   `get_annual_*` tools cover the six official annual categories (see
-   Award discovery below).
+   slug you can search by. For browsable discovery, `get_collections`
+   lists curated/member collections (pass a returned `ref` as `slug` for
+   one collection's cards), and `search_directory` lists agencies and
+   studios with optional country/category/budget filters. For annual
+   "of the Year" questions, the `get_annual_*` tools cover the six
+   official annual categories (see Award discovery below).
 3. **Search.** Call `search_sites` with 1–3 filters (e.g.
    `{ color: "#404040", tags: ["3d", "portfolio"] }`). Judge the results from
    the inline screenshots, not just titles. Shortlist 2–3 candidates.

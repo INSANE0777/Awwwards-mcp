@@ -46,6 +46,12 @@ instruction to build a timeline each.
   manifest hash equal to a fresh generation; if you must add rows, mark them
   authored and say so — never `measured: true`
 - `pageTriggers` belong to the page-level module, not to a section
+- No build yet? `build_motion_manifest({ bands, scrollCensus, sections? })`
+  scaffolds this manifest shape straight from `analyze_page_structure` +
+  `analyze_scroll_map` (+ optional `{label, selector?}` overrides). Its
+  envelope is `measured: false` and DOM initial-state hints are empty (no
+  markup), so author from the census triggers and record authored code as
+  below — never flip the scaffold to `measured: true` by hand.
 
 ## 3. Intent map (what to port, what to skip)
 

@@ -1139,6 +1139,8 @@ describe("analyze_page_structure", () => {
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.totalHeight).toBe(2000);
     expect(parsed.bands.length).toBe(2);
+    expect("mobileBands" in parsed).toBe(false);
+    expect("diff" in parsed).toBe(false);
   });
 
   it("surfaces the install hint as isError when playwright is missing", async () => {
@@ -1181,6 +1183,69 @@ describe("analyze_page_structure", () => {
     });
     expect(seen[0]?.maxBands).toBe(10);
     expect(seen[0]?.opts).toMatchObject({ viewport: "mobile" });
+  });
+
+  it("compare:mobile captures a second mobile pass and appends mobileBands + diff", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<string | undefined> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (url: string, _maxBands?: number, opts?: { viewport?: string }) => {
+        seen.push(opts?.viewport);
+        const mobile = opts?.viewport === "mobile";
+        return {
+          url,
+          title: "T",
+          totalHeight: mobile ? 800 : 1000,
+          bands: mobile
+            ? [
+                { index: 0, tag: "section", label: ".a", background: "rgb(0, 0, 0)", offsetTop: 0, height: 300, textStart: "" },
+                { index: 1, tag: "section", label: ".b", background: "rgb(0, 0, 0)", offsetTop: 300, height: 500, textStart: "" },
+              ]
+            : [
+                { index: 0, tag: "section", label: ".a", background: "rgb(0, 0, 0)", offsetTop: 0, height: 500, textStart: "" },
+                { index: 1, tag: "section", label: ".c", background: "rgb(0, 0, 0)", offsetTop: 500, height: 500, textStart: "" },
+              ],
+        };
+      },
+    });
+    const res = await h.analyze_page_structure({ url: "https://example.com", compare: "mobile" });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toEqual(["desktop", "mobile"]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.totalHeight).toBe(1000); // desktop stays the base
+    expect(parsed.bands.map((b: any) => b.label)).toEqual([".a", ".c"]);
+    expect(parsed.mobileBands.map((b: any) => b.label)).toEqual([".a", ".b"]);
+    expect(parsed.diff).toEqual({
+      heightDelta: -200,
+      bandsAdded: [".b"],
+      bandsRemoved: [".c"],
+      reordered: [],
+    });
+  });
+
+  it("compare:mobile reuses a mobile primary capture instead of a second call", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    let calls = 0;
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (url: string) => {
+        calls++;
+        return { url, title: "T", totalHeight: 500, bands: [] };
+      },
+    });
+    const res = await h.analyze_page_structure({
+      url: "https://example.com",
+      viewport: "mobile",
+      compare: "mobile",
+    });
+    expect(calls).toBe(1);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.diff).toEqual({ heightDelta: 0, bandsAdded: [], bandsRemoved: [], reordered: [] });
   });
 });
 
@@ -1587,6 +1652,42 @@ describe("build_gsap_stub handler", () => {
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.stubHtml).toContain("gsap.registerPlugin(ScrollTrigger)");
     expect(parsed.stubHtml).toContain("no usable scroll-census anims");
+  });
+});
+
+describe("build_motion_manifest handler", () => {
+  const census = () =>
+    JSON.parse(readFileSync(join(FIXTURES, "build-project", "census.json"), "utf8"));
+  const bands = {
+    url: "https://example.test/native",
+    title: "Native",
+    totalHeight: 2000,
+    bands: [
+      { index: 0, tag: "section", label: "#a", background: "rgb(0, 0, 0)", offsetTop: 0, height: 1000, textStart: "" },
+      { index: 1, tag: "section", label: "#b", background: "rgb(0, 0, 0)", offsetTop: 1000, height: 1000, textStart: "" },
+    ],
+  };
+
+  it("returns the manifest scaffold envelope as JSON", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.build_motion_manifest({ bands, scrollCensus: census() });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.measured).toBe(false);
+    expect(parsed.note).toContain("author motion before shipping");
+    expect(parsed.manifest.sections.map((s: any) => s.id)).toEqual(["a", "b"]);
+    expect(parsed.manifest.pageTriggers.map((t: any) => t.selector)).toEqual(["#space"]);
+  });
+
+  it("maps invalid input to a { error } isError response, never a throw", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.build_motion_manifest({ bands: {}, scrollCensus: {} });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse((res.content[0] as any).text).error).toContain("bands:");
   });
 });
 

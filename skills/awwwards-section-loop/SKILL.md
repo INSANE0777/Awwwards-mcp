@@ -112,7 +112,11 @@ re-lock. Never silently fudge a locked section while building another.
 ### Step 5 — Final coherence pass
 
 After the last section locks: whole-page `verify_build`, read every
-band. You're now checking cross-section things the per-section loop
+band. Also run `analyze_page_structure` once with `compare: "mobile"`:
+`mobileBands` + `diff` (`bandsAdded`, `bandsRemoved`, `reordered`,
+`heightDelta`) name the sections that only exist at 390×844 or changed
+order — a desktop-only rebuild shows up here before the mobile smoke.
+You're now checking cross-section things the per-section loop
 can't see: shared spacing rhythm, consistent header behavior, scroll
 continuity, one easing family across sections (or an intentional
 break). Fix coherence issues at the page level (tokens, shared CSS),

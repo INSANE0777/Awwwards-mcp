@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMPONENT_SNIPPET, captureComponent, reduceComponent } from "../src/component.js";
+import { COMPONENT_SNIPPET, captureComponent, reduceComponent, summarizePalette, summarizeTypography } from "../src/component.js";
 import type { ComponentNode, ComponentPack } from "../src/component.js";
 import { createHandlers } from "../src/server.js";
 import { AwwwardsClient } from "../src/awwwards.js";
@@ -147,6 +147,96 @@ describe("reduceComponent", () => {
   });
 });
 
+// --- typography / palette summaries ----------------------------------------
+
+const summaryPack = (): ComponentPack => ({
+  id: "component-pack-v1",
+  url: "https://example.dev",
+  selector: "header",
+  capturedAt: 1,
+  viewport: { width: 1440, height: 900 },
+  nodeCount: 3,
+  root: n(
+    [
+      n([], {
+        styles: {
+          fontFamily: '"Inter", sans-serif',
+          fontSize: "16px",
+          fontWeight: "700",
+          lineHeight: "24px",
+          letterSpacing: "0px",
+          color: "rgb(17, 17, 17)",
+          backgroundColor: "rgba(0, 0, 0, 0)",
+        },
+      }),
+      n([], {
+        styles: {
+          fontFamily: '"Inter", sans-serif',
+          fontSize: "16px",
+          fontWeight: "400",
+          color: "#fff",
+        } as Record<string, string>,
+      }),
+    ],
+    {
+      styles: {
+        fontFamily: '"Inter", sans-serif',
+        fontSize: "48px",
+        color: "#fff",
+        borderColor: "transparent",
+        fill: "none",
+        stroke: "rgb(1, 2, 3)",
+      },
+    },
+  ),
+  fonts: ['"Inter", sans-serif'],
+  colors: ["#fff", "transparent", "rgb(9, 9, 9)"],
+});
+
+describe("component summaries", () => {
+  it("counts typography values per node, sorted by usage, with sampled coverage", () => {
+    const summary = summarizeTypography(summaryPack());
+    expect(summary.sampled).toBe(3);
+    expect(summary.families).toEqual([{ value: '"Inter", sans-serif', count: 3 }]);
+    expect(summary.sizes).toEqual([
+      { value: "16px", count: 2 },
+      { value: "48px", count: 1 },
+    ]);
+    expect(summary.weights).toEqual([
+      { value: "400", count: 1 },
+      { value: "700", count: 1 },
+    ]);
+    expect(summary.lineHeights).toEqual([{ value: "24px", count: 1 }]);
+    expect(summary.letterSpacings).toEqual([{ value: "0px", count: 1 }]);
+  });
+
+  it("bounds each typography bucket to the top 12 values", () => {
+    const children = Array.from({ length: 15 }, (_, i) =>
+      n([], { styles: { fontSize: `${10 + i}px` } }),
+    );
+    const pack: ComponentPack = { ...summaryPack(), nodeCount: 16, root: n(children) };
+    const summary = summarizeTypography(pack);
+    expect(summary.sampled).toBe(16);
+    expect(summary.sizes).toHaveLength(12);
+  });
+
+  it("counts palette properties + pack colors, filters junk, top 24", () => {
+    const palette = summarizePalette(summaryPack());
+    expect(palette.junkFiltered).toBe(4); // alpha-0 rgba, 2× transparent, none
+    expect(palette.colors[0]).toEqual({ value: "#fff", count: 2 });
+    expect(palette.colors).toContainEqual({ value: "rgb(17, 17, 17)", count: 1 });
+    expect(palette.colors).toContainEqual({ value: "rgb(9, 9, 9)", count: 1 });
+    expect(palette.colors).toContainEqual({ value: "rgb(1, 2, 3)", count: 1 });
+    expect(palette.colors).toHaveLength(4);
+
+    const children = Array.from({ length: 30 }, (_, i) =>
+      n([], { styles: { color: `rgb(${i}, 0, 0)` } }),
+    );
+    const capped = summarizePalette({ ...summaryPack(), nodeCount: 31, root: n(children) });
+    expect(capped.colors).toHaveLength(24);
+  });
+});
+
 // --- MCP handler (DI fake captureComponentFn, mirrors server.test.ts) ------
 
 describe("capture_component handler", () => {
@@ -226,6 +316,43 @@ describe("capture_component handler", () => {
     const res = await h.capture_component({ url: pack.url, maxNodes: 1200 });
     expect(res.isError).toBeUndefined();
     expect(seen[0]).toEqual({ url: pack.url, opts: { viewport: "desktop", maxNodes: 1200 } });
+  });
+
+  it("adds typography/paletteSummary by default and omits both in compact mode", async () => {
+    const styled: ComponentPack = {
+      ...pack,
+      root: {
+        ...pack.root,
+        styles: { fontFamily: "Arial", fontSize: "16px", color: "#123456", backgroundColor: "transparent" },
+      },
+    };
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(tmpDir()),
+      captureComponentFn: async () => styled,
+    });
+
+    const full = await h.capture_component({ url: pack.url });
+    const parsed = JSON.parse((full.content[0] as any).text);
+    expect(parsed.fonts).toEqual(["Arial"]); // old fields unchanged
+    expect(parsed.typography).toMatchObject({
+      sampled: 1,
+      families: [{ value: "Arial", count: 1 }],
+      sizes: [{ value: "16px", count: 1 }],
+    });
+    expect(parsed.paletteSummary).toEqual({
+      colors: [
+        { value: "#123456", count: 1 },
+        { value: "#ffffff", count: 1 },
+      ],
+      junkFiltered: 1,
+    });
+
+    const compact = await h.capture_component({ url: pack.url, compact: true });
+    const diet = JSON.parse((compact.content[0] as any).text);
+    expect(diet.typography).toBeUndefined();
+    expect(diet.paletteSummary).toBeUndefined();
+    expect(diet.fonts).toEqual(["Arial"]);
   });
 });
 
