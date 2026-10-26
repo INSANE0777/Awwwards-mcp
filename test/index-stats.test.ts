@@ -109,7 +109,7 @@ function seeded() {
 function seedSamples(cache: Cache, n: number): void {
   for (let i = 0; i < n; i++) {
     cache.setMeta(`detail:fixture-${i}`, details(5 + (i % 5), ["#112233", "#445566"]));
-    cache.upsertMotionDna(dna(`https://fixture-${i}.example`, ["gsap"], NOW));
+    cache.upsertMotionDna(dna(`https://fixture-${i}.example`, ["gsap", "three.js"], NOW));
   }
 }
 
@@ -157,6 +157,12 @@ describe("getIndexStats", () => {
       insufficient: true,
     });
 
+    for (const metric of [stats.colors, stats.scores, stats.motionLibs]) {
+      expect(metric.hint).toContain("get_site_details");
+      expect(metric.hint).toContain(`<${MIN_METRIC_SAMPLE}`);
+    }
+    expect(MIN_METRIC_SAMPLE).toBe(30);
+
     // All-time metrics carry all-time coverage; windowed metrics carry the
     // window and the detail-parse cap.
     for (const metric of [stats.sites, stats.elements, stats.technologies]) {
@@ -168,27 +174,7 @@ describe("getIndexStats", () => {
     }
   });
 
-  it("suppresses colour, score and motion metrics below 30 parsed rows", () => {
-    const cache = seeded();
-    const result = getIndexStats({}, { cache, now: () => NOW });
-
-    expect(MIN_METRIC_SAMPLE).toBe(30);
-    expect(result.colors.sample).toBe(2);
-    expect(result.colors.insufficient).toBe(true);
-    expect(result.colors.items).toEqual([]);
-    expect(result.scores.sample).toBe(2);
-    expect(result.scores.avg).toBeNull();
-    expect(result.scores.median).toBeNull();
-    expect(result.scores.insufficient).toBe(true);
-    expect(result.motionLibs.sample).toBe(2);
-    expect(result.motionLibs.insufficient).toBe(true);
-    expect(result.motionLibs.items).toEqual([]);
-    for (const metric of [result.colors, result.scores, result.motionLibs]) {
-      expect(metric.hint).toContain("get_site_details");
-    }
-  });
-
-  it("reports metrics at 30 parsed rows", () => {
+  it("reports metrics at 30 parsed rows and caps derived lists at top", () => {
     const cache = new Cache(tmpDir(), () => NOW);
     seedSamples(cache, 30);
     const result = getIndexStats({}, { cache, now: () => NOW });
@@ -208,7 +194,28 @@ describe("getIndexStats", () => {
 
     expect(result.motionLibs.sample).toBe(30);
     expect(result.motionLibs.insufficient).toBe(false);
-    expect(result.motionLibs.items).toEqual([{ lib: "gsap", count: 30 }]);
+    expect(result.motionLibs.items).toEqual([
+      { lib: "gsap", count: 30 },
+      { lib: "three.js", count: 30 },
+    ]);
+
+    const capped = getIndexStats({ top: 1 }, { cache, now: () => NOW });
+    expect(capped.colors.items).toEqual([{ hex: "#112233", count: 30 }]);
+    expect(capped.motionLibs.items).toEqual([{ lib: "gsap", count: 30 }]);
+  });
+
+  it("derives score provenance from scored rows, not parsed rows", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    for (let i = 0; i < 30; i++) {
+      cache.setMeta(`detail:score-${i}`, details(i < 2 ? 7 : null, ["#112233"]));
+    }
+    const result = getIndexStats({}, { cache, now: () => NOW });
+
+    expect(result.colors.sample).toBe(30);
+    expect(result.colors.insufficient).toBe(false);
+    expect(result.scores.sample).toBe(2);
+    expect(result.scores.insufficient).toBe(true);
+    expect(result.scores.avg).toBeNull();
   });
 
   it("uses parsed rows for sample, not detailsCached", () => {
