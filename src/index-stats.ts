@@ -10,6 +10,8 @@
  *
  * Bounds: detail rows parsed for palettes/scores ≤500 (most recently fetched),
  * output arrays ≤ top (default 10, max 50), window 1..3650 days (default 90).
+ * Detail-derived metrics with fewer than 30 parsed rows are suppressed
+ * (`insufficient: true`) instead of publishing misleading lists or averages.
  */
 import type { Cache } from "./cache.js";
 import type { MotionDna, SiteDetails } from "./types.js";
@@ -20,6 +22,8 @@ export const INDEX_STATS_DEFAULT_TOP = 10;
 export const INDEX_STATS_MAX_TOP = 50;
 /** Most recently fetched detail rows parsed for palettes/scores. */
 export const MAX_DETAILS_PARSED = 500;
+/** Below this many parsed rows, detail-derived metrics are suppressed. */
+export const MIN_METRIC_SAMPLE = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -35,6 +39,13 @@ export interface WindowedCoverage extends IndexCoverage {
   detailParseCap: number;
 }
 
+/** Sample provenance for a detail-derived metric. */
+export interface MetricSample {
+  sample: number;
+  insufficient: boolean;
+  hint?: string;
+}
+
 export interface IndexStatsResult {
   windowDays: number;
   top: number;
@@ -46,18 +57,18 @@ export interface IndexStatsResult {
     distinct: number;
     coverage: IndexCoverage;
   };
-  colors: {
+  colors: MetricSample & {
     items: Array<{ hex: string; count: number }>;
     detailsParsed: number;
     coverage: WindowedCoverage;
   };
-  scores: {
+  scores: MetricSample & {
     n: number;
     avg: number | null;
     median: number | null;
     coverage: WindowedCoverage;
   };
-  motionLibs: {
+  motionLibs: MetricSample & {
     items: Array<{ lib: string; count: number }>;
     rows: number;
     coverage: WindowedCoverage;
@@ -83,6 +94,17 @@ const slugify = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Sample metadata; below the floor the metric is suppressed and names the fix. */
+function sampleState(sample: number): MetricSample {
+  return sample < MIN_METRIC_SAMPLE
+    ? {
+        sample,
+        insufficient: true,
+        hint: "Insufficient sample (<30). Enrich with get_site_details { slugs } and retry.",
+      }
+    : { sample, insufficient: false };
+}
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -227,6 +249,10 @@ export function getIndexStats(
     }
     const libTop = topCounts(libs, top).map((l) => ({ lib: l.key, count: l.count }));
 
+    const colorsSample = sampleState(detailsParsed);
+    const scoresSample = sampleState(scores.length);
+    const motionSample = sampleState(dnaRowsParsed);
+
     return {
       windowDays,
       top,
@@ -234,9 +260,25 @@ export function getIndexStats(
       details: { cached: detailsCached, coverage: windowCoverage },
       elements: { total: elementsTotal, coverage },
       technologies: { items: techTop, distinct: tech.size, coverage },
-      colors: { items: colorTop, detailsParsed, coverage: windowCoverage },
-      scores: { n: scores.length, avg: scoreAvg, median: scoreMedian, coverage: windowCoverage },
-      motionLibs: { items: libTop, rows: dnaRowsParsed, coverage: windowCoverage },
+      colors: {
+        items: colorsSample.insufficient ? [] : colorTop,
+        detailsParsed,
+        ...colorsSample,
+        coverage: windowCoverage,
+      },
+      scores: {
+        n: scores.length,
+        avg: scoresSample.insufficient ? null : scoreAvg,
+        median: scoresSample.insufficient ? null : scoreMedian,
+        ...scoresSample,
+        coverage: windowCoverage,
+      },
+      motionLibs: {
+        items: motionSample.insufficient ? [] : libTop,
+        rows: dnaRowsParsed,
+        ...motionSample,
+        coverage: windowCoverage,
+      },
       note: "Aggregates over the local cache only; no network requests and no site slugs or titles. Sites, elements and technologies are all-time; details, colours, scores and motion libraries use the window.",
     };
   });

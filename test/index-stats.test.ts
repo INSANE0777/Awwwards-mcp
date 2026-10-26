@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
-import { getIndexStats } from "../src/index-stats.js";
+import { getIndexStats, MIN_METRIC_SAMPLE } from "../src/index-stats.js";
 import type { ElementRecord, MotionDna, SiteDetails, SiteSummary } from "../src/types.js";
 
 const dirs: string[] = [];
@@ -105,8 +105,16 @@ function seeded() {
   return cache;
 }
 
+/** Seed `n` fresh parsed detail rows and `n` fresh Motion DNA rows. */
+function seedSamples(cache: Cache, n: number): void {
+  for (let i = 0; i < n; i++) {
+    cache.setMeta(`detail:fixture-${i}`, details(5 + (i % 5), ["#112233", "#445566"]));
+    cache.upsertMotionDna(dna(`https://fixture-${i}.example`, ["gsap"], NOW));
+  }
+}
+
 describe("getIndexStats", () => {
-  it("aggregates sites, details, elements, technologies, colors, scores and motion libs", () => {
+  it("aggregates all-time counts and suppresses low-sample detail metrics", () => {
     const cache = seeded();
     const stats = getIndexStats({}, { cache, now: () => NOW });
 
@@ -124,20 +132,30 @@ describe("getIndexStats", () => {
     ]);
     expect(stats.technologies.distinct).toBe(4);
 
-    expect(stats.colors.items).toEqual([
-      { hex: "#000000", count: 2 },
-      { hex: "#FF0000", count: 1 },
-      { hex: "#FFFFFF", count: 1 },
-    ]);
-    expect(stats.colors.detailsParsed).toBe(2);
+    // Two parsed rows are below the 30-row floor, so derived lists and
+    // averages are suppressed rather than published as fact.
+    expect(stats.colors).toMatchObject({
+      items: [],
+      detailsParsed: 2,
+      sample: 2,
+      insufficient: true,
+    });
+    expect(stats.colors.hint).toContain("get_site_details");
 
-    expect(stats.scores).toMatchObject({ n: 2, avg: 7, median: 7 });
+    expect(stats.scores).toMatchObject({
+      n: 2,
+      avg: null,
+      median: null,
+      sample: 2,
+      insufficient: true,
+    });
 
-    expect(stats.motionLibs.items).toEqual([
-      { lib: "gsap", count: 2 },
-      { lib: "three.js", count: 1 },
-    ]);
-    expect(stats.motionLibs.rows).toBe(2);
+    expect(stats.motionLibs).toMatchObject({
+      items: [],
+      rows: 2,
+      sample: 2,
+      insufficient: true,
+    });
 
     // All-time metrics carry all-time coverage; windowed metrics carry the
     // window and the detail-parse cap.
@@ -148,6 +166,65 @@ describe("getIndexStats", () => {
     for (const metric of [stats.details, stats.colors, stats.scores, stats.motionLibs]) {
       expect(metric.coverage).toEqual(WINDOW_COVERAGE);
     }
+  });
+
+  it("suppresses colour, score and motion metrics below 30 parsed rows", () => {
+    const cache = seeded();
+    const result = getIndexStats({}, { cache, now: () => NOW });
+
+    expect(MIN_METRIC_SAMPLE).toBe(30);
+    expect(result.colors.sample).toBe(2);
+    expect(result.colors.insufficient).toBe(true);
+    expect(result.colors.items).toEqual([]);
+    expect(result.scores.sample).toBe(2);
+    expect(result.scores.avg).toBeNull();
+    expect(result.scores.median).toBeNull();
+    expect(result.scores.insufficient).toBe(true);
+    expect(result.motionLibs.sample).toBe(2);
+    expect(result.motionLibs.insufficient).toBe(true);
+    expect(result.motionLibs.items).toEqual([]);
+    for (const metric of [result.colors, result.scores, result.motionLibs]) {
+      expect(metric.hint).toContain("get_site_details");
+    }
+  });
+
+  it("reports metrics at 30 parsed rows", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    seedSamples(cache, 30);
+    const result = getIndexStats({}, { cache, now: () => NOW });
+
+    expect(result.colors.sample).toBe(30);
+    expect(result.colors.insufficient).toBe(false);
+    expect(result.colors.hint).toBeUndefined();
+    expect(result.colors.items).toEqual([
+      { hex: "#112233", count: 30 },
+      { hex: "#445566", count: 30 },
+    ]);
+
+    expect(result.scores.sample).toBe(30);
+    expect(result.scores.insufficient).toBe(false);
+    expect(result.scores.avg).toBe(7);
+    expect(result.scores.median).toBe(7);
+
+    expect(result.motionLibs.sample).toBe(30);
+    expect(result.motionLibs.insufficient).toBe(false);
+    expect(result.motionLibs.items).toEqual([{ lib: "gsap", count: 30 }]);
+  });
+
+  it("uses parsed rows for sample, not detailsCached", () => {
+    const cache = new Cache(tmpDir(), () => NOW);
+    cache.setMeta("detail:valid-a", details(8, ["#FFFFFF"]));
+    cache.setMeta("detail:valid-b", details(6, ["#000000"]));
+    cache.withDbForTest((db) => {
+      const insert = db.prepare("INSERT INTO meta (key, value, fetchedAt) VALUES (?, ?, ?)");
+      for (let i = 0; i < 38; i++) insert.run(`detail:malformed-${i}`, "{not json", NOW);
+    });
+
+    const result = getIndexStats({}, { cache, now: () => NOW });
+    expect(result.details.cached).toBe(40);
+    expect(result.colors.sample).toBe(2);
+    expect(result.colors.detailsParsed).toBe(2);
+    expect(result.colors.insufficient).toBe(true);
   });
 
   it("never emits site slugs, titles or URLs", () => {
@@ -163,10 +240,19 @@ describe("getIndexStats", () => {
     const cache = seeded();
     const wide = getIndexStats({ windowDays: 3650, top: 1 }, { cache, now: () => NOW });
     expect(wide.details.cached).toBe(3);
-    expect(wide.scores).toMatchObject({ n: 3, avg: 8, median: 8 });
-    expect(wide.colors.items).toEqual([{ hex: "#000000", count: 2 }]);
-    expect(wide.motionLibs.items).toEqual([{ lib: "gsap", count: 3 }]);
+    // Still below the 30-row floor after widening the window.
+    expect(wide.scores).toMatchObject({
+      n: 3,
+      avg: null,
+      median: null,
+      sample: 3,
+      insufficient: true,
+    });
+    expect(wide.colors.items).toEqual([]);
+    expect(wide.colors.sample).toBe(3);
+    expect(wide.motionLibs.items).toEqual([]);
     expect(wide.motionLibs.rows).toBe(3);
+    expect(wide.motionLibs.sample).toBe(3);
     expect(wide.technologies.items).toHaveLength(1);
     for (const metric of [wide.sites, wide.elements, wide.technologies]) {
       expect(metric.coverage).toEqual(BASE_COVERAGE);
@@ -242,18 +328,21 @@ describe("getIndexStats", () => {
     // The cached row exists (SQL count) but does not contribute evidence.
     expect(stats.details.cached).toBe(3);
     expect(stats.colors.detailsParsed).toBe(2);
-    expect(stats.colors.items).toEqual([
-      { hex: "#000000", count: 2 },
-      { hex: "#FF0000", count: 1 },
-      { hex: "#FFFFFF", count: 1 },
-    ]);
-    expect(stats.scores).toMatchObject({ n: 2, avg: 7, median: 7 });
+    expect(stats.colors.sample).toBe(2);
+    expect(stats.colors.insufficient).toBe(true);
+    expect(stats.colors.items).toEqual([]);
+    expect(stats.scores).toMatchObject({
+      n: 2,
+      avg: null,
+      median: null,
+      sample: 2,
+      insufficient: true,
+    });
     // rows counts parsed DNA rows, so the malformed row is not double-counted.
     expect(stats.motionLibs.rows).toBe(2);
-    expect(stats.motionLibs.items).toEqual([
-      { lib: "gsap", count: 2 },
-      { lib: "three.js", count: 1 },
-    ]);
+    expect(stats.motionLibs.sample).toBe(2);
+    expect(stats.motionLibs.insufficient).toBe(true);
+    expect(stats.motionLibs.items).toEqual([]);
     expect(stats.technologies.items).toEqual([
       { tag: "webgl", count: 2 },
       { tag: "3d", count: 1 },
