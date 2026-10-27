@@ -1633,10 +1633,14 @@ export function createHandlers(deps: {
             m.analyzePageStructure(url, undefined, maxBands, opts),
           ));
       const viewport = args.viewport ?? "desktop";
-      const structure = await analyze(args.url, args.maxBands, {
+      const wantsResponsive = args.compare === "mobile";
+      const primaryOpts: WaitOpts = {
         waitStrategy: args.waitStrategy,
         viewport,
-      });
+      };
+      // Only the mobile capture scans elements; a mobile primary IS that capture.
+      if (wantsResponsive && viewport === "mobile") primaryOpts.responsive = true;
+      const structure = await analyze(args.url, args.maxBands, primaryOpts);
       if ("error" in structure) return { content: [text(structure.error)], isError: true };
       // Desktop default is byte-identical: no new keys unless compare is set.
       if (args.compare !== "mobile") {
@@ -1651,6 +1655,7 @@ export function createHandlers(deps: {
           : await analyze(args.url, args.maxBands, {
               waitStrategy: args.waitStrategy,
               viewport: "mobile",
+              responsive: true,
             });
       if ("error" in mobile) {
         // Keep the valid desktop result; degrade the compare half explicitly.
@@ -1660,16 +1665,14 @@ export function createHandlers(deps: {
           ],
         };
       }
+      const payload: Record<string, unknown> = {
+        ...structure,
+        mobileBands: mobile.bands,
+        diff: diffBands(structure, mobile),
+      };
+      if (mobile.responsive) payload.responsive = mobile.responsive;
       return {
-        content: [
-          text(
-            JSON.stringify(
-              { ...structure, mobileBands: mobile.bands, diff: diffBands(structure, mobile) },
-              null,
-              1,
-            ),
-          ),
-        ],
+        content: [text(JSON.stringify(payload, null, 1))],
       };
     } catch (err) {
       return errorResponse(err);

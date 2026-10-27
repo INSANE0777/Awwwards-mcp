@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { collapseBands, analyzePageStructure, splitCollapsedBands, diffBands, SCAN_SNIPPET } from "../src/structure.js";
-import type { PageBand, PageStructure } from "../src/structure.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  buildResponsiveReport,
+  collapseBands,
+  analyzePageStructure,
+  selectorFromParts,
+  splitCollapsedBands,
+  diffBands,
+  SCAN_SNIPPET,
+} from "../src/structure.js";
+import type { PageBand, PageStructure, RawResponsiveScan } from "../src/structure.js";
 import type { RawBand } from "../src/structure.js";
+
+const FIXTURES = join(__dirname, "fixtures");
 
 const band = (over: Partial<RawBand> = {}): RawBand => ({
   tag: "section",
@@ -28,6 +40,51 @@ const page = (bands: PageBand[], totalHeight: number): PageStructure => ({
   title: "T",
   totalHeight,
   bands,
+});
+
+describe("buildResponsiveReport", () => {
+  it("orders kinds, caps each at 10, keeps raw counts and marks truncation", () => {
+    const raw = JSON.parse(
+      readFileSync(join(FIXTURES, "responsive", "scan-overflow.json"), "utf8"),
+    ) as RawResponsiveScan;
+    const report = buildResponsiveReport(raw);
+    expect(report.measuredAt).toBe("mobile");
+    expect(report.viewport).toEqual({ width: 390, height: 844, dpr: 3 });
+    expect(report.pageOverflow).toEqual({ horizontal: true, scrollWidth: 421, innerWidth: 390 });
+    expect(report.issues.map((i) => i.kind)).toEqual([
+      ...Array(10).fill("overflow"),
+      "small-text",
+      "small-tap-target",
+    ]);
+    expect(report.issues[0]!.selector).toBe("div.hero > img.banner");
+    expect(report.issues[0]!.rect).toEqual({ x: 320, y: 10, w: 300, h: 120 });
+    expect(report.issues[10]!.selector).toBe("main > p.lede");
+    expect(report.issues[11]!.selector).toBe("button#cta");
+    expect(report.counts).toEqual({ overflow: 12, smallText: 1, smallTapTarget: 1 });
+    expect(report.truncated).toBe(true);
+  });
+
+  it("returns zero issues for a clean scan", () => {
+    const raw = JSON.parse(
+      readFileSync(join(FIXTURES, "responsive", "scan-clean.json"), "utf8"),
+    ) as RawResponsiveScan;
+    const report = buildResponsiveReport(raw);
+    expect(report.issues).toEqual([]);
+    expect(report.pageOverflow).toEqual({ horizontal: false, scrollWidth: 390, innerWidth: 390 });
+    expect(report.counts).toEqual({ overflow: 0, smallText: 0, smallTapTarget: 0 });
+    expect(report.truncated).toBe(false);
+  });
+});
+
+describe("selectorFromParts", () => {
+  it("reverses innermost-first parts and joins with >", () => {
+    expect(selectorFromParts(["img.banner", "div.hero"])).toBe("div.hero > img.banner");
+    expect(selectorFromParts([])).toBe("");
+  });
+
+  it("caps the selector at 160 characters", () => {
+    expect(selectorFromParts(["x".repeat(200)])).toHaveLength(160);
+  });
 });
 
 describe("diffBands", () => {
@@ -310,6 +367,89 @@ describe("analyzePageStructure", () => {
     }
   });
 
+  it("passes the responsive flag to the scan and builds the report", async () => {
+    const rawScan = {
+      title: "Mobile Page",
+      totalHeight: 800,
+      candidates: [
+        band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 800 }),
+      ],
+      responsive: {
+        innerWidth: 390,
+        scrollWidth: 390,
+        counts: { overflow: 0, smallText: 0, smallTapTarget: 0 },
+        overflow: [],
+        smallText: [],
+        smallTapTarget: [],
+      },
+    };
+    const argsSeen: any[] = [];
+    const fake = {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async () => {},
+          waitForTimeout: async () => {},
+          evaluate: async (_fn: unknown, arg?: unknown) => {
+            argsSeen.push(arg);
+            return rawScan;
+          },
+        }),
+        close: async () => {},
+      }),
+    };
+    const res = await analyzePageStructure(
+      "https://example.com",
+      async () => ({ chromium: fake }),
+      40,
+      { viewport: "mobile", responsive: true },
+    );
+    expect("error" in res).toBe(false);
+    // preScroll calls evaluate with no argument; the scan passes the options.
+    expect(argsSeen).toEqual([undefined, { responsive: true }]);
+    if (!("error" in res)) {
+      expect(res.responsive).toEqual({
+        measuredAt: "mobile",
+        viewport: { width: 390, height: 844, dpr: 3 },
+        pageOverflow: { horizontal: false, scrollWidth: 390, innerWidth: 390 },
+        issues: [],
+        counts: { overflow: 0, smallText: 0, smallTapTarget: 0 },
+        truncated: false,
+      });
+    }
+  });
+
+  it("omits responsive when the scan does not return raw evidence", async () => {
+    const argsSeen: any[] = [];
+    const fake = {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async () => {},
+          waitForTimeout: async () => {},
+          evaluate: async (_fn: unknown, arg?: unknown) => {
+            argsSeen.push(arg);
+            return {
+              title: "Desktop Page",
+              totalHeight: 800,
+              candidates: [
+                band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 800 }),
+              ],
+            };
+          },
+        }),
+        close: async () => {},
+      }),
+    };
+    const res = await analyzePageStructure(
+      "https://example.com",
+      async () => ({ chromium: fake }),
+      40,
+      { responsive: false },
+    );
+    expect("error" in res).toBe(false);
+    expect(argsSeen[1]).toEqual({ responsive: false });
+    if (!("error" in res)) expect("responsive" in res).toBe(false);
+  });
+
   it("returns the install hint when playwright is missing", async () => {
     const res = await analyzePageStructure("https://example.com", async () => {
       throw new Error("Cannot find package 'playwright'");
@@ -410,7 +550,9 @@ describe("analyzePageStructure", () => {
 // function / function declaration — no arrows anywhere in its body.
 it("SCAN_SNIPPET is a serializable plain function (no-arrow lock)", () => {
   expect(typeof SCAN_SNIPPET).toBe("function");
-  expect(String(SCAN_SNIPPET)).not.toContain("=>");
+  const src = String(SCAN_SNIPPET);
+  expect(src).not.toContain("=>");
+  expect(src).toContain("smallTapTarget");
 });
 
 // Mirror of the SCAN_SNIPPET in-page alpha parse (src/structure.ts). The

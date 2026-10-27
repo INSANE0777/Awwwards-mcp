@@ -1,0 +1,25 @@
+{
+  "url": "https://example.com",
+  "title": "Archive",
+  "totalHeight": 1000,
+  "bands": [
+    {
+      "index": 0,
+      "tag": "body",
+      "label": "body",
+      "background": "rgb(10, 12, 16)",
+      "offsetTop": 0,
+      "height": 600,
+      "textStart": "Studio"
+    },
+    {
+      "index": 1,
+      "tag": "section",
+      "label": ".work",
+      "background": "rgb(240, 240, 240)",
+      "offsetTop": 600,
+      "height": 400,
+      "textStart": "Selected work"
+    }
+  ]
+}

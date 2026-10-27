@@ -1,0 +1,25 @@
+{
+  "innerWidth": 390,
+  "scrollWidth": 421,
+  "counts": { "overflow": 12, "smallText": 1, "smallTapTarget": 1 },
+  "overflow": [
+    { "parts": ["img.banner", "div.hero"], "x": 320, "y": 10, "w": 300, "h": 120, "detail": "overflows viewport by 230px" },
+    { "parts": ["div.wide-card", "main"], "x": 340, "y": 180, "w": 240, "h": 80, "detail": "overflows viewport by 190px" },
+    { "parts": ["span.price", "div.row"], "x": 360, "y": 300, "w": 120, "h": 20, "detail": "overflows viewport by 90px" },
+    { "parts": ["div.table", "section.grid"], "x": 370, "y": 420, "w": 100, "h": 40, "detail": "overflows viewport by 80px" },
+    { "parts": ["pre.code"], "x": 372, "y": 500, "w": 80, "h": 30, "detail": "overflows viewport by 62px" },
+    { "parts": ["div.hero-copy", "div.hero"], "x": 375, "y": 560, "w": 60, "h": 30, "detail": "overflows viewport by 45px" },
+    { "parts": ["li.tile", "ul.tiles"], "x": 378, "y": 620, "w": 50, "h": 50, "detail": "overflows viewport by 38px" },
+    { "parts": ["div.badge"], "x": 380, "y": 700, "w": 40, "h": 20, "detail": "overflows viewport by 30px" },
+    { "parts": ["a.cta", "div.banner"], "x": 382, "y": 760, "w": 30, "h": 20, "detail": "overflows viewport by 22px" },
+    { "parts": ["div.footer-note", "footer"], "x": 385, "y": 820, "w": 20, "h": 16, "detail": "overflows viewport by 15px" },
+    { "parts": ["span.meta", "div.byline"], "x": 388, "y": 880, "w": 10, "h": 10, "detail": "overflows viewport by 8px" },
+    { "parts": ["i.icon", "span.meta"], "x": 390, "y": 900, "w": 5, "h": 5, "detail": "overflows viewport by 5px" }
+  ],
+  "smallText": [
+    { "parts": ["p.lede", "main"], "x": 16, "y": 240, "w": 320, "h": 14, "detail": "font-size 10px < 12px" }
+  ],
+  "smallTapTarget": [
+    { "parts": ["button#cta"], "x": 16, "y": 360, "w": 16, "h": 16, "detail": "16×16px < 24px" }
+  ]
+}

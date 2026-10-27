@@ -1421,6 +1421,7 @@ describe("analyze_page_structure", () => {
     expect(parsed.mobileError).toBe("mobile boom");
     expect("mobileBands" in parsed).toBe(false);
     expect("diff" in parsed).toBe(false);
+    expect("responsive" in parsed).toBe(false);
   });
 
   it("compare:mobile reuses a mobile primary capture instead of a second call", async () => {
@@ -1443,6 +1444,86 @@ describe("analyze_page_structure", () => {
     expect(calls).toBe(1);
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.diff).toEqual({ heightDelta: 0, bandsAdded: [], bandsRemoved: [], reordered: [] });
+  });
+
+  const REPORT = {
+    measuredAt: "mobile" as const,
+    viewport: { width: 390, height: 844, dpr: 3 },
+    pageOverflow: { horizontal: true, scrollWidth: 420, innerWidth: 390 },
+    issues: [],
+    counts: { overflow: 1, smallText: 0, smallTapTarget: 0 },
+    truncated: false,
+  };
+
+  it("compare:mobile requests responsive evidence on the mobile capture only", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const optsSeen: Array<{ viewport?: string; responsive?: boolean }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (_url: string, _maxBands?: number, opts?: { viewport?: string; responsive?: boolean }) => {
+        optsSeen.push({ viewport: opts?.viewport, responsive: opts?.responsive });
+        return {
+          url: "https://example.com",
+          title: "T",
+          totalHeight: 800,
+          bands: [],
+          ...(opts?.responsive ? { responsive: REPORT } : {}),
+        };
+      },
+    });
+    const res = await h.analyze_page_structure({ url: "https://example.com", compare: "mobile" });
+    expect(optsSeen).toEqual([
+      { viewport: "desktop", responsive: undefined },
+      { viewport: "mobile", responsive: true },
+    ]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.responsive).toEqual(REPORT);
+  });
+
+  it("desktop-only structure has no responsive key and matches the 1.13 baseline", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const desktop = JSON.parse(
+      readFileSync(join(FIXTURES, "v1.13", "structure-desktop.json"), "utf8"),
+    );
+    const h = createHandlers({ client, cache, analyzeFn: async () => desktop });
+    const res = await h.analyze_page_structure({ url: "https://example.com" });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect("responsive" in parsed).toBe(false);
+    expect(parsed).toEqual(desktop);
+  });
+
+  it("viewport mobile + compare:mobile makes one responsive capture", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    let calls = 0;
+    const seen: Array<{ viewport?: string; responsive?: boolean }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (_url: string, _maxBands?: number, opts?: { viewport?: string; responsive?: boolean }) => {
+        calls++;
+        seen.push({ viewport: opts?.viewport, responsive: opts?.responsive });
+        return {
+          url: "https://example.com",
+          title: "T",
+          totalHeight: 500,
+          bands: [],
+          ...(opts?.responsive ? { responsive: REPORT } : {}),
+        };
+      },
+    });
+    const res = await h.analyze_page_structure({
+      url: "https://example.com",
+      viewport: "mobile",
+      compare: "mobile",
+    });
+    expect(calls).toBe(1);
+    expect(seen).toEqual([{ viewport: "mobile", responsive: true }]);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.responsive).toEqual(REPORT);
   });
 });
 

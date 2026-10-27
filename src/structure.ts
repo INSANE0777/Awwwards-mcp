@@ -25,6 +25,44 @@ export interface PageStructure {
   title: string;
   totalHeight: number;
   bands: PageBand[];
+  /** Mobile-only element evidence; absent unless the capture asked for it. */
+  responsive?: ResponsiveReport;
+}
+
+/** Raw element evidence serialized out of the page (selector parts are innermost-first). */
+export interface RawResponsiveElement {
+  parts: string[];
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  detail: string;
+}
+
+/** Raw mobile scan. `counts` are pre-cap totals; arrays are capped in the page. */
+export interface RawResponsiveScan {
+  innerWidth: number;
+  scrollWidth: number;
+  counts: { overflow: number; smallText: number; smallTapTarget: number };
+  overflow: RawResponsiveElement[];
+  smallText: RawResponsiveElement[];
+  smallTapTarget: RawResponsiveElement[];
+}
+
+export interface ResponsiveIssue {
+  kind: "overflow" | "small-text" | "small-tap-target";
+  selector: string;
+  rect: { x: number; y: number; w: number; h: number };
+  detail: string;
+}
+
+export interface ResponsiveReport {
+  measuredAt: "mobile";
+  viewport: { width: 390; height: 844; dpr: 3 };
+  pageOverflow: { horizontal: boolean; scrollWidth: number; innerWidth: number };
+  issues: ResponsiveIssue[];
+  counts: { overflow: number; smallText: number; smallTapTarget: number };
+  truncated: boolean;
 }
 
 /** What page.evaluate(SCAN_SNIPPET) serializes back from the page. */
@@ -34,6 +72,8 @@ export interface ScanResult {
   candidates: RawBand[];
   /** Landmark y-tops (headings + distinct-bg children ≥400px). Omitted when collection threw. */
   landmarks?: number[];
+  /** Mobile element evidence; omitted unless the snippet was called with responsive:true. */
+  responsive?: RawResponsiveScan;
 }
 
 // Runs IN THE PAGE via page.evaluate. Collects full-width, tall, opaque
@@ -43,7 +83,7 @@ export interface ScanResult {
 //
 // page.evaluate serializes plain data only, so this is a single
 // self-contained function returning { title, totalHeight, candidates,
-// landmarks? } (no closures over module scope; every helper below is a
+// responsive? } (no closures over module scope; every helper below is a
 // function declaration — page.evaluate re-serializes the source, so no
 // arrows). The Node tsconfig has no DOM lib, so browser globals are
 // reached through globalThis.
@@ -52,7 +92,7 @@ export interface ScanResult {
 // modern-color-function fallback) is mirrored in test/structure.test.ts
 // ("SCAN_SNIPPET alpha parsing handles space syntax and percentage alphas")
 // and must stay in sync.
-export const SCAN_SNIPPET = function (): ScanResult {
+export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResult {
   const g = globalThis as any;
   const doc = g.document;
   const totalHeight = Math.round(doc.documentElement.scrollHeight);
@@ -155,8 +195,204 @@ export const SCAN_SNIPPET = function (): ScanResult {
   }
   const out: ScanResult = { title: doc.title, totalHeight, candidates };
   if (landmarks) out.landmarks = landmarks;
+  // Responsive evidence, mobile captures only. One pass in document
+  // coordinates; every rule is independent and the whole block degrades to no
+  // responsive key if anything throws, so band scanning never fails because of
+  // it. Counts are pre-cap totals; arrays keep at most 10.
+  if (args && args.responsive === true) {
+    try {
+      const innerWidth = g.innerWidth;
+      const scrollWidth = doc.documentElement.scrollWidth;
+      const counts = { overflow: 0, smallText: 0, smallTapTarget: 0 };
+      const overflow: RawResponsiveElement[] = [];
+      const smallText: RawResponsiveElement[] = [];
+      const smallTapTarget: RawResponsiveElement[] = [];
+      const all = doc.querySelectorAll("*");
+
+      function isVisible(el: any, r: any): boolean {
+        if (r.width <= 0 || r.height <= 0) return false;
+        const s = g.getComputedStyle(el);
+        return s.display !== "none" && s.visibility !== "hidden" && s.visibility !== "collapse";
+      }
+
+      function selectorParts(el: any): string[] {
+        const parts: string[] = [];
+        let cur = el;
+        let ancestors = 0;
+        while (cur && cur.nodeType === 1) {
+          const tag = String(cur.tagName || "").toLowerCase();
+          if (cur.id) {
+            parts.push(tag + "#" + String(cur.id));
+            break;
+          }
+          let cls = "";
+          const classes = cur.classList;
+          if (classes) {
+            for (let i = 0; i < classes.length; i++) {
+              const name = String(classes[i]);
+              if (/^[A-Za-z0-9_-]+$/.test(name)) {
+                cls = name;
+                break;
+              }
+            }
+          }
+          parts.push(cls ? tag + "." + cls : tag);
+          if (ancestors >= 4) break;
+          cur = cur.parentElement;
+          ancestors++;
+        }
+        return parts;
+      }
+
+      function snapshot(el: any, detail: string): RawResponsiveElement {
+        const r = el.getBoundingClientRect();
+        return {
+          parts: selectorParts(el),
+          x: Math.round(r.left + g.scrollX),
+          y: Math.round(r.top + g.scrollY),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          detail: detail,
+        };
+      }
+
+      function hasDirectText(el: any): boolean {
+        const nodes = el.childNodes;
+        for (let i = 0; i < nodes.length; i++) {
+          const node = nodes[i];
+          if (node.nodeType === 3 && String(node.textContent || "").trim() !== "") return true;
+        }
+        return false;
+      }
+
+      function insideScroller(el: any): boolean {
+        let cur = el.parentElement;
+        let depth = 0;
+        while (cur && depth < 10) {
+          const s = g.getComputedStyle(cur);
+          if (s.overflowX === "auto" || s.overflowX === "scroll" || s.overflowX === "hidden") {
+            return true;
+          }
+          if (String(s.transform || "none") !== "none") return true;
+          cur = cur.parentElement;
+          depth++;
+        }
+        return false;
+      }
+
+      // Overflow offenders: document right edge past the viewport, not inside
+      // a horizontal scroller or transformed ancestor; keep the widest 10.
+      const overflowCandidates: Array<{ el: any; over: number }> = [];
+      for (let i = 0; i < all.length; i++) {
+        const el = all[i];
+        const r = el.getBoundingClientRect();
+        if (r.width > 0) {
+          const right = r.left + g.scrollX + r.width;
+          if (right > innerWidth + 1 && !insideScroller(el)) {
+            counts.overflow++;
+            overflowCandidates.push({ el: el, over: right - innerWidth });
+          }
+        }
+      }
+      overflowCandidates.sort(function (a, b): number { return b.over - a.over; });
+      for (let i = 0; i < overflowCandidates.length && overflow.length < 10; i++) {
+        const item = overflowCandidates[i];
+        if (item) {
+          overflow.push(snapshot(item.el, "overflows viewport by " + Math.round(item.over) + "px"));
+        }
+      }
+
+      // Small text: a direct non-empty text node below the 12px floor.
+      for (let i = 0; i < all.length; i++) {
+        const el = all[i];
+        if (!hasDirectText(el)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || !isVisible(el, r)) continue;
+        const size = parseFloat(String(g.getComputedStyle(el).fontSize || ""));
+        if (!(size < 12)) continue;
+        counts.smallText++;
+        if (smallText.length < 10) {
+          smallText.push(snapshot(el, "font-size " + Math.round(size * 10) / 10 + "px < 12px"));
+        }
+      }
+
+      // Small tap targets: interactive elements under 24px in either axis.
+      // Inline prose links are excluded — their click box is the text run.
+      const taps = doc.querySelectorAll("a[href], button, input, select, textarea, [role=button]");
+      for (let i = 0; i < taps.length; i++) {
+        const el = taps[i];
+        const r = el.getBoundingClientRect();
+        if (!isVisible(el, r)) continue;
+        const isInlineLink =
+          String(el.tagName || "").toLowerCase() === "a" &&
+          g.getComputedStyle(el).display === "inline";
+        if (isInlineLink) continue;
+        if (r.width >= 24 && r.height >= 24) continue;
+        counts.smallTapTarget++;
+        if (smallTapTarget.length < 10) {
+          smallTapTarget.push(
+            snapshot(el, Math.round(r.width) + "×" + Math.round(r.height) + "px < 24px"),
+          );
+        }
+      }
+
+      out.responsive = {
+        innerWidth: innerWidth,
+        scrollWidth: scrollWidth,
+        counts: counts,
+        overflow: overflow,
+        smallText: smallText,
+        smallTapTarget: smallTapTarget,
+      };
+    } catch {
+      // responsive stays undefined — the band scan is never failed by this
+    }
+  }
   return out;
 };
+
+// PURE: joins raw selector parts (innermost-first) into a readable path.
+// The page snippet collects the parts because page.evaluate cannot import the
+// a11y selectorFor helper; the 160-char cap matches it.
+export function selectorFromParts(parts: string[]): string {
+  return parts.slice().reverse().join(" > ").slice(0, 160);
+}
+
+// PURE: classifies a raw mobile scan into the public report. Per-kind order is
+// overflow → small-text → small-tap-target; each kind is defensively capped at
+// 10 again. counts stay the page's pre-cap totals, and truncated is true when a
+// cap hid anything.
+export function buildResponsiveReport(raw: RawResponsiveScan): ResponsiveReport {
+  const issues: ResponsiveIssue[] = [];
+  function add(kind: ResponsiveIssue["kind"], els: RawResponsiveElement[]): void {
+    for (const el of els.slice(0, 10)) {
+      issues.push({
+        kind,
+        selector: selectorFromParts(el.parts),
+        rect: { x: el.x, y: el.y, w: el.w, h: el.h },
+        detail: el.detail,
+      });
+    }
+  }
+  add("overflow", raw.overflow);
+  add("small-text", raw.smallText);
+  add("small-tap-target", raw.smallTapTarget);
+  return {
+    measuredAt: "mobile",
+    viewport: { width: 390, height: 844, dpr: 3 },
+    pageOverflow: {
+      horizontal: raw.scrollWidth > raw.innerWidth + 1,
+      scrollWidth: raw.scrollWidth,
+      innerWidth: raw.innerWidth,
+    },
+    issues,
+    counts: { ...raw.counts },
+    truncated:
+      raw.counts.overflow > Math.min(raw.overflow.length, 10) ||
+      raw.counts.smallText > Math.min(raw.smallText.length, 10) ||
+      raw.counts.smallTapTarget > Math.min(raw.smallTapTarget.length, 10),
+  };
+}
 
 // PURE: reduces raw candidates to the page's visible horizontal band map.
 // Sweeps y in 8px steps; at each y the effective background is the covering
@@ -333,6 +569,8 @@ export interface WaitOpts {
   waitStrategy?: WaitStrategy;
   /** Page creation profile: "desktop" (default, 1440x900) or "mobile" (390x844 @ DPR 3, touch). */
   viewport?: ViewportName;
+  /** Mobile only: collect overflow, small-text and small-tap-target evidence. */
+  responsive?: boolean;
 }
 
 // tsx (esbuild keepNames) injects __name()/__defProp helpers at module scope;
@@ -395,13 +633,17 @@ export async function analyzePageStructure(
     // settle window; networkidle already means the network went quiet.
     if (waitStrategy === "load") await page.waitForTimeout(3000);
     await preScroll(page);
-    const raw = (await page.evaluate(SCAN_SNIPPET)) as ScanResult;
-    return {
+    const raw = (await page.evaluate(SCAN_SNIPPET, {
+      responsive: opts?.responsive === true,
+    })) as ScanResult;
+    const structure: PageStructure = {
       url,
       title: raw.title,
       totalHeight: raw.totalHeight,
       bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
     };
+    if (raw.responsive) structure.responsive = buildResponsiveReport(raw.responsive);
+    return structure;
   } finally {
     try {
       await browser.close();
