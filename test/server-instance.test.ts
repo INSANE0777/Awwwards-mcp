@@ -8,13 +8,24 @@ const toolNames = (server: unknown): string[] =>
 
 describe("server factory", () => {
   it("returns a distinct server with 37 registrations per call", () => {
-    const handlers = {} as any;
-    const first = createServer({ handlers, version: "0.0.0-test" });
-    const second = createServer({ handlers, version: "0.0.0-test" });
+    const savedProfile = process.env.AWWWARDS_MCP_PROFILE;
+    const savedLegacy = process.env.AWARDS_MCP_PROFILE;
+    delete process.env.AWWWARDS_MCP_PROFILE;
+    delete process.env.AWARDS_MCP_PROFILE;
+    try {
+      const handlers = {} as any;
+      const first = createServer({ handlers, version: "0.0.0-test" });
+      const second = createServer({ handlers, version: "0.0.0-test" });
 
-    expect(second).not.toBe(first);
-    expect(toolNames(first)).toHaveLength(37);
-    expect(toolNames(second)).toHaveLength(37);
-    expect(toolNames(second)).toEqual(toolNames(first));
+      expect(second).not.toBe(first);
+      expect(toolNames(first)).toHaveLength(37);
+      expect(toolNames(second)).toHaveLength(37);
+      expect(toolNames(second)).toEqual(toolNames(first));
+    } finally {
+      if (savedProfile === undefined) delete process.env.AWWWARDS_MCP_PROFILE;
+      else process.env.AWWWARDS_MCP_PROFILE = savedProfile;
+      if (savedLegacy === undefined) delete process.env.AWARDS_MCP_PROFILE;
+      else process.env.AWARDS_MCP_PROFILE = savedLegacy;
+    }
   });
 });

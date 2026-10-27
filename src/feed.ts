@@ -1,4 +1,4 @@
-import { AwwwardsClient, buildFilterUrl, AWARD_FILTERS } from "./awwwards.js";
+import { AwwwardsClient, buildFilterUrl } from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import type { ElementRecord, SiteSummary } from "./types.js";
 import { parseListing, parseElements } from "./parsers.js";

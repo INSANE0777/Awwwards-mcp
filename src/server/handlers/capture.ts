@@ -1,7 +1,6 @@
 import { DEFAULT_MAX_INLINE_BYTES } from "../../capture.js";
 import type { CaptureOpts } from "../../capture.js";
 import { summarizePalette, summarizeTypography } from "../../component.js";
-import type { PoseGrid } from "../../pose3d.js";
 import { diffBands } from "../../structure.js";
 import type { WaitOpts, WaitStrategy } from "../../structure.js";
 import { compactHoverCensus } from "../../verify-build.js";

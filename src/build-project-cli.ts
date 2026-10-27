@@ -4,7 +4,7 @@
 // 3 io (unreadable html, unwritable out, thrown error). The MCP build_project
 // handler calls buildProject() itself — this bin exists for agents on plain
 // CLIs; verify-cli's shape (DI fn, main guard) is mirrored exactly.
-import { parseBuildArgs, buildProject, type BuildProjectArgs, type BuildProjectFn, type BuildProjectResult } from "./build-project.js";
+import { parseBuildArgs, buildProject, type BuildProjectFn } from "./build-project.js";
 
 export type { BuildProjectFn };
 

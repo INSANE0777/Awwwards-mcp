@@ -34,7 +34,7 @@ Make cached searches complete, bound slow Awwwards requests, and expose two usef
 
 1. Update `src/cache.ts` FTS query to apply `LIMIT` only when explicitly requested; add a SQL row-count helper for index health.
 2. Add a deadline wrapper in `src/awwwards.ts` around both fetch and body-read phases; preserve retry and rate-limit behavior.
-3. Extract shared detail loading in `src/server.ts`, implement comparison and index-health handlers, and register them with Zod schemas in `src/cli.ts`.
+3. Extract shared detail loading in `src/server/context.ts`, implement comparison and index-health handlers in `src/server/handlers/awards.ts`, and register them with Zod schemas in `src/tools/awards.ts`.
 4. Correct `src/indexer.ts` checkpoint lifecycle for both completed and interrupted crawls; document the two new tools and behavior in `README.md`.
 5. Add offline regression coverage for >200 FTS hits, deep filtered/paged results, hung fetch/body stages, both tool outputs, parser drift, and refresh/resume cycles.
 6. Review the combined diff for accidental network calls and data-loss paths; run typecheck, offline tests, build, and `git diff --check`. Do not run the live smoke test without an explicit reason.
