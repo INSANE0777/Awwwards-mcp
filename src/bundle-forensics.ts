@@ -696,7 +696,7 @@ export async function captureBundleForensics(
             evidenceCoverage: coverageFrom({
               collected: chunks.length,
               excluded: Math.max(0, targets.length - baseSaved),
-              total: targets.length,
+              total: Math.max(targets.length, chunks.length),
               limitations: captureWarnings,
             }),
           }

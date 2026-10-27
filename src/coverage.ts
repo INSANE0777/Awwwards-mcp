@@ -20,7 +20,7 @@ export function coverageFrom(input: {
   const limitations = [...(input.limitations ?? [])];
   const missedSome = total !== undefined && collected < total;
 
-  const status = error || (total !== undefined && total > 0 && collected === 0)
+  const status = error !== undefined || (total !== undefined && total > 0 && collected === 0)
     ? "unknown"
     : excluded > 0 || limitations.length > 0 || missedSome
       ? "partial"
