@@ -10,7 +10,7 @@ import {
   diffBands,
   SCAN_SNIPPET,
 } from "../src/structure.js";
-import type { PageBand, PageStructure, RawResponsiveScan } from "../src/structure.js";
+import type { PageBand, PageStructure, RawResponsiveElement, RawResponsiveScan } from "../src/structure.js";
 import type { RawBand } from "../src/structure.js";
 
 const FIXTURES = join(__dirname, "fixtures");
@@ -72,6 +72,70 @@ describe("buildResponsiveReport", () => {
     expect(report.issues).toEqual([]);
     expect(report.pageOverflow).toEqual({ horizontal: false, scrollWidth: 390, innerWidth: 390 });
     expect(report.counts).toEqual({ overflow: 0, smallText: 0, smallTapTarget: 0 });
+    expect(report.truncated).toBe(false);
+  });
+
+  const rawElement = (parts: string[], y = 0): RawResponsiveElement => ({
+    parts,
+    x: 400,
+    y,
+    w: 50,
+    h: 10,
+    detail: "evidence",
+  });
+
+  const rawScan = (over: Partial<RawResponsiveScan> = {}): RawResponsiveScan => ({
+    innerWidth: 390,
+    scrollWidth: 390,
+    counts: { overflow: 0, smallText: 0, smallTapTarget: 0 },
+    overflow: [],
+    smallText: [],
+    smallTapTarget: [],
+    ...over,
+  });
+
+  it("defensively caps an over-long raw overflow array at 10", () => {
+    const raw = rawScan({
+      scrollWidth: 421,
+      counts: { overflow: 12, smallText: 0, smallTapTarget: 0 },
+      overflow: Array.from({ length: 12 }, (_, i) => rawElement([`div.o${i}`], i * 10)),
+    });
+    const report = buildResponsiveReport(raw);
+    expect(report.issues).toHaveLength(10);
+    expect(report.counts.overflow).toBe(12);
+    expect(report.truncated).toBe(true);
+  });
+
+  it("caps smallText at 10 while reporting the pre-cap count (11 → truncated)", () => {
+    const raw = rawScan({
+      counts: { overflow: 0, smallText: 11, smallTapTarget: 0 },
+      smallText: Array.from({ length: 11 }, (_, i) => rawElement([`p.t${i}`], i * 10)),
+    });
+    const report = buildResponsiveReport(raw);
+    expect(report.issues.filter((i) => i.kind === "small-text")).toHaveLength(10);
+    expect(report.counts.smallText).toBe(11);
+    expect(report.truncated).toBe(true);
+  });
+
+  it("caps smallTapTarget at 10 while reporting the pre-cap count (11 → truncated)", () => {
+    const raw = rawScan({
+      counts: { overflow: 0, smallText: 0, smallTapTarget: 11 },
+      smallTapTarget: Array.from({ length: 11 }, (_, i) => rawElement([`button.b${i}`], i * 10)),
+    });
+    const report = buildResponsiveReport(raw);
+    expect(report.issues.filter((i) => i.kind === "small-tap-target")).toHaveLength(10);
+    expect(report.counts.smallTapTarget).toBe(11);
+    expect(report.truncated).toBe(true);
+  });
+
+  it("keeps 10 of each kind without truncation when the caps are not hit", () => {
+    const raw = rawScan({
+      counts: { overflow: 0, smallText: 10, smallTapTarget: 10 },
+      smallText: Array.from({ length: 10 }, (_, i) => rawElement([`p.t${i}`], i * 10)),
+      smallTapTarget: Array.from({ length: 10 }, (_, i) => rawElement([`button.b${i}`], i * 10)),
+    });
+    const report = buildResponsiveReport(raw);
+    expect(report.issues).toHaveLength(20);
     expect(report.truncated).toBe(false);
   });
 });
@@ -307,6 +371,62 @@ it("SCAN_SNIPPET collects section/article/[role=main] landmark tops, bounded at 
   expect(src).toContain("querySelectorAll"); // runs inside the landmark try-block
 });
 
+// Review pins: the responsive predicates have no DOM executor offline, so each
+// exclusion/guard is source-locked — deleting one fails a named assertion.
+describe("SCAN_SNIPPET responsive predicates (source-lock)", () => {
+  const src = String(SCAN_SNIPPET);
+
+  it("measures overflow against documentElement.clientWidth, not window.innerWidth", () => {
+    expect(src).toContain("doc.documentElement.clientWidth || g.innerWidth");
+    expect(src).toContain("right > viewportWidth + 1");
+    expect(src).toContain("innerWidth: viewportWidth");
+  });
+
+  it("§7: an inline prose link is not a tap target", () => {
+    expect(src).toContain('g.getComputedStyle(el).display === "inline"');
+    expect(src).toContain('String(el.tagName || "").toLowerCase() === "a"');
+    expect(src).toContain('doc.querySelectorAll("a[href], button, input, select, textarea, [role=button]")');
+  });
+
+  it("§7: a marquee inside an overflow-x scroller is excluded from offences", () => {
+    expect(src).toContain('s.overflowX === "auto" || s.overflowX === "scroll" || s.overflowX === "hidden"');
+    expect(src).toContain("!insideScroller(el)");
+    expect(src).toContain('String(s.transform || "none") !== "none"');
+    expect(src).toContain("depth < 100");
+  });
+
+  it("counts small text only when the element owns a direct text node below 12px", () => {
+    expect(src).toContain("if (!hasDirectText(el)) continue;");
+    expect(src).toContain("if (!(size < 12)) continue;");
+  });
+
+  it("keeps the 24px tap floor and a per-kind cap of 10", () => {
+    expect(src).toContain("if (r.width >= 24 && r.height >= 24) continue;");
+    expect(src).toContain("overflow.length < 10");
+    expect(src).toContain("smallText.length < 10");
+    expect(src).toContain("smallTapTarget.length < 10");
+  });
+
+  it("guards the scan on args.responsive === true and uses document scroll offsets", () => {
+    expect(src).toContain("args.responsive === true");
+    expect(src).toContain("r.left + g.scrollX");
+    expect(src).toContain("r.top + g.scrollY");
+  });
+
+  it("rejects opacity:0 and clipped sr-only boxes as invisible", () => {
+    expect(src).toContain('parseFloat(String(s.opacity || "1")) === 0');
+    expect(src).toContain('clip === "rect(0px, 0px, 0px, 0px)"');
+    expect(src).toContain('clipPath === "inset(50%)"');
+  });
+
+  it("mirrors a11y.ts selector parts: classList[0] only, 4 parts, id stops", () => {
+    expect(src).toContain("while (cur && cur.nodeType === 1 && depth < 4)");
+    expect(src).toContain("String(cur.classList[0])");
+    expect(src).toContain('parts.push(tag + "#" + String(cur.id))');
+    expect(src).not.toContain("classes[i]"); // no fallback to later classes
+  });
+});
+
 describe("analyzePageStructure", () => {
   it("builds the structure from the loader's evaluate result", async () => {
     const fake = {
@@ -444,6 +564,38 @@ describe("analyzePageStructure", () => {
       async () => ({ chromium: fake }),
       40,
       { responsive: false },
+    );
+    expect("error" in res).toBe(false);
+    expect(argsSeen[1]).toEqual({ responsive: false });
+    if (!("error" in res)) expect("responsive" in res).toBe(false);
+  });
+
+  it("viewport mobile without compare does not scan and returns no responsive key", async () => {
+    const argsSeen: any[] = [];
+    const fake = {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async () => {},
+          waitForTimeout: async () => {},
+          evaluate: async (_fn: unknown, arg?: unknown) => {
+            argsSeen.push(arg);
+            return {
+              title: "Mobile Page",
+              totalHeight: 800,
+              candidates: [
+                band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 800 }),
+              ],
+            };
+          },
+        }),
+        close: async () => {},
+      }),
+    };
+    const res = await analyzePageStructure(
+      "https://example.com",
+      async () => ({ chromium: fake }),
+      40,
+      { viewport: "mobile" },
     );
     expect("error" in res).toBe(false);
     expect(argsSeen[1]).toEqual({ responsive: false });

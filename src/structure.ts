@@ -201,7 +201,9 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   // it. Counts are pre-cap totals; arrays keep at most 10.
   if (args && args.responsive === true) {
     try {
-      const innerWidth = g.innerWidth;
+      // Emulated mobile widens window.innerWidth to the content width, so
+      // overflow is measured against the layout client width instead.
+      const viewportWidth = doc.documentElement.clientWidth || g.innerWidth;
       const scrollWidth = doc.documentElement.scrollWidth;
       const counts = { overflow: 0, smallText: 0, smallTapTarget: 0 };
       const overflow: RawResponsiveElement[] = [];
@@ -212,34 +214,36 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
       function isVisible(el: any, r: any): boolean {
         if (r.width <= 0 || r.height <= 0) return false;
         const s = g.getComputedStyle(el);
-        return s.display !== "none" && s.visibility !== "hidden" && s.visibility !== "collapse";
+        if (s.display === "none" || s.visibility === "hidden" || s.visibility === "collapse") {
+          return false;
+        }
+        if (parseFloat(String(s.opacity || "1")) === 0) return false;
+        // sr-only boxes (1x1 + clip / clip-path: inset(50%)) have a rect but
+        // are not visible; clip without percentages normalizes to this form.
+        const clip = String(s.clip || "");
+        const clipPath = String(s.clipPath || "");
+        if (clip === "rect(0px, 0px, 0px, 0px)" || clipPath === "inset(50%)") return false;
+        return true;
       }
 
+      // Same rule as a11y.ts selectorFor: id stops the walk, classList[0]
+      // only, at most 4 parts (self + 3 ancestors).
       function selectorParts(el: any): string[] {
         const parts: string[] = [];
         let cur = el;
-        let ancestors = 0;
-        while (cur && cur.nodeType === 1) {
+        let depth = 0;
+        while (cur && cur.nodeType === 1 && depth < 4) {
           const tag = String(cur.tagName || "").toLowerCase();
           if (cur.id) {
             parts.push(tag + "#" + String(cur.id));
             break;
           }
-          let cls = "";
-          const classes = cur.classList;
-          if (classes) {
-            for (let i = 0; i < classes.length; i++) {
-              const name = String(classes[i]);
-              if (/^[A-Za-z0-9_-]+$/.test(name)) {
-                cls = name;
-                break;
-              }
-            }
-          }
-          parts.push(cls ? tag + "." + cls : tag);
-          if (ancestors >= 4) break;
+          let part = tag;
+          const cls = cur.classList && cur.classList.length ? String(cur.classList[0]) : "";
+          if (cls && /^[A-Za-z0-9_-]+$/.test(cls)) part += "." + cls;
+          parts.push(part);
           cur = cur.parentElement;
-          ancestors++;
+          depth++;
         }
         return parts;
       }
@@ -268,7 +272,8 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
       function insideScroller(el: any): boolean {
         let cur = el.parentElement;
         let depth = 0;
-        while (cur && depth < 10) {
+        // Walk to the document root; 100 is only a hostile-DOM safety bound.
+        while (cur && cur.nodeType === 1 && depth < 100) {
           const s = g.getComputedStyle(cur);
           if (s.overflowX === "auto" || s.overflowX === "scroll" || s.overflowX === "hidden") {
             return true;
@@ -288,9 +293,9 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
         const r = el.getBoundingClientRect();
         if (r.width > 0) {
           const right = r.left + g.scrollX + r.width;
-          if (right > innerWidth + 1 && !insideScroller(el)) {
+          if (right > viewportWidth + 1 && !insideScroller(el)) {
             counts.overflow++;
-            overflowCandidates.push({ el: el, over: right - innerWidth });
+            overflowCandidates.push({ el: el, over: right - viewportWidth });
           }
         }
       }
@@ -337,7 +342,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
       }
 
       out.responsive = {
-        innerWidth: innerWidth,
+        innerWidth: viewportWidth,
         scrollWidth: scrollWidth,
         counts: counts,
         overflow: overflow,

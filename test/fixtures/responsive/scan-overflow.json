@@ -12,9 +12,7 @@
     { "parts": ["li.tile", "ul.tiles"], "x": 378, "y": 620, "w": 50, "h": 50, "detail": "overflows viewport by 38px" },
     { "parts": ["div.badge"], "x": 380, "y": 700, "w": 40, "h": 20, "detail": "overflows viewport by 30px" },
     { "parts": ["a.cta", "div.banner"], "x": 382, "y": 760, "w": 30, "h": 20, "detail": "overflows viewport by 22px" },
-    { "parts": ["div.footer-note", "footer"], "x": 385, "y": 820, "w": 20, "h": 16, "detail": "overflows viewport by 15px" },
-    { "parts": ["span.meta", "div.byline"], "x": 388, "y": 880, "w": 10, "h": 10, "detail": "overflows viewport by 8px" },
-    { "parts": ["i.icon", "span.meta"], "x": 390, "y": 900, "w": 5, "h": 5, "detail": "overflows viewport by 5px" }
+    { "parts": ["div.footer-note", "footer"], "x": 385, "y": 820, "w": 20, "h": 16, "detail": "overflows viewport by 15px" }
   ],
   "smallText": [
     { "parts": ["p.lede", "main"], "x": 16, "y": 240, "w": 320, "h": 14, "detail": "font-size 10px < 12px" }
