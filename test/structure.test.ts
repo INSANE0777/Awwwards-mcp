@@ -12,6 +12,7 @@ import {
 } from "../src/structure.js";
 import type { PageBand, PageStructure, RawResponsiveElement, RawResponsiveScan } from "../src/structure.js";
 import type { RawBand } from "../src/structure.js";
+import { VIEWPORT_PROFILES } from "../src/viewport.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 
@@ -137,6 +138,23 @@ describe("buildResponsiveReport", () => {
     const report = buildResponsiveReport(raw);
     expect(report.issues).toHaveLength(20);
     expect(report.truncated).toBe(false);
+  });
+
+  it("derives viewport from the profile used (default is the mobile profile)", () => {
+    const raw = rawScan();
+    const fallback = buildResponsiveReport(raw);
+    expect(fallback.viewport).toEqual({
+      width: VIEWPORT_PROFILES.mobile.width,
+      height: VIEWPORT_PROFILES.mobile.height,
+      dpr: VIEWPORT_PROFILES.mobile.deviceScaleFactor,
+    });
+    const custom = buildResponsiveReport(raw, {
+      width: 412,
+      height: 915,
+      deviceScaleFactor: 2.625,
+      isMobile: true,
+    });
+    expect(custom.viewport).toEqual({ width: 412, height: 915, dpr: 2.625 });
   });
 });
 
@@ -412,6 +430,11 @@ describe("SCAN_SNIPPET responsive predicates (source-lock)", () => {
     expect(src).toContain("if (!(size < 12)) continue;");
   });
 
+  it("only measures widths > 0 and keeps the widest overflow offenders first", () => {
+    expect(src).toContain("if (r.width > 0) {");
+    expect(src).toContain("return b.over - a.over;");
+  });
+
   it("keeps the 24px tap floor and a per-kind cap of 10", () => {
     expect(src).toContain("if (r.width >= 24 && r.height >= 24) continue;");
     expect(src).toContain("overflow.length < 10");
@@ -436,6 +459,109 @@ describe("SCAN_SNIPPET responsive predicates (source-lock)", () => {
     expect(src).toContain("String(cur.classList[0])");
     expect(src).toContain('parts.push(tag + "#" + String(cur.id))');
     expect(src).not.toContain("classes[i]"); // no fallback to later classes
+  });
+
+  // §7 acceptance: run the in-page snippet against a minimal DOM. The inline
+  // prose link must be excluded at scan time, leaving exactly 3 issues.
+  it("§7 acceptance: one overflow, one 10px text, one 16px button and an inline link report 3 issues", () => {
+    type FakeEl = {
+      tagName: string;
+      id: string;
+      classList: string[];
+      children: FakeEl[];
+      childNodes: Array<{ nodeType: number; textContent: string }>;
+      parentElement: FakeEl | null;
+      nodeType: number;
+      textContent: string;
+      rect: { left: number; top: number; width: number; height: number };
+      style: Record<string, string>;
+      getBoundingClientRect: () => { left: number; top: number; width: number; height: number };
+    };
+    const el = (
+      tagName: string,
+      rect: FakeEl["rect"],
+      style: Record<string, string> = {},
+      text = "",
+      className = "",
+    ): FakeEl => {
+      const node: FakeEl = {
+        tagName,
+        id: "",
+        classList: className ? [className] : [],
+        children: [],
+        childNodes: text ? [{ nodeType: 3, textContent: text }] : [],
+        parentElement: null,
+        nodeType: 1,
+        textContent: text,
+        rect,
+        style,
+        getBoundingClientRect: () => node.rect,
+      };
+      return node;
+    };
+    const html = el("html", { left: 0, top: 0, width: 390, height: 800 });
+    const body = el("body", { left: 0, top: 0, width: 390, height: 800 }, {}, "", "page");
+    const overflow = el("div", { left: 320, top: 10, width: 300, height: 100 }, {}, "wide", "overflow");
+    const smallText = el("p", { left: 16, top: 240, width: 320, height: 14 }, { fontSize: "10px" }, "small text", "lede");
+    const button = el("button", { left: 16, top: 360, width: 16, height: 16 }, {}, "Go", "cta");
+    const inlineLink = el("a", { left: 40, top: 400, width: 80, height: 16 }, { display: "inline" }, "prose link", "link");
+    html.children = [body];
+    body.children = [overflow, smallText, button, inlineLink];
+    for (const child of body.children) child.parentElement = body;
+    body.parentElement = html;
+    const documentElement = Object.assign(html, { scrollHeight: 800, clientWidth: 390, scrollWidth: 421 });
+    const fakeDoc = {
+      title: "Acceptance",
+      documentElement,
+      body,
+      querySelectorAll: (selector: string): FakeEl[] => {
+        if (selector === "*") return [html, body, overflow, smallText, button, inlineLink];
+        if (selector.includes("a[href]")) return [button, inlineLink];
+        return [];
+      },
+    };
+    const g = globalThis as any;
+    const saved = {
+      document: g.document,
+      getComputedStyle: g.getComputedStyle,
+      scrollX: g.scrollX,
+      scrollY: g.scrollY,
+    };
+    g.document = fakeDoc;
+    g.scrollX = 0;
+    g.scrollY = 0;
+    g.getComputedStyle = (node: FakeEl) => ({
+      display: node.style.display ?? "block",
+      visibility: "visible",
+      opacity: "1",
+      clip: "",
+      clipPath: "",
+      overflowX: "visible",
+      transform: "none",
+      fontSize: node.style.fontSize ?? "16px",
+      backgroundColor: "rgb(255, 255, 255)",
+    });
+    try {
+      const raw = SCAN_SNIPPET({ responsive: true }).responsive!;
+      expect(raw.counts).toEqual({ overflow: 1, smallText: 1, smallTapTarget: 1 });
+      expect(raw.overflow).toHaveLength(1);
+      expect(raw.smallText[0]!.detail).toContain("10px");
+      expect(raw.smallTapTarget).toHaveLength(1);
+      expect(raw.smallTapTarget[0]!.parts[0]).toBe("button.cta");
+      const report = buildResponsiveReport(raw);
+      expect(report.issues.map((i) => i.kind)).toEqual([
+        "overflow",
+        "small-text",
+        "small-tap-target",
+      ]);
+      expect(report.issues).toHaveLength(3);
+      expect(report.truncated).toBe(false);
+    } finally {
+      g.document = saved.document;
+      g.getComputedStyle = saved.getComputedStyle;
+      g.scrollX = saved.scrollX;
+      g.scrollY = saved.scrollY;
+    }
   });
 });
 

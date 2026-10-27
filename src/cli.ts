@@ -67,7 +67,7 @@ const server = new McpServer({ name: "awwwards-mcp", version: pkgJson.version })
 
 server.tool(
   "search_sites",
-  "Search award-winning websites on Awwwards. Returns site cards with inline screenshots, live URLs, awards and tags.",
+  "Search award-winning websites on Awwwards — the site index with filters. Returns site cards with inline screenshots, live URLs, awards and tags.",
   {
     query: z.string().describe("Free text matched against site titles and tags").optional(),
     color: z
@@ -105,7 +105,7 @@ server.registerTool(
   "get_site_details",
   {
     description:
-      "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot. compact=true returns a token-diet summary. Batch: pass slugs (1–10, no images) for ordered compact details per slug with cached/fetched/error status; provide exactly one of slug or slugs.",
+      "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot. compact=true returns a token-diet summary. Batch: pass slugs (1–10, no images) for ordered compact details per slug with cached/fetched/error status; compact is ignored in batch mode (batch output is always compact). Provide exactly one of slug or slugs.",
     inputSchema: detailArgsSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
@@ -222,7 +222,7 @@ server.tool(
 
 server.tool(
   "get_annual_categories",
-  "List the official Awwwards Annual Awards categories (Site of the Year, Agency of the Year, …) with nominee counts. Annual data comes from Awwwards' official public read-only API for personal, non-commercial inspiration use; nominee details are hydrated on request. Media URLs are reference-only — nothing is downloaded.",
+  "List the official Awwwards Annual Awards categories (Site of the Year, Agency of the Year, …) with nominee counts. Annual Awards only: this is not the daily site index. Annual data comes from Awwwards' official public read-only API for personal, non-commercial inspiration use; nominee details are hydrated on request. Media URLs are reference-only — nothing is downloaded.",
   {},
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   () => asMcpResult(handlers.get_annual_categories()),
@@ -230,7 +230,7 @@ server.tool(
 
 server.tool(
   "get_annual_nominees",
-  "List nominees in one official Awwwards Annual Awards category, hydrated on demand at 1 request/second (default 10, max 20 per call). Site summaries carry siteSlug and inLocalIndex, so an agent can jump to get_site_details when the daily index has the site. Personal, non-commercial inspiration use only; media URLs are reference-only and are never downloaded.",
+  "Annual Awards only: list nominees in one official Awwwards Annual Awards category, hydrated on demand at 1 request/second (default 10, max 20 per call). Site summaries carry siteSlug and inLocalIndex, so an agent can jump to get_site_details when the daily index has the site. Personal, non-commercial inspiration use only; media URLs are reference-only and are never downloaded.",
   {
     category: z
       .string()
@@ -249,7 +249,7 @@ server.tool(
 
 server.tool(
   "get_annual_nominee",
-  "Get one official Awwwards Annual Awards nominee in full: site entries carry date, description, designBy, country, image/video URLs; agency entries carry location, avatar, award tag counts and featured projects. Pass id (a UUID or full /api/annual/nominees/... path) or category+slug; category+slug may hydrate up to 20 uncached nominees at 1 request/second (~20s worst case), so prefer id when known. Personal, non-commercial inspiration use only; media URLs are reference-only and nothing is downloaded.",
+  "Annual Awards only: get one official Awwwards Annual Awards nominee in full: site entries carry date, description, designBy, country, image/video URLs; agency entries carry location, avatar, award tag counts and featured projects. Pass id (a UUID or full /api/annual/nominees/... path) or category+slug; category+slug may hydrate up to 20 uncached nominees at 1 request/second (~20s worst case), so prefer id when known. Personal, non-commercial inspiration use only; media URLs are reference-only and nothing is downloaded.",
   {
     id: z
       .string()
@@ -265,7 +265,7 @@ server.tool(
 
 server.tool(
   "get_collections",
-  "Browse Awwwards' curated and member collections. Without a slug, lists collections (paginated); with a slug, returns that collection's first page of site cards. Curated slugs look like 'brutalism'; member collections need 'owner/slug'. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
+  "Browse Awwwards' curated thematic moodboards, not a search index. Without a slug, lists collections (paginated); with a slug, returns that collection's first page of site cards. Curated slugs look like 'brutalism'; member collections need 'owner/slug'. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
   {
     slug: z
       .string()
@@ -289,7 +289,7 @@ server.tool(
 
 server.tool(
   "search_directory",
-  "Search the Awwwards directory of agencies, studios and freelancers. Filters are path-based, so one of country/category/budget applies per request; query is matched client-side over the fetched page. Returns public profile cards (name, slug, location, website, award counts) — contact details are stripped. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
+  "Search the Awwwards directory of agencies/studios, not sites. Filters are path-based, so one of country/category/budget applies per request; query is matched client-side over the fetched page. Returns public profile cards (name, slug, location, website, award counts) — contact details are stripped. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
   {
     query: z
       .string()
@@ -344,7 +344,7 @@ server.tool(
 
 server.tool(
   "analyze_accessibility",
-  "Collect accessibility EVIDENCE from a live page - not a WCAG pass/fail grade. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background composited bottom-up from the ancestor stack (colour alpha layers), then the contrast ratio (worst pairs with selector paths). Samples under any ancestor opacity group (<1) are excluded from ratios and counted in coverage.skippedOpacityGroups, never approximated; background images, gradients and pseudo-elements are not composited either, so contrast stays heuristic there. Also: image alt coverage; heading ladder (skipped levels, multiple h1); focusable/positive-tabindex counts plus outline:none stylesheet rules; unlabeled form controls; document lang/title. Result carries coverage and heuristic:true. http(s) URLs only; requires the optional playwright dependency and degrades to {error}. Personal, non-commercial use.",
+  "Collect accessibility EVIDENCE from a live page — an evidence census, not a compliance audit. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background composited bottom-up from the ancestor stack (colour alpha layers), then the contrast ratio (worst pairs with selector paths). Samples under any ancestor opacity group (<1) are excluded from ratios and counted in coverage.skippedOpacityGroups, never approximated; background images, gradients and pseudo-elements are not composited either, so contrast stays heuristic there. Also: image alt coverage; heading ladder (skipped levels, multiple h1); focusable/positive-tabindex counts plus outline:none stylesheet rules; unlabeled form controls; document lang/title. Result carries coverage and heuristic:true. http(s) URLs only; requires the optional playwright dependency and degrades to {error}. Personal, non-commercial use.",
   {
     url: z.string().url().describe("Absolute http(s) URL of the page to inspect"),
     viewport: viewportSchema,

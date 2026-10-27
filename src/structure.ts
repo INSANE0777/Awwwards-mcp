@@ -1,5 +1,5 @@
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
-import { resolveViewport, type ViewportName } from "./viewport.js";
+import { resolveViewport, type ViewportName, type ViewportProfile } from "./viewport.js";
 
 export interface RawBand {
   tag: string;
@@ -58,7 +58,7 @@ export interface ResponsiveIssue {
 
 export interface ResponsiveReport {
   measuredAt: "mobile";
-  viewport: { width: 390; height: 844; dpr: 3 };
+  viewport: { width: number; height: number; dpr: number };
   pageOverflow: { horizontal: boolean; scrollWidth: number; innerWidth: number };
   issues: ResponsiveIssue[];
   counts: { overflow: number; smallText: number; smallTapTarget: number };
@@ -369,7 +369,10 @@ export function selectorFromParts(parts: string[]): string {
 // overflow → small-text → small-tap-target; each kind is defensively capped at
 // 10 again. counts stay the page's pre-cap totals, and truncated is true when a
 // cap hid anything.
-export function buildResponsiveReport(raw: RawResponsiveScan): ResponsiveReport {
+export function buildResponsiveReport(
+  raw: RawResponsiveScan,
+  viewport: ViewportProfile = resolveViewport("mobile"),
+): ResponsiveReport {
   const issues: ResponsiveIssue[] = [];
   function add(kind: ResponsiveIssue["kind"], els: RawResponsiveElement[]): void {
     for (const el of els.slice(0, 10)) {
@@ -386,7 +389,13 @@ export function buildResponsiveReport(raw: RawResponsiveScan): ResponsiveReport 
   add("small-tap-target", raw.smallTapTarget);
   return {
     measuredAt: "mobile",
-    viewport: { width: 390, height: 844, dpr: 3 },
+    // The capture profile, not a literal: a different phone profile (or a
+    // desktop capture that requested evidence) must report what it measured.
+    viewport: {
+      width: viewport.width,
+      height: viewport.height,
+      dpr: viewport.deviceScaleFactor ?? 1,
+    },
     pageOverflow: {
       horizontal: raw.scrollWidth > raw.innerWidth + 1,
       scrollWidth: raw.scrollWidth,
@@ -632,7 +641,8 @@ export async function analyzePageStructure(
     // the mobile-profile flags (deviceScaleFactor/isMobile/hasTouch) are
     // sibling context options. The desktop profile resolves to no extra
     // fields, so the default call shape is unchanged.
-    const { width, height, ...contextOpts } = resolveViewport(opts?.viewport);
+    const profile = resolveViewport(opts?.viewport);
+    const { width, height, ...contextOpts } = profile;
     const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
     await installSnippetShims(page);
     await page.goto(url, { waitUntil: waitStrategy, timeout: 45_000 });
@@ -649,7 +659,7 @@ export async function analyzePageStructure(
       totalHeight: raw.totalHeight,
       bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
     };
-    if (raw.responsive) structure.responsive = buildResponsiveReport(raw.responsive);
+    if (raw.responsive) structure.responsive = buildResponsiveReport(raw.responsive, profile);
     return structure;
   } finally {
     try {

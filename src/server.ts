@@ -913,16 +913,13 @@ export function createHandlers(deps: {
     return { detail: await loadDetail(slug), source: "fetched" };
   }
 
-  // Ordered batch outcomes. tolerant=false rethrows the first non-block
-  // failure; stopOnBlocked=false keeps requesting after a block.
-  async function loadDetails(
-    slugs: string[],
-    opts: { tolerant: boolean; stopOnBlocked: boolean } = { tolerant: true, stopOnBlocked: true },
-  ): Promise<BatchDetailEntry[]> {
+  // Ordered batch outcomes: per-slug failures are tolerant, and the first
+  // block skips every remaining slug (no further requests).
+  async function loadDetails(slugs: string[]): Promise<BatchDetailEntry[]> {
     const results: BatchDetailEntry[] = [];
     let blocked = false;
     for (const slug of slugs) {
-      if (blocked && opts.stopOnBlocked) {
+      if (blocked) {
         results.push({ slug, status: "skipped", error: "blocked-before-request", blocked: true });
         continue;
       }
@@ -934,7 +931,6 @@ export function createHandlers(deps: {
       } catch (err) {
         const isBlocked = err instanceof BlockedError;
         if (isBlocked) blocked = true;
-        if (!isBlocked && !opts.tolerant) throw err;
         results.push({
           slug,
           status: "error",

@@ -87,9 +87,10 @@ queries keep AND semantics: every token must hit the same site.
 `verify_build`, `analyze_scroll_map`, `analyze_hover_census` and
 `capture_component` return a summary payload with less detail, and each shape
 differs: the scroll/hover censuses reduce to counts, `capture_component` drops
-the typography/palette summaries, `audit_url` reduces the perf keys and
-`verify_build` collapses band names to counts. Only `verify_build` keeps its
-top-level keys (`verdict`, `overall`, `bands`, `motion`).
+the typography/palette summaries, and `verify_build` keeps `verdict`,
+`overall`, `bands` and `motion` top-level while dropping `buildUrl`,
+`referenceUrl` and `evidence` (`bands` holds counts). `audit_url` keeps its
+top-level keys but reduces `perf` and `antiPatterns`.
 Batch detail is `get_site_details { slugs }`, capped at 10: results stay in
 input order, carry compact details only (no images), and report per-slug
 `cached`/`fetched`/`error`/`skipped` status. `analyze_page_structure` with

@@ -2625,6 +2625,25 @@ describe("audit_url and verify_build compact payloads", () => {
     expect(parsed.coverage).toEqual({ assetsScanned: 2, failed: 1 });
   });
 
+  it("audit_url compact passes perf and antiPatterns errors through unchanged", async () => {
+    const degraded = {
+      ...auditReport(),
+      antiPatterns: {
+        ...auditReport().antiPatterns,
+        error: "Page HTML could not be fetched (HTTP error, timeout, or over 2MB).",
+      },
+    };
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache, auditUrlFn: async () => degraded });
+    const res = await h.audit_url({ url: "https://example.com/", compact: true });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    // Degraded halves are reported, not hidden or replaced by zeros.
+    expect(parsed.perf).toEqual({ error: "No Chrome or Edge found." });
+    expect(parsed.antiPatterns.error).toBe(degraded.antiPatterns.error);
+    expect(parsed.antiPatterns.count).toBe(4);
+  });
+
   it("audit_url full payload keeps findings and gains nextActions", async () => {
     const res = await auditHandler().audit_url({ url: "https://example.com/" });
     const parsed = JSON.parse((res.content[0] as any).text);
