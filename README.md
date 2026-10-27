@@ -34,7 +34,7 @@ queries keep AND semantics: every token must hit the same site.
 | Tool | What it does |
 |------|--------------|
 | `search_sites` | Search by color, tags, technology, award type or free-text query; e.g. `award: "soty"`, `award: "nominees"`, `award: "ecommerce"` (winners), or a technology alias like `technology: "nextjs"` which canonicalizes to the live slug. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Default full results include each site's screenshot; use `responseMode: "compact"` for concise cards and inline previews of only the first two results on the requested page. |
-| `get_site_details` | Full design DNA for one site: palette, technologies, elements, awards, description. |
+| `get_site_details` | Design DNA for one site: palette, technologies, elements, awards, description. Batch (`slugs`, up to 10) is compact enrichment for a shortlist — `compactSiteDetails` per slug (lists as counts, ≤500-char description, awards), cached/fetched/error status, no inline images. |
 | `compare_sites` | Compare 2–3 sites' design DNA and jury scores as text-only JSON. Uses cached details or fetches missing detail pages. |
 | `create_design_brief` | Turn 2–5 selected site slugs plus a required project goal into a deterministic, cited build brief. Uses cached detail/element evidence and cached Motion DNA first, fetches only missing details, returns Markdown plus versioned JSON, and runs browser band analysis only with `includeStructure: true`. |
 | `get_index_status` | Read local index count, crawl progress, last success/error, lock state and freshness without network requests. |
@@ -77,7 +77,7 @@ queries keep AND semantics: every token must hit the same site.
 | Curated inspiration boards | `get_collections` — curated moodboards, not a search index. |
 | Agencies, studios or freelancers | `search_directory` — agencies/studios, not sites. |
 | Annual Awards categories, nominees or one nominee | `get_annual_*` — Annual Awards only. |
-| Full design DNA for one site or a shortlist | `get_site_details` — one `slug`, or a bounded batch of `slugs`. |
+| Design DNA for one site, or compact enrichment for a shortlist | `get_site_details` — one `slug`, or a bounded batch of `slugs`. |
 | Performance evidence for one URL | `audit_url` — one URL, no reference. |
 | A scored build-vs-reference comparison | `verify_build` — two URLs, scored comparison. |
 | Accessibility evidence for a live page | `analyze_accessibility` — evidence census, not compliance. |
@@ -85,7 +85,11 @@ queries keep AND semantics: every token must hit the same site.
 
 `compact:true` is the summary mode for heavy tools — `audit_url`,
 `verify_build`, `analyze_scroll_map`, `analyze_hover_census` and
-`capture_component` return the full payload's field names with less detail.
+`capture_component` return a summary payload with less detail, and each shape
+differs: the scroll/hover censuses reduce to counts, `capture_component` drops
+the typography/palette summaries, `audit_url` reduces the perf keys and
+`verify_build` collapses band names to counts. Only `verify_build` keeps its
+top-level keys (`verdict`, `overall`, `bands`, `motion`).
 Batch detail is `get_site_details { slugs }`, capped at 10: results stay in
 input order, carry compact details only (no images), and report per-slug
 `cached`/`fetched`/`error`/`skipped` status. `analyze_page_structure` with
