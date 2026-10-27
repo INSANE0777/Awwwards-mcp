@@ -8,7 +8,7 @@ import type { HoverCensus } from "../src/hover-census.js";
 import type { UnifiedMotionDna } from "../src/motion-dna.js";
 import type { ComponentPack } from "../src/component.js";
 import { utcDayStart } from "../src/feed.js";
-import { AwwwardsClient, RateLimiter } from "../src/awwwards.js";
+import { AwwwardsClient, BlockedError, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
 import type { ElementRecord, SiteDetails, SiteSummary } from "../src/types.js";
@@ -424,6 +424,101 @@ describe("get_site_details", () => {
     const res = await h.get_site_details({ slug: "l-i-s-a" });
     // the l-i-s-a fixture (detail.html) has a c-heading-score block
     expect((res.content[0] as any).text).toMatch(/Jury score: \d\.\d{1,2}\/10/);
+  });
+});
+
+describe("get_site_details batch", () => {
+  // Minimal awarded-page shape: parseDetail needs a non-empty palette,
+  // technologies or description to treat the parse as real content.
+  function detailPage(slug: string): string {
+    return [
+      `<meta property="og:title" content="Site ${slug}">`,
+      `<meta property="og:description" content="About ${slug}">`,
+      `<meta property="og:image" content="https://cdn.test/${slug}.jpg">`,
+      "<strong>HEX</strong> #AABBCC",
+      '<h2>Technologies & Tools</h2><a class="button button--tag">WebGL</a>',
+    ].join("\n");
+  }
+
+  it("returns one ordered entry per slug and reports cache hits", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    const getHtml = vi.spyOn(client, "getHtml").mockImplementation(async (path: string) =>
+      detailPage(path.split("/sites/")[1] ?? ""));
+    const h = createHandlers({ client, cache });
+
+    const first = await h.get_site_details({ slugs: ["a", "b", "c"] });
+    expect(first.isError).toBeUndefined();
+    expect(first.content).toHaveLength(1);
+    expect(first.content.filter((block) => block.type === "image")).toHaveLength(0);
+    const parsed = JSON.parse((first.content[0] as any).text);
+    expect(parsed.results.map((r: any) => r.slug)).toEqual(["a", "b", "c"]);
+    expect(parsed.results.every((r: any) => r.status === "fetched")).toBe(true);
+    expect(parsed.summary).toEqual({ requested: 3, fetched: 3, cached: 0, failed: 0, skipped: 0 });
+    expect(parsed.blocked).toBeUndefined();
+    expect(getHtml).toHaveBeenCalledTimes(3);
+
+    const again = await h.get_site_details({ slugs: ["a", "b", "c"] });
+    const cached = JSON.parse((again.content[0] as any).text);
+    expect(cached.results.every((r: any) => r.status === "cached")).toBe(true);
+    expect(cached.summary).toEqual({ requested: 3, fetched: 0, cached: 3, failed: 0, skipped: 0 });
+    expect(getHtml).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(cached)).not.toContain("base64");
+  });
+
+  it("rejects both slug and slugs, neither, duplicates and more than 10", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    const getHtml = vi.spyOn(client, "getHtml");
+    const h = createHandlers({ client, cache });
+    const invalid = [
+      { slug: "a", slugs: ["b"] },
+      {},
+      { slugs: ["a", "A"] },
+      { slugs: Array.from({ length: 11 }, (_, i) => `s${i}`) },
+      { slugs: ["../bad"] },
+    ];
+    for (const args of invalid) {
+      const res = await h.get_site_details(args as any);
+      expect(res.isError).toBe(true);
+    }
+    expect(getHtml).not.toHaveBeenCalled();
+  });
+
+  it("stops on block and marks the rest skipped", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    const getHtml = vi.spyOn(client, "getHtml").mockImplementation(async (path: string) => {
+      if (path.includes("/sites/b")) {
+        throw new BlockedError("https://www.awwwards.com/sites/b", 429);
+      }
+      return detailPage("a");
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_details({ slugs: ["a", "b", "c"] });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.results.map((r: any) => r.status)).toEqual(["fetched", "error", "skipped"]);
+    expect(parsed.results[1]).toMatchObject({ status: "error", blocked: true });
+    expect(parsed.results[2]).toMatchObject({
+      status: "skipped", error: "blocked-before-request", blocked: true,
+    });
+    expect(parsed.summary).toEqual({ requested: 3, fetched: 1, cached: 0, failed: 1, skipped: 1 });
+    expect(parsed.blocked).toBe(true);
+    expect(getHtml).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns compactSiteDetails output per entry", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    vi.spyOn(client, "getHtml").mockImplementation(async (path: string) =>
+      detailPage(path.split("/sites/")[1] ?? ""));
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_details({ slugs: ["a", "b"] });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    const detail = cache.getMeta<SiteDetails>("detail:a", 7 * 24 * 60 * 60 * 1000);
+    expect(detail).not.toBeNull();
+    expect(parsed.results[0].details).toEqual(compactSiteDetails(detail!));
   });
 });
 

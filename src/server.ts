@@ -269,6 +269,16 @@ export function compactSiteDetails(d: SiteDetails): Record<string, unknown> {
   };
 }
 
+export type CompactSiteDetails = ReturnType<typeof compactSiteDetails>;
+export type DetailSource = "cached" | "fetched";
+
+// Spec §4.1: one ordered entry per requested slug. A block short-circuits
+// every remaining slug to "skipped" without a request.
+export type BatchDetailEntry =
+  | { slug: string; status: DetailSource; details: CompactSiteDetails }
+  | { slug: string; status: "error"; error: string; blocked?: true }
+  | { slug: string; status: "skipped"; error: "blocked-before-request"; blocked: true };
+
 export function slugifyTag(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -347,7 +357,7 @@ function errorResponse(err: unknown): ToolResponse {
 
 export interface Handlers {
   search_sites(args: SearchArgs): Promise<ToolResponse>;
-  get_site_details(args: { slug: string; compact?: boolean }): Promise<ToolResponse>;
+  get_site_details(args: { slug?: string; slugs?: string[]; compact?: boolean }): Promise<ToolResponse>;
   compare_sites(args: { slugs: string[] }): Promise<ToolResponse>;
   create_design_brief(args: DesignBriefInput & {
     viewport?: ViewportName;
@@ -838,6 +848,49 @@ export function createHandlers(deps: {
     return d;
   }
 
+  // Cache-first wrapper for the batch path: a real loadDetail call (including
+  // its built-in retry) is the only thing reported as "fetched".
+  async function loadDetailWithSource(
+    slug: string,
+  ): Promise<{ detail: SiteDetails | null; source: DetailSource }> {
+    const cached = cache.getMeta<SiteDetails>(`detail:${slug}`, SITE_TTL_MS);
+    if (cached) return { detail: cached, source: "cached" };
+    return { detail: await loadDetail(slug), source: "fetched" };
+  }
+
+  // Ordered batch outcomes; after a BlockedError no further request is made.
+  async function loadDetails(slugs: string[]): Promise<BatchDetailEntry[]> {
+    const results: BatchDetailEntry[] = [];
+    let blocked = false;
+    for (const slug of slugs) {
+      if (blocked) {
+        results.push({ slug, status: "skipped", error: "blocked-before-request", blocked: true });
+        continue;
+      }
+      try {
+        const { detail, source } = await loadDetailWithSource(slug);
+        results.push(detail
+          ? { slug, status: source, details: compactSiteDetails(detail) }
+          : {
+              slug,
+              status: "error",
+              error:
+                "Awwwards layout may have changed: parsed no design data for " + slug +
+                ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
+            });
+      } catch (err) {
+        if (err instanceof BlockedError) blocked = true;
+        results.push({
+          slug,
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+          ...(err instanceof BlockedError ? { blocked: true as const } : {}),
+        });
+      }
+    }
+    return results;
+  }
+
   // ---- C3 token-diet helpers ----
   // Pure compaction for the four tools' `compact` flag (plan Task C3). Heavy
   // per-element detail → counts; top-level numerics and triggers stay. The
@@ -845,14 +898,60 @@ export function createHandlers(deps: {
   // so tests can call them directly; census-typed siblings live in
   // verify-build.ts (census.ts/hover-census.ts are out of this wave's scope).
 
-  async function get_site_details(args: { slug: string; compact?: boolean }): Promise<ToolResponse> {
+  async function get_site_details(args: {
+    slug?: string;
+    slugs?: string[];
+    compact?: boolean;
+  }): Promise<ToolResponse> {
+    const hasSlug = args.slug !== undefined;
+    const hasSlugs = args.slugs !== undefined;
+    if (hasSlug === hasSlugs) {
+      return { content: [text("Provide exactly one of slug or slugs.")], isError: true };
+    }
+    const slugs = hasSlug ? [args.slug!] : args.slugs!;
+    if (
+      !Array.isArray(slugs) || slugs.length < 1 || slugs.length > 10 ||
+      slugs.some((slug) => typeof slug !== "string" || !/^[\w-]+$/.test(slug)) ||
+      new Set(slugs.map((slug) => slug.toLowerCase())).size !== slugs.length
+    ) {
+      return {
+        content: [text(
+          "Provide 1 to 10 distinct valid site slugs (letters, digits, underscores or hyphens only).",
+        )],
+        isError: true,
+      };
+    }
     try {
-      const d = await loadDetail(args.slug);
+      if (args.slugs !== undefined) {
+        const results = await loadDetails(slugs);
+        const summary = {
+          requested: slugs.length,
+          fetched: results.filter((r) => r.status === "fetched").length,
+          cached: results.filter((r) => r.status === "cached").length,
+          failed: results.filter((r) => r.status === "error").length,
+          skipped: results.filter((r) => r.status === "skipped").length,
+        };
+        const blocked = results.some((r) => r.status === "error" && r.blocked === true);
+        // Partial failure is a normal response; only a batch with no usable
+        // entry at all is an error.
+        const anyOk = summary.fetched + summary.cached > 0;
+        return {
+          content: [text(JSON.stringify(
+            { results, summary, ...(blocked ? { blocked: true } : {}) },
+            null,
+            1,
+          ))],
+          ...(anyOk ? {} : { isError: true }),
+        };
+      }
+
+      const slug = slugs[0]!;
+      const d = await loadDetail(slug);
       if (!d) {
         return {
           content: [text(
             "Awwwards layout may have changed: parsed no design data for " +
-              args.slug +
+              slug +
               ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
           )],
           isError: true,
@@ -863,13 +962,13 @@ export function createHandlers(deps: {
       if (args.compact) {
         return { content: [text(JSON.stringify(compactSiteDetails(d), null, 1))] };
       }
-      const cachedSite = cache.getSite(args.slug, SITE_TTL_MS);
+      const cachedSite = cache.getSite(slug, SITE_TTL_MS);
       const liveUrl = d.liveUrl ?? cachedSite?.liveUrl ?? null;
 
       const content: Block[] = [
         text(
           [
-            `# ${d.title ?? args.slug}`,
+            `# ${d.title ?? slug}`,
             liveUrl ? `Live site: ${liveUrl}` : null,
             d.awards.length
               ? `Awards: ${d.awards.map((a) => `${a.title} (${a.date})`).join(", ")}`

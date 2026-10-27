@@ -100,18 +100,38 @@ server.tool(
   (args) => asMcpResult(handlers.search_sites(args)),
 );
 
-server.tool(
+server.registerTool(
   "get_site_details",
-  "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot. compact=true returns a token-diet summary.",
   {
-    slug: z
-      .string()
-      .regex(/^[\w-]+$/)
-      .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
-    compact: z.boolean().optional()
-      .describe("token-diet summary: palette/technologies/elements become counts; awards and jury numerics stay"),
+    description:
+      "Get the design DNA of one Awwwards site: color palette, technologies, design elements, awards, description and inline screenshot. compact=true returns a token-diet summary. Batch: pass slugs (1–10, no images) for ordered compact details per slug with cached/fetched/error status; provide exactly one of slug or slugs.",
+    inputSchema: z
+      .object({
+        slug: z
+          .string()
+          .regex(/^[\w-]+$/)
+          .optional()
+          .describe("Site slug from search_sites, e.g. 'l-i-s-a'. Provide exactly one of slug or slugs"),
+        slugs: z
+          .array(z.string().regex(/^[\w-]+$/))
+          .min(1)
+          .max(10)
+          .refine(
+            (slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length,
+            "Site slugs must be distinct",
+          )
+          .optional()
+          .describe(
+            "1–10 distinct site slugs for a bounded batch: ordered compact details per slug, cached/fetched/error status, no images",
+          ),
+        compact: z.boolean().optional()
+          .describe("token-diet summary: palette/technologies/elements become counts; awards and jury numerics stay"),
+      })
+      .refine((args) => (args.slug === undefined) !== (args.slugs === undefined), {
+        message: "Provide exactly one of slug or slugs",
+      }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
-  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.get_site_details(args)),
 );
 
