@@ -190,6 +190,7 @@ export interface BundleIntel {
 
 const MAX_ROUTES = 30;
 const MAX_VENDORS = 20;
+const MAX_SOURCE_MAPS = 10;
 const MAX_EXTERNAL_SPECIFIERS = 20;
 // 200-char method window each side of the quoted route (design §4.2).
 const METHOD_WINDOW = 200;
@@ -278,7 +279,7 @@ export function extractBundleIntel(
   return {
     routes: routes.slice(0, MAX_ROUTES),
     vendors: vendors.slice(0, MAX_VENDORS),
-    sourceMaps,
+    sourceMaps: sourceMaps.slice(0, MAX_SOURCE_MAPS),
     moduleGraph: {
       nodes: chunks.length,
       edges: scanned.edges.length,

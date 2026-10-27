@@ -925,6 +925,19 @@ describe("bundle intelligence (opt-in bundleIntel)", () => {
     expect(JSON.stringify(intel.sourceMaps)).not.toContain("data:");
   });
 
+  it("caps source-map rows at 10 after dedupe", () => {
+    const chunks = Array.from({ length: 12 }, (_, i) => ({
+      index: i,
+      text: `//# sourceMappingURL=/maps/m${i}.map`,
+    }));
+    // Duplicate markers in the same chunk must not consume cap rows.
+    chunks.push({ index: 0, text: "//# sourceMappingURL=/maps/m0.map" });
+    const intel = extractBundleIntel(chunks);
+    expect(intel.sourceMaps).toHaveLength(10);
+    expect(intel.sourceMaps.map((s) => s.chunk)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(intel.sourceMaps.at(-1)?.path).toBe("/maps/m9.map");
+  });
+
   it("module graph filters numeric/relative/absolute specifiers, caps externals at 20, flags the 400-edge cap", () => {
     const first = [
       `import a from "./rel.js";`,
