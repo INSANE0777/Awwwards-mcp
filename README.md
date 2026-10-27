@@ -384,7 +384,7 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
-## Built with awwwards-mcp: six real sites
+## Built with awwwards-mcp: seven real sites
 
 Four complete sites were built through the full inspiration loop this MCP
 enables, using nothing but the server's tools plus the shipped
@@ -505,6 +505,10 @@ open `index.html` directly, no server or build step needed.
 ![NEUTOMNI rehost — red footer with contact and wordmark](assets/neutomni-rehost-footer.png)
 
 **6. NEUTOMNI study recreation** ([`showcase/nio/`](showcase/nio/index.html)) — a hand-built recreation of neutomni.com reconstructed from MCP evidence (band map, component packs, scroll/hover censuses, motion DNA, pose capture) rather than rehosted markup: authored HTML/CSS/JS with GSAP + ScrollTrigger + Lenis, sourced fonts/images/audio vendored locally. Ships with the mandatory study-build disclaimer and a full provenance list in its own README — a private reference build, **not for publication**; replace the borrowed assets before any real use. This is the `recreate` skill's end-to-end artifact.
+
+**7. Two26 Studio study recreation** ([`showcase/two26/`](showcase/two26/index.html)) — a hand-authored recreation of two26.studio built with the 1.14 MCP. The site is an inner-scroller page (`body{position:fixed}` + `.page{overflow-y:auto}`): `analyze_page_structure` now reports `scrollRoot: div.page` and the full 13,103px band map; `capture_live_site` waits out the preloader. Built from eight component packs, scroll/hover censuses + motion DNA, with 13 GSAP triggers (2 scrubs, 1 pin), local fonts/media, QA at five viewports, and a 54-file provenance list in its README. Mandatory study-build disclaimer: **not for publication**; replace borrowed assets before any real use.
+
+![Two26 Studio study recreation — hero](assets/two26-hero.png)
 
 ## Skills used to build these
 
