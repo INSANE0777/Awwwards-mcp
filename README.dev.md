@@ -213,7 +213,7 @@ one-release fallback; the canonical `AWWWARDS_MCP_*` value wins.
   `awwwards-setup`, `recreate`, `motion-authoring`). Shipped copies change only
   via human PRs; local copies self-improve through the skill-memory flywheel.
 - `showcase/` holds real sites built through the loop (`ridge`,
-  `afjal-portfolio`, `fallow-press`), each with `_qa/` capture evidence. They
+  `afjal-portfolio`, `fallow-press`, `neutomni`, `nio`, `two26`), each with `_qa/` capture evidence. They
   double as regression demos for the capture/structure/motion tools.
 
 ## Conventions worth preserving

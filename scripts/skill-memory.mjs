@@ -25,7 +25,7 @@
 //   node scripts/skill-memory.mjs record --skill awwwards-inspiration \
 //        --phase verify --symptom "horizontal copy vanished mid-view" \
 //        --rule "Full-viewport horizontal panels get one-shot entrances" \
-//        [--evidence fallow-press/_qa/pin-0.33.png] [--refs "url1,url2"]
+//        [--evidence showcase/fallow-press/_qa/pin-0.33.png] [--refs "url1,url2"]
 //   node scripts/skill-memory.mjs recall --skill awwwards-inspiration
 //   node scripts/skill-memory.mjs distill [--min-count 2] [--cap 12]
 //   node scripts/skill-memory.mjs promote --skill awwwards-inspiration

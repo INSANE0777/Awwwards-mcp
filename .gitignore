@@ -19,3 +19,11 @@ docs/
 # demo GIF raw frames + recording artifacts (only the encoded assets/demo.gif is tracked)
 assets/demo-src/
 .firecrawl/
+
+# local agent scratch and machine config (never track)
+.opencode/
+.claude/
+.cortexkit/
+.mcp.json
+CLAUDE.md
+linkedin-post-90stars.txt

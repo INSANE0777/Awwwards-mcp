@@ -423,8 +423,8 @@ the player, [watch the file directly](assets/demo-loop.mp4).*
 |---|---|---|
 | ![Ridge desktop — Swiss panel grid with mint and grain](assets/ridge-home.jpg) | ![Ridge disciplines — pinned horizontal passage mid-slide](assets/ridge-disciplines.jpg) | ![Ridge mobile — stacked grid, zero overflow](assets/ridge-mobile.jpg) |
 
-**2. [Fallow Press](fallow-press/index.html)**
-([source](fallow-press/)) — a flat-2D editorial journal, direction
+**2. [Fallow Press](showcase/fallow-press/index.html)**
+([source](showcase/fallow-press/)) — a flat-2D editorial journal, direction
 **Emergence Magazine** (SOTD): pink `#FF9398` on cream and black, torn-paper
 masthead (pure CSS `clip-path`, zero WebGL), giant grotesque display over
 grayscale photography, serif-italic brand, three pages with **separate
@@ -441,10 +441,10 @@ The loop as it ran:
    screenshots → `get_site_details` on Emergence Magazine.
 2. **Capture before building**: `capture_live_site` + `record_site_motion`
    on the live site *first*; full-page PNG and motion .webm kept in
-   [fallow-press/ref-motion/](fallow-press/ref-motion/) as the evidence trail.
+   [showcase/fallow-press/ref-motion/](showcase/fallow-press/ref-motion/) as the evidence trail.
 3. Build, then verify: full-page capture plus **panel-center pin shots** of
    both horizontal pages (13 stops each, in
-   [fallow-press/_qa/](fallow-press/_qa/) — `capture-qa.mjs` is reusable).
+   [showcase/fallow-press/_qa/](showcase/fallow-press/_qa/) — `capture-qa.mjs` is reusable).
 4. The pin shots caught a real bug: horizontal-panel entrances used
    `toggleActions: "play none none reverse"`, and 100vw panels hide content
    at midpoints on the way back — copy disappeared mid-view. Fix
