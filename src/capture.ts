@@ -144,8 +144,8 @@ export async function captureLiveSite(
     // "load" can fire before late XHRs settle, so give the page a fixed
     // settle window; networkidle already means the network went quiet.
     if (waitStrategy === "load") await page.waitForTimeout(3000);
+    if (opts?.waitForOverlay !== false) await waitForOverlays(page, 15_000);
     await preScroll(page);
-    if (opts?.waitForOverlay !== false) await waitForOverlays(page);
     // Viewport goes into the name: the same URL captured at desktop and mobile
     // must keep both files (issue #23). Return the buffer playwright already
     // gave us — re-reading the file races a concurrent capture of the same URL.

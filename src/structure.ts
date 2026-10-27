@@ -1,5 +1,5 @@
 import { attachPage, closeAttached, validateCdpEndpoint, ATTACH_ENV } from "./browser.js";
-import { CAPTURE_INSTALL_HINT } from "./capture.js";
+import { CAPTURE_INSTALL_HINT, waitForOverlays } from "./capture.js";
 import { resolveViewport, type ViewportName, type ViewportProfile } from "./viewport.js";
 
 export interface RawBand {
@@ -836,6 +836,9 @@ export async function analyzePageStructure(
     // "load" can fire before late XHRs settle, so give the page a fixed
     // settle window; networkidle already means the network went quiet.
     if (waitStrategy === "load") await page.waitForTimeout(3000);
+    // Wait out a full-screen preloader before scanning: on body-pinned sites
+    // the inner scroller may not exist until the loader has finished.
+    await waitForOverlays(page, 15_000);
     await preScroll(page);
     const raw = (await page.evaluate(SCAN_SNIPPET, {
       responsive: opts?.responsive === true,

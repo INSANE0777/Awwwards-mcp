@@ -858,7 +858,7 @@ describe("analyzePageStructure", () => {
     );
     expect("error" in res).toBe(false);
     // preScroll calls evaluate with no argument; the scan passes the options.
-    expect(argsSeen).toEqual([undefined, { responsive: true }]);
+    expect(argsSeen).toEqual([undefined, undefined, { responsive: true }]);
     if (!("error" in res)) {
       expect(res.responsive).toEqual({
         measuredAt: "mobile",
@@ -899,7 +899,7 @@ describe("analyzePageStructure", () => {
       { responsive: false },
     );
     expect("error" in res).toBe(false);
-    expect(argsSeen[1]).toEqual({ responsive: false });
+    expect(argsSeen[2]).toEqual({ responsive: false });
     if (!("error" in res)) expect("responsive" in res).toBe(false);
   });
 
@@ -931,7 +931,7 @@ describe("analyzePageStructure", () => {
       { viewport: "mobile" },
     );
     expect("error" in res).toBe(false);
-    expect(argsSeen[1]).toEqual({ responsive: false });
+    expect(argsSeen[2]).toEqual({ responsive: false });
     if (!("error" in res)) expect("responsive" in res).toBe(false);
   });
 
@@ -968,7 +968,7 @@ describe("analyzePageStructure", () => {
     expect("error" in res).toBe(false);
     expect(calls[0]).toBe("goto:load"); // default wait strategy is "load"
     expect(calls.indexOf("wait:3000")).toBe(1); // settle right after load
-    expect(calls.filter((c) => c === "eval").length).toBe(2); // pre-scroll + scan
+    expect(calls.filter((c) => c === "eval").length).toBe(3); // overlay + pre-scroll + scan
     expect(calls[calls.length - 1]).toBe("eval"); // scan runs last, after the scroll
   });
 
