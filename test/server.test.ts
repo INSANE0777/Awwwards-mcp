@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compactSiteDetails, createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import { compactAuditResult, compactSiteDetails, createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import { detailArgsSchema } from "../src/detail-schema.js";
+import type { AuditUrlResult } from "../src/audit-url.js";
 import type { ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { UnifiedMotionDna } from "../src/motion-dna.js";
@@ -2491,6 +2492,9 @@ describe("audit_url and verify_build compact payloads", () => {
     perf: { error: "No Chrome or Edge found." },
     antiPatterns: {
       count: 4,
+      high: 2,
+      medium: 1,
+      info: 1,
       worst: "blur-heavy",
       findings: [
         findingOf("blur-heavy", "HIGH", "css", 3, "Keep blurs under 10px."),
@@ -2544,9 +2548,78 @@ describe("audit_url and verify_build compact payloads", () => {
     const res = await auditHandler().audit_url({ url: "https://example.com/" });
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.antiPatterns.findings).toHaveLength(4);
-    expect(parsed.antiPatterns.high).toBeUndefined();
+    // Full perf and the pre-cap severity counts stay in the full payload.
+    expect(parsed.antiPatterns.high).toBe(2);
+    expect(parsed.antiPatterns.medium).toBe(1);
+    expect(parsed.antiPatterns.info).toBe(1);
+    expect(parsed.perf).toEqual({ error: "No Chrome or Edge found." });
     expect(parsed.nextActions).toEqual(auditReport().nextActions);
     expect(parsed.note).toBe("Evidence only — not a performance grade.");
+  });
+
+  it("audit_url compact reduces a successful perf block and drops chrome details", () => {
+    const full: AuditUrlResult = {
+      ...auditReport(),
+      perf: {
+        seconds: 4,
+        frames: 240,
+        fps: 60,
+        droppedFrames: 1,
+        worstFrameMs: 18,
+        longTaskCount: 2,
+        longTaskMaxMs: 55,
+        longAnimationFrameCount: 1,
+        longAnimationFrameMaxBlockingMs: 40,
+        layoutThrashCount: 3,
+        measureBeforeCompositeCount: 4,
+        layoutReads: 10,
+        styleWrites: 6,
+        scrollListeners: [{ type: "scroll", passive: false }],
+        animationsAtEnd: 2,
+        chromePath: "C:\\fake\\chrome.exe",
+      },
+    };
+    const parsed = compactAuditResult(full);
+    expect(parsed.perf).toEqual({
+      fps: 60,
+      droppedFrames: 1,
+      longTasks: 2,
+      layoutThrashing: 3,
+    });
+    expect(Object.keys(parsed.perf).sort()).toEqual([
+      "droppedFrames",
+      "fps",
+      "layoutThrashing",
+      "longTasks",
+    ]);
+    expect("chromePath" in parsed.perf).toBe(false);
+    expect("scrollListeners" in parsed.perf).toBe(false);
+    // Full payload still carries the whole measurement.
+    expect(full.perf).toMatchObject({ chromePath: "C:\\fake\\chrome.exe" });
+  });
+
+  it("audit_url compact maps pre-cap counts that can exceed the bounded findings", () => {
+    const full: AuditUrlResult = {
+      ...auditReport(),
+      antiPatterns: {
+        count: 60,
+        high: 1,
+        medium: 9,
+        info: 50,
+        worst: "blur-heavy",
+        findings: auditReport().antiPatterns.findings,
+      },
+    };
+    const parsed = compactAuditResult(full);
+    expect(parsed.antiPatterns).toMatchObject({
+      count: 60,
+      high: 1,
+      medium: 9,
+      info: 50,
+    });
+    expect(parsed.antiPatterns.high + parsed.antiPatterns.medium + parsed.antiPatterns.info)
+      .toBeGreaterThan(full.antiPatterns.findings.length);
+    expect("findings" in parsed.antiPatterns).toBe(false);
   });
 
   const verifyReport = () => ({

@@ -19,6 +19,7 @@ import {
   SEVERITY_WEIGHTS,
   scanAntiPatterns,
   type AntiPatternFinding,
+  type Severity,
 } from "./audit-rules.js";
 import {
   measureRuntime,
@@ -38,6 +39,10 @@ const MAX_TIMEOUT_MS = 30_000;
 export interface AuditAntiPatterns {
   /** Total findings before the output cap (findings[] is bounded). */
   count: number;
+  /** Pre-cap totals across all findings; they can exceed findings.length. */
+  high: number;
+  medium: number;
+  info: number;
   /** Highest-severity rule id (tier rows weigh as INFO), or null. */
   worst: string | null;
   findings: AntiPatternFinding[];
@@ -57,7 +62,13 @@ export interface AuditUrlResult {
 /** Token-diet audit: finding bodies collapse to severity counts + ranked actions. */
 export interface AuditCompact {
   url: string;
-  perf: PerfMeasurement | { error: string };
+  /** Reduced on purpose: chromePath and scrollListeners stay in the full payload. */
+  perf: {
+    fps: number;
+    droppedFrames: number;
+    longTasks: number;
+    layoutThrashing: number;
+  } | { error: string };
   antiPatterns: {
     count: number;
     worst: string | null;
@@ -241,7 +252,8 @@ export function rankAuditActions(result: AuditUrlResult): string[] {
     })
     .slice(0, 3)
     .map((f) => {
-      const where = f.line === undefined ? f.source : `${f.source}:${f.line}`;
+      // Spec format is source:line; findings without a derivable line pin 0.
+      const where = `${f.source}:${f.line ?? 0}`;
       return `${f.ruleId} at ${where} — ${f.improvements.trim() || f.message}`;
     });
 }
@@ -353,6 +365,9 @@ export async function auditUrl(
   const { coverage, error, ...bounded } = scan;
   const sorted = sortBySeverity(bounded.findings);
   const findings = sorted.slice(0, MAX_AUDIT_FINDINGS);
+  // Pre-cap severity totals: findings[] is capped, these are not.
+  const severityCount = (severity: Severity) =>
+    sorted.filter((f) => (f.severity ?? "INFO") === severity).length;
   const notes: string[] = ["Evidence only — not a performance grade."];
   if ("error" in perf) notes.push(`Runtime not measured: ${perf.error}`);
   if (error) notes.push(`Static scan: ${error}`);
@@ -363,6 +378,9 @@ export async function auditUrl(
     perf,
     antiPatterns: {
       count: sorted.length,
+      high: severityCount("HIGH"),
+      medium: severityCount("MEDIUM"),
+      info: severityCount("INFO"),
       worst: sorted[0]?.ruleId ?? null,
       findings,
       ...(error ? { error } : {}),

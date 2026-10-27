@@ -69,7 +69,7 @@ function rule(
   ruleId: string,
   severity: "HIGH" | "MEDIUM" | "INFO" | undefined,
   source: "css" | "html" | "js",
-  line: number,
+  line: number | undefined,
   improvements = "",
 ): AntiPatternFinding {
   return { ruleId, severity, source, line, message: `m-${ruleId}`, why: "test", improvements };
@@ -79,7 +79,14 @@ function makeAuditResult(findings: AntiPatternFinding[]): AuditUrlResult {
   return {
     url: PAGE,
     perf: PERF,
-    antiPatterns: { count: findings.length, worst: findings[0]?.ruleId ?? null, findings },
+    antiPatterns: {
+      count: findings.length,
+      high: findings.filter((f) => (f.severity ?? "INFO") === "HIGH").length,
+      medium: findings.filter((f) => (f.severity ?? "INFO") === "MEDIUM").length,
+      info: findings.filter((f) => (f.severity ?? "INFO") === "INFO").length,
+      worst: findings[0]?.ruleId ?? null,
+      findings,
+    },
     coverage: { assetsScanned: 0, failed: 0 },
     nextActions: [],
     note: "Evidence only",
@@ -307,6 +314,13 @@ describe("auditUrl", () => {
     expect(result.antiPatterns.findings).toHaveLength(50);
     expect(result.antiPatterns.worst).toBe("unique-high");
     expect(result.antiPatterns.findings[0].ruleId).toBe("unique-high");
+    // Severity counts are pre-cap totals, so they exceed the bounded findings.
+    expect(result.antiPatterns.high).toBe(1);
+    expect(result.antiPatterns.medium).toBe(0);
+    expect(result.antiPatterns.info).toBe(60);
+    expect(
+      result.antiPatterns.high + result.antiPatterns.medium + result.antiPatterns.info,
+    ).toBe(61);
   });
 
   it("rejects unusable URLs without fetching anything", async () => {
@@ -350,6 +364,26 @@ describe("rankAuditActions", () => {
       "info at css:1 — fix info",
       "tier at js:5 — m-tier",
     ]);
+  });
+
+  it("caps nextActions at the three worst findings", () => {
+    const result = makeAuditResult([
+      rule("h1", "HIGH", "css", 10, "fix h1"),
+      rule("m1", "MEDIUM", "css", 20, "fix m1"),
+      rule("h2", "HIGH", "html", 30, "fix h2"),
+      rule("m2", "MEDIUM", "css", 40, "fix m2"),
+      rule("h3", "HIGH", "js", 50, "fix h3"),
+    ]);
+    expect(rankAuditActions(result)).toEqual([
+      "h1 at css:10 — fix h1",
+      "h2 at html:30 — fix h2",
+      "h3 at js:50 — fix h3",
+    ]);
+  });
+
+  it("pins an undefined line to :0 so the source:line format holds", () => {
+    const result = makeAuditResult([rule("tier", undefined, "js", undefined)]);
+    expect(rankAuditActions(result)).toEqual(["tier at js:0 — m-tier"]);
   });
 
   it("returns an empty list when there are no findings", () => {

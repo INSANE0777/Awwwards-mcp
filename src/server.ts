@@ -249,19 +249,26 @@ export function compactComponentPack(p: ComponentPack): {
   };
 }
 
-/** AuditUrlResult → diet: severity counts + ranked actions instead of every finding body. */
+/** AuditUrlResult → diet: pre-cap severity counts + ranked actions instead of every finding body. */
 export function compactAuditResult(r: AuditUrlResult): AuditCompact {
-  const severity = (s: "HIGH" | "MEDIUM" | "INFO") =>
-    r.antiPatterns.findings.filter((f) => (f.severity ?? "INFO") === s).length;
   return {
     url: r.url,
-    perf: r.perf,
+    // Chrome path and scroll-listener details stay in the full payload only.
+    perf:
+      "error" in r.perf
+        ? r.perf
+        : {
+            fps: r.perf.fps,
+            droppedFrames: r.perf.droppedFrames,
+            longTasks: r.perf.longTaskCount,
+            layoutThrashing: r.perf.layoutThrashCount,
+          },
     antiPatterns: {
       count: r.antiPatterns.count,
       worst: r.antiPatterns.worst,
-      high: severity("HIGH"),
-      medium: severity("MEDIUM"),
-      info: severity("INFO"),
+      high: r.antiPatterns.high,
+      medium: r.antiPatterns.medium,
+      info: r.antiPatterns.info,
       ...(r.antiPatterns.error ? { error: r.antiPatterns.error } : {}),
     },
     coverage: r.coverage,
