@@ -1,0 +1,222 @@
+import { DEFAULT_MAX_INLINE_BYTES } from "../../capture.js";
+import type { CaptureOpts } from "../../capture.js";
+import { summarizePalette, summarizeTypography } from "../../component.js";
+import type { PoseGrid } from "../../pose3d.js";
+import { diffBands } from "../../structure.js";
+import type { WaitOpts, WaitStrategy } from "../../structure.js";
+import { compactHoverCensus } from "../../verify-build.js";
+import type { ViewportName } from "../../viewport.js";
+import type { HandlerContext } from "../context.js";
+import { compactComponentPack, errorResponse, text } from "../types.js";
+import type { ToolResponse } from "../types.js";
+
+export async function capture_live_site(ctx: HandlerContext, args: {
+  url: string;
+  waitStrategy?: WaitStrategy;
+  viewport?: ViewportName;
+  inline?: boolean;
+  maxInlineBytes?: number;
+  waitForOverlay?: boolean;
+}): Promise<ToolResponse> {
+  try {
+    // Lazy default: playwright is only touched when the tool actually runs.
+    // The default is wrapped because captureLiveSite's third positional is
+    // the injectable playwright loader - opts must land in fourth place.
+    const capture =
+      ctx.deps.captureFn ??
+      ((url: string, imagesDir: string, opts?: CaptureOpts) =>
+        import("../../capture.js").then((m) => m.captureLiveSite(url, imagesDir, undefined, opts)));
+    // The tool schema defaults viewport to "desktop" (zod); the ?? keeps
+    // direct handler calls on the same explicit path.
+    const result = await capture(args.url, ctx.cache.imagesDir, {
+      waitStrategy: args.waitStrategy,
+      viewport: args.viewport ?? "desktop",
+      inline: args.inline,
+      maxInlineBytes: args.maxInlineBytes,
+      waitForOverlay: args.waitForOverlay,
+    });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    if (result.base64 === undefined) {
+      const budget = args.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES;
+      const budgetLabel =
+        budget >= 1_000_000
+          ? `${Number((budget / 1_000_000).toFixed(1))} MB`
+          : `${budget} bytes`;
+      const note =
+        args.inline === false
+          ? "(inline preview disabled; open the saved file)"
+          : `(inline preview omitted: the PNG exceeds the ${budgetLabel} inline budget; open the saved file or raise maxInlineBytes)`;
+      return {
+        content: [text(`Full-page capture of ${args.url} saved to ${result.file} ${note}`)],
+      };
+    }
+    return {
+      content: [
+        text(`Full-page capture of ${args.url} saved to ${result.file}`),
+        { type: "image", data: result.base64, mimeType: "image/png" },
+      ],
+    };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function analyze_page_structure(ctx: HandlerContext, args: {
+  url: string;
+  maxBands?: number;
+  waitStrategy?: WaitStrategy;
+  viewport?: ViewportName;
+  compare?: "mobile";
+  cdpEndpoint?: string;
+}): Promise<ToolResponse> {
+  try {
+    // Attach scans one open page; the compare pass opens its own
+    // mobile capture, so the two contracts cannot be mixed.
+    if (args.cdpEndpoint !== undefined && args.compare !== undefined) {
+      return {
+        content: [
+          text(
+            'cdpEndpoint (attach) cannot be combined with compare:"mobile": the compare pass opens its own mobile capture. Remove compare or cdpEndpoint.',
+          ),
+        ],
+        isError: true,
+      };
+    }
+    // Lazy default: playwright is only touched when the tool actually runs.
+    // maxBands from the tool schema is forwarded so the analyzer honors the
+    // caller's cap (falling back to the analyzer's own default of 40).
+    const analyze =
+      ctx.deps.analyzeFn ??
+      ((url: string, maxBands?: number, opts?: WaitOpts) =>
+        import("../../structure.js").then((m) =>
+          m.analyzePageStructure(url, undefined, maxBands, opts),
+        ));
+    const viewport = args.viewport ?? "desktop";
+    const wantsResponsive = args.compare === "mobile";
+    const primaryOpts: WaitOpts = {
+      waitStrategy: args.waitStrategy,
+      viewport,
+      ...(args.cdpEndpoint !== undefined ? { cdpEndpoint: args.cdpEndpoint } : {}),
+    };
+    // Only the mobile capture scans elements; a mobile primary IS that capture.
+    if (wantsResponsive && viewport === "mobile") primaryOpts.responsive = true;
+    const structure = await analyze(args.url, args.maxBands, primaryOpts);
+    if ("error" in structure) return { content: [text(structure.error)], isError: true };
+    // Desktop default is byte-identical: no new keys unless compare is set.
+    if (args.compare !== "mobile") {
+      return { content: [text(JSON.stringify(structure, null, 1))] };
+    }
+    // compare:"mobile" adds a second capture at 390×844 (a phone capture is
+    // already the mobile side, so it is reused). A failed second capture is
+    // an error response, never a silently desktop-only "diff".
+    const mobile =
+      viewport === "mobile"
+        ? structure
+        : await analyze(args.url, args.maxBands, {
+            waitStrategy: args.waitStrategy,
+            viewport: "mobile",
+            responsive: true,
+          });
+    if ("error" in mobile) {
+      // Keep the valid desktop result; degrade the compare half explicitly.
+      return {
+        content: [
+          text(JSON.stringify({ ...structure, mobileError: mobile.error }, null, 1)),
+        ],
+      };
+    }
+    const payload: Record<string, unknown> = {
+      ...structure,
+      mobileBands: mobile.bands,
+      diff: diffBands(structure, mobile),
+    };
+    if (mobile.responsive) payload.responsive = mobile.responsive;
+    return {
+      content: [text(JSON.stringify(payload, null, 1))],
+    };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function analyze_hover_census(ctx: HandlerContext, args: {
+  url: string;
+  waitStrategy?: WaitStrategy;
+  viewport?: ViewportName;
+  reducedMotion?: boolean;
+  compact?: boolean;
+}): Promise<ToolResponse> {
+  try {
+    // Lazy default: playwright is only touched when the tool actually runs.
+    const capture =
+      ctx.deps.hoverCensusFn ??
+      ((url: string, opts?: { waitStrategy?: WaitStrategy; viewport?: ViewportName; reducedMotion?: boolean }) =>
+        import("../../hover-census.js").then((m) => m.captureHoverCensus(url, opts)));
+    const result = await capture(args.url, {
+      waitStrategy: args.waitStrategy,
+      viewport: args.viewport ?? "desktop",
+      reducedMotion: args.reducedMotion,
+    });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    // C3: compact=true replaces sample bodies with count + selectors.
+    return { content: [text(JSON.stringify(args.compact ? compactHoverCensus(result) : result, null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+// Gap 4: captures the page's 3D pose grid (headless browser via the
+// injected/default capturePose3d) and renders a scroll-scrubbed three.js
+// stub from a grid — the default stub path is the pure builder in
+// pose-stub.ts, so no browser is ever launched for build_pose_stub.
+export async function capture_pose_3d(ctx: HandlerContext, args: {
+  url: string;
+  steps?: number;
+  viewport?: ViewportName;
+}): Promise<ToolResponse> {
+  try {
+    const capture =
+      ctx.deps.pose3dFn ??
+      ((url: string, opts?: { steps?: number; viewport?: ViewportName }) =>
+        import("../../pose3d.js").then((m) => m.capturePose3d(url, opts)));
+    const result = await capture(args.url, { steps: args.steps, viewport: args.viewport });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    return { content: [text(JSON.stringify(result, null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function capture_component(ctx: HandlerContext, args: {
+  url: string;
+  selector?: string;
+  viewport?: ViewportName;
+  maxNodes?: number;
+  compact?: boolean;
+}): Promise<ToolResponse> {
+  try {
+    // Lazy default: playwright is only touched when the tool actually runs.
+    const capture =
+      ctx.deps.captureComponentFn ??
+      ((url: string, opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number }) =>
+        import("../../component.js").then((m) => m.captureComponent(url, opts)));
+    const result = await capture(args.url, {
+      selector: args.selector,
+      viewport: args.viewport ?? "desktop",
+      maxNodes: args.maxNodes,
+    });
+    if ("error" in result) return { content: [text(result.error)], isError: true };
+    // C3: compact=true strips per-node styles/text/svg/anims; the tree's
+    // tag/classes/rect skeleton + fonts/colors stay (summaries omitted).
+    const payload = args.compact
+      ? compactComponentPack(result)
+      : {
+          ...result,
+          typography: summarizeTypography(result),
+          paletteSummary: summarizePalette(result),
+        };
+    return { content: [text(JSON.stringify(payload, null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}

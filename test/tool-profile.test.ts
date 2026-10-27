@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   CORE_TOOL_NAMES,
   DEFAULT_MAX_RESPONSE_BYTES,
   isCoreTool,
   registerGuarded,
 } from "../src/tool-profile.js";
+import { registerAllTools } from "../src/tools/index.js";
 
 type Registration = { name: string; handler?: (...args: any[]) => any };
 
@@ -19,11 +18,16 @@ function fakeServer() {
   return { server: { tool: (...args: any[]) => record(args), registerTool: (...args: any[]) => record(args) }, regs };
 }
 
-// cli.ts connects to stdio on import, so the registration contract is read
-// from source: every tool name must go through the guarded wrapper.
+// cli.ts connects to stdio on import, so the registration contract is checked
+// against the tool modules directly: registerAllTools on a fake server.
 function cliToolNames(): string[] {
-  const src = readFileSync(join(__dirname, "../src/cli.ts"), "utf8");
-  return [...src.matchAll(/^(?:tool|registerTool)\(\n  "([a-z0-9_]+)"/gm)].map((m) => m[1]);
+  const { server, regs } = fakeServer();
+  registerAllTools({
+    handlers: {} as any,
+    tool: server.tool as any,
+    registerTool: server.registerTool as any,
+  });
+  return regs.map((r) => r.name);
 }
 
 describe("tool profile", () => {

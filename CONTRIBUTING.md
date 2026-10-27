@@ -47,11 +47,13 @@ src/
   parsers.ts    Pure HTML parsers (fixture-tested — most PRs land here)
   awwwards.ts   HTTP client: 1 req/s limiter, BlockedError on 403/429
   cache.ts      SQLite cache at ~/.awwwards-mcp/ (node:sqlite, no native deps)
-  server.ts     MCP tool handlers (search, details, elements, categories)
+  server.ts     Thin facade: re-exports public types + createHandlers
+  server/       Handler domains: awards, data, capture, motion, audit, build
+  tools/        37 MCP tool registrations (zod schemas + annotations)
   capture.ts    Optional playwright: capture_live_site
   structure.ts  Optional playwright: analyze_page_structure
   motion.ts     Optional playwright + ffmpeg: record_site_motion
-  cli.ts        stdio server entry + zod schemas
+  cli.ts        stdio server entry + startup wiring
   index-cli.ts  awwwards-index bin (cache priming crawler)
 test/           vitest, offline, committed fixtures
 skills/         awwwards-inspiration agent skill (ships in the npm package)
