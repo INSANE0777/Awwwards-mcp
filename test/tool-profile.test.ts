@@ -9,6 +9,11 @@ import { registerAllTools } from "../src/tools/index.js";
 
 type Registration = { name: string; handler?: (...args: any[]) => any };
 
+// v2 registerTool shape: (name, { description, inputSchema, annotations }, handler).
+function v2Args(name: string, handler: (...args: any[]) => any): any[] {
+  return [name, { description: "d", inputSchema: {}, annotations: {} }, handler];
+}
+
 function fakeServer() {
   const regs: Registration[] = [];
   const record = (args: any[]) => {
@@ -36,10 +41,10 @@ describe("tool profile", () => {
     const env = { AWWWARDS_MCP_PROFILE: "core" };
     const handler = async () => ({ content: [] });
     for (const name of CORE_TOOL_NAMES) {
-      registerGuarded(server as any, "tool", [name, "d", {}, {}, handler], env);
+      registerGuarded(server as any, "registerTool", v2Args(name, handler), env);
     }
-    registerGuarded(server as any, "tool", ["compare_sites", "d", {}, {}, handler], env);
-    registerGuarded(server as any, "registerTool", ["verify_flow", "d", {}, {}, handler], env);
+    registerGuarded(server as any, "registerTool", v2Args("compare_sites", handler), env);
+    registerGuarded(server as any, "registerTool", v2Args("verify_flow", handler), env);
 
     expect(regs.map((r) => r.name)).toEqual([...CORE_TOOL_NAMES]);
     expect(isCoreTool("search_sites", env)).toBe(true);
@@ -60,7 +65,7 @@ describe("tool profile", () => {
 
     const { server, regs } = fakeServer();
     for (const name of names) {
-      registerGuarded(server as any, "tool", [name, "d", {}, {}, async () => ({ content: [] })], {});
+      registerGuarded(server as any, "registerTool", v2Args(name, async () => ({ content: [] })), {});
     }
     expect(regs.map((r) => r.name)).toEqual(names);
   });
@@ -76,21 +81,15 @@ describe("tool profile", () => {
     const { server, regs } = fakeServer();
     registerGuarded(
       server as any,
-      "tool",
-      [
-        "big_tool",
-        "d",
-        {},
-        {},
-        async () => ({
-          isError: true,
-          structuredContent: { keep: true },
-          content: [
-            { type: "text", text: "abcd" },
-            { type: "image", data: "0123456789", mimeType: "image/png" },
-          ],
-        }),
-      ],
+      "registerTool",
+      v2Args("big_tool", async () => ({
+        isError: true,
+        structuredContent: { keep: true },
+        content: [
+          { type: "text", text: "abcd" },
+          { type: "image", data: "0123456789", mimeType: "image/png" },
+        ],
+      })),
       { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "10" },
     );
     const result = await regs[0].handler!();
@@ -113,13 +112,13 @@ describe("tool profile", () => {
   it("accepts the legacy env name but the canonical name wins", async () => {
     const payload = { content: [{ type: "text", text: "abcd" }, { type: "image", data: "0123456789" }] };
     const legacy = fakeServer();
-    registerGuarded(legacy.server as any, "tool", ["t", "d", {}, {}, async () => payload], {
+    registerGuarded(legacy.server as any, "registerTool", v2Args("t", async () => payload), {
       AWARDS_MCP_MAX_RESPONSE_BYTES: "10",
     });
     expect((await legacy.regs[0].handler!()).content[0].text).toContain('"truncated":true');
 
     const both = fakeServer();
-    registerGuarded(both.server as any, "tool", ["t", "d", {}, {}, async () => payload], {
+    registerGuarded(both.server as any, "registerTool", v2Args("t", async () => payload), {
       AWWWARDS_MCP_MAX_RESPONSE_BYTES: "100",
       AWARDS_MCP_MAX_RESPONSE_BYTES: "10",
     });
@@ -134,7 +133,7 @@ describe("tool profile", () => {
       ],
     };
     const { server, regs } = fakeServer();
-    registerGuarded(server as any, "tool", ["capture_pose_3d", "d", {}, {}, async () => payload], {});
+    registerGuarded(server as any, "registerTool", v2Args("capture_pose_3d", async () => payload), {});
     expect(await regs[0].handler!()).toBe(payload);
     expect(DEFAULT_MAX_RESPONSE_BYTES).toBe(32_000_000);
   });
@@ -149,8 +148,8 @@ describe("tool profile", () => {
     try {
       registerGuarded(
         server as any,
-        "tool",
-        ["dbg_tool", "d", {}, {}, async () => ({ content: [{ type: "text", text: "x" }] })],
+        "registerTool",
+        v2Args("dbg_tool", async () => ({ content: [{ type: "text", text: "x" }] })),
         { AWWWARDS_MCP_DEBUG_MEMORY: "1" },
       );
       await regs[0].handler!();

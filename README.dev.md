@@ -35,7 +35,7 @@ design DNA, band maps and motion recordings included.
         │ src/server/  37 MCP tools over createHandlers(deps)   │
         └───────────────────────────┬───────────────────────────┘
                                     │
-                    src/cli.ts ── stdio McpServer (awwwards-mcp)
+                    src/cli.ts ── serveStdio entry (awwwards-mcp)
                     src/index-cli.ts ── crawl CLI (awwwards-index)
 ```
 
@@ -85,7 +85,8 @@ Note: it spawns a real browser.
 | `gsap-stub.ts` | ~230 | Pure + synchronous `buildGsapStub` + `normalizeEase`: one GSAP timeline per scroll-census anim (trigger, `start: "top 80%"`, scrub/pin, `durationMs` → seconds, cubic-bezier → nearest GSAP token via a 20-row bezier table with 1-decimal rounding), optional scroll-driven camera module from pose-grid anchors (y=r·2.5, z=12−r·4, gated on `canvasW>0` + ≥2 snapshots), unconditional reduced-motion guard, `<` neutralized for script safety, no `eval`, byte-deterministic, never throws. Powers `build_gsap_stub`. |
 | `build-project.ts` | ~660 | build_project core: rebuild-shape section split (top-level roots keyed on the `c-N` class + generic fallback), style buckets (tokens hoisted, class-safe per-section mention match), timeline extraction (quote-aware balanced-paren `.from(` scan so `;`-bearing callbacks never drop a block), vite/astro/next emit dispatch + the `buildProject` orchestration the bin and MCP tool share. Emitters are pure files arrays (byte-deterministic tests); CLI arg model maps exits 0/2/3 in `build-project-cli.ts`. |
 | `build-project-cli.ts` / `emit-next.ts` | ~45 / ~410 | Thin `awwwards-build-project` bin: one JSON line, exit 0/2/3, verify-cli's DI + main-guard shape. `emit-next.ts`: kit `jsx.mjs` port (`htmlToJsx`: class→className, for→htmlFor, style string→object with kebab→camel + `!important` strip, svg camelCase tags/attrs, text-brace entity escaping) + the Next App Router tree — `package.json`/`next.config.mjs`/tsconfig, `app/layout.tsx` (metadata + font links), `app/globals.css` (tokens+shared+section buckets), `app/page.tsx` and per-section components with kit-verbatim `useEffect` + `gsap.context` + `ctx.revert()` wiring; gsap dep and imports gated on the source's CDN tags. |
-| `cli.ts` | ~77 | `McpServer` wiring and startup only: cache/client/handlers, `registerAllTools`, background auto-reindex, daily version/env checks - stdout stays clean for JSON-RPC. Registrations go through `tool()` / `registerTool()` guards (see resource limits below). |
+| `cli.ts` | ~65 | Startup only: cache/client/handlers, background auto-reindex, daily version/env checks, then `serveStdio` with a per-connection factory - stdout stays clean for JSON-RPC. |
+| `server-instance.ts` | ~45 | `createServer({handlers,version})`: a fresh v2 `McpServer` with all 37 tools registered through the `tool()` / `registerTool()` guards (see resource limits below). `serveStdio` calls it once per connection; the modern-probe -> legacy fallback discards the first instance and builds a second. |
 | `version-check.ts` | ~131 | Daily npm-registry check, stderr-only, 3 s timeout, all failures swallowed. Self-update is opt-in via `AWWWARDS_AUTO_UPDATE=1`. |
 | `viewport.ts` | ~20 | Desktop (1440×900) / mobile (390×844, DPR 3, touch) profiles. Width/height go in playwright's `viewport` key; mobile flags spread as sibling context options. |
 | `types.ts`, `index-cli.ts` | — | Shared types (`SiteSummary`, `SiteDetails`, `ElementMedia`); thin crawl-CLI entry. |
@@ -179,7 +180,8 @@ Dependency injection is the pattern everywhere a hard dependency exists:
 ## Resource limits & diagnostics
 
 Read once at startup; `src/tool-profile.ts` owns the registration guard and its
-tests import it directly (cli.ts connects to stdio on import).
+tests import it directly (cli.ts connects to stdio on import). The guard is
+called from `server-instance.ts`, once per `serveStdio` factory invocation.
 
 - `AWWWARDS_MCP_PROFILE=core|full` (default `full`) - `core` registers only the
   12 build-loop tools; `full` keeps all 37.

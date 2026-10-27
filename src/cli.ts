@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -14,8 +12,7 @@ import { captureLiveSite } from "./capture.js";
 import { runIndexer, shouldAutoIndex } from "./indexer.js";
 import { checkForUpdate } from "./version-check.js";
 import { checkEnvironment } from "./env-check.js";
-import { registerGuarded } from "./tool-profile.js";
-import { registerAllTools } from "./tools/index.js";
+import { createServer } from "./server-instance.js";
 
 const cacheRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
 let cache: Cache;
@@ -43,27 +40,6 @@ const handlers = createHandlers({
 const pkgJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8"),
 ) as { version: string };
-const server = new McpServer({ name: "awwwards-mcp", version: pkgJson.version });
-
-// Every registration goes through the guard: AWWWARDS_MCP_PROFILE=core skips
-// non-core tools, AWWWARDS_MCP_MAX_RESPONSE_BYTES caps text+image payloads, and
-// AWWWARDS_MCP_DEBUG_MEMORY=1 logs one JSON line per call on stderr. The
-// legacy AWARDS_MCP_* names are accepted as a one-release fallback.
-const tool = ((name: string, description: string, inputSchema: any, annotations: any, handler: any) =>
-  registerGuarded(server, "registerTool", [
-    name,
-    {
-      description,
-      // v2 registerTool wants a z.object, while the tool modules still pass
-      // raw field shapes (the v1 style). Accept both.
-      inputSchema: inputSchema instanceof z.ZodType ? inputSchema : z.object(inputSchema),
-      annotations,
-    },
-    handler,
-  ])) as unknown as (...args: any[]) => void;
-const registerTool = ((...args: any[]) =>
-  registerGuarded(server, "registerTool", args)) as unknown as McpServer["registerTool"];
-registerAllTools({ handlers, tool, registerTool });
 
 // Auto-refresh: if the index is stale (or absent) and no crawl is running,
 // re-index in the background. Serving is never blocked; errors are stderr-only.
@@ -85,5 +61,7 @@ checkForUpdate(pkgJson.version);
 // never blocks serving.
 checkEnvironment();
 
-serveStdio(() => server);
+serveStdio(() => createServer({ handlers, version: pkgJson.version }), {
+  onerror: (error) => console.error(`awwwards-mcp: server error: ${error.message}`),
+});
 

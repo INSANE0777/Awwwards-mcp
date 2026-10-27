@@ -1,4 +1,4 @@
-import type { McpServer, CallToolResult } from "@modelcontextprotocol/server";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Handlers, ToolResponse } from "../server.js";
 

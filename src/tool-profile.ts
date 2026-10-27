@@ -1,7 +1,6 @@
 // Tool registration guard: profile filtering, per-call debug memory lines and
-// a response-byte ceiling. Kept out of cli.ts so tests can exercise it
-// without starting the stdio server.
-import type { McpServer } from "@modelcontextprotocol/server";
+// a response-byte ceiling. Kept out of the server factory so tests can
+// exercise it without starting the stdio server.
 
 // The 12 tool core an agent needs for the capture -> analyze -> build -> verify
 // loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 37.
@@ -58,17 +57,16 @@ const note = (): string =>
 
 type ServerLike = {
   registerTool: (...args: any[]) => unknown;
-  tool?: (...args: any[]) => unknown;
 };
 
-// Registers through server.tool or server.registerTool. In core profile a
-// non-core name is silently skipped. The final function argument (the handler)
-// is wrapped: response size is enforced, and AWWWARDS_MCP_DEBUG_MEMORY=1 emits
-// one JSON line per call on stderr (never stdout — stdout is the JSON-RPC
-// channel).
+// Registers through server.registerTool (v2 has no server.tool). In core
+// profile a non-core name is silently skipped. The final function argument
+// (the handler) is wrapped: response size is enforced, and
+// AWWWARDS_MCP_DEBUG_MEMORY=1 emits one JSON line per call on stderr (never
+// stdout — stdout is the JSON-RPC channel).
 export function registerGuarded(
   server: ServerLike,
-  method: "tool" | "registerTool",
+  method: "registerTool",
   args: any[],
   env: NodeJS.ProcessEnv = process.env,
   log: (line: string) => void = (line) => console.error(line),
@@ -118,5 +116,5 @@ export function registerGuarded(
     };
   }
 
-  (server as any)[method](...args);
+  server.registerTool(...args);
 }

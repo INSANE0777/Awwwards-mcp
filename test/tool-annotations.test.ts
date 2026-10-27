@@ -32,7 +32,7 @@ describe("tool annotations", () => {
   it("every tool registration declares all four boolean hints", () => {
     // get_site_details uses registerTool because its cross-field .refine
     // cannot be expressed as a raw parameter shape. All registrations go
-    // through the guarded tool()/registerTool() wrappers in cli.ts.
+    // through the guarded tool()/registerTool() wrappers in server-instance.ts.
     const calls = src.match(/^\s*(?:ctx\.)?(?:tool|registerTool)\(/gm) ?? [];
     expect(calls.length).toBe(37);
 
