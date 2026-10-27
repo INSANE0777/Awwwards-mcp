@@ -850,12 +850,12 @@ describe("analyzePageStructure attach mode", () => {
 
   // Fake browser with no newPage: any launch/page-creation fallback throws.
   function attachFake(pageUrl = "https://example.com/", scan: any = SCAN) {
-    const evals: any[] = [];
+    const evalCalls: Array<{ fn: unknown; arg?: unknown }> = [];
     const calls: string[] = [];
     const page = {
       url: () => pageUrl,
-      evaluate: async (_fn: unknown, arg?: unknown) => {
-        evals.push(arg);
+      evaluate: async (fn: unknown, arg?: unknown) => {
+        evalCalls.push({ fn, arg });
         return scan;
       },
       goto: async () => {
@@ -891,24 +891,28 @@ describe("analyzePageStructure attach mode", () => {
         return browser;
       },
     };
-    return { evals, calls, page, loader: async () => ({ chromium }) };
+    return { evalCalls, calls, page, loader: async () => ({ chromium }) };
   }
 
-  it("requires AWWWARDS_MCP_ATTACH=1 and never loads playwright otherwise", async () => {
-    let loaded = false;
-    const res = await analyzePageStructure(
-      "https://example.com",
-      async () => {
-        loaded = true;
-        return {};
-      },
-      40,
-      { cdpEndpoint: "http://127.0.0.1:9222" },
-    );
-    expect("error" in res).toBe(true);
-    if ("error" in res) expect(res.error).toContain("AWWWARDS_MCP_ATTACH=1");
-    expect(loaded).toBe(false);
-  });
+  it.each([undefined, ""])(
+    "requires AWWWARDS_MCP_ATTACH=1 (ambient value %s) and never loads playwright otherwise",
+    async (ambient) => {
+      vi.stubEnv("AWWWARDS_MCP_ATTACH", ambient);
+      let loaded = false;
+      const res = await analyzePageStructure(
+        "https://example.com",
+        async () => {
+          loaded = true;
+          return {};
+        },
+        40,
+        { cdpEndpoint: "http://127.0.0.1:9222" },
+      );
+      expect("error" in res).toBe(true);
+      if ("error" in res) expect(res.error).toContain("AWWWARDS_MCP_ATTACH=1");
+      expect(loaded).toBe(false);
+    },
+  );
 
   it("scans the attached page without launch, goto, settle or preScroll", async () => {
     vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
@@ -927,8 +931,25 @@ describe("analyzePageStructure attach mode", () => {
       expect(res.bands.map((b) => b.label)).toEqual(["body"]);
     }
     expect(fake.calls).toEqual(["connect:http://127.0.0.1:9222", "browser.close"]);
-    // One evaluate: the scan only (preScroll would add an argument-less call).
-    expect(fake.evals).toEqual([{ responsive: false }]);
+    // Two evaluates: the one-shot dev shim, then the scan (preScroll would add
+    // an argument-less call after them).
+    expect(fake.evalCalls).toHaveLength(2);
+    expect(String(fake.evalCalls[0]!.fn)).toContain("globalThis.__name");
+    expect(fake.evalCalls[1]).toEqual({ fn: SCAN_SNIPPET, arg: { responsive: false } });
+  });
+
+  it("installs the one-shot __name shim before the scan evaluate", async () => {
+    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
+    const fake = attachFake();
+    await analyzePageStructure(
+      "https://example.com",
+      fake.loader,
+      40,
+      { cdpEndpoint: "http://127.0.0.1:9222" },
+    );
+    expect(fake.evalCalls).toHaveLength(2);
+    expect(fake.evalCalls[0]!.fn).toContain("globalThis.__name");
+    expect(fake.evalCalls[1]!.fn).toBe(SCAN_SNIPPET);
   });
 
   it("rejects an invalid endpoint before loading playwright", async () => {
@@ -984,7 +1005,7 @@ describe("analyzePageStructure attach mode", () => {
     );
     expect("error" in res).toBe(true);
     if ("error" in res) expect(res.error).toContain("https://other.test");
-    expect(fake.evals).toEqual([]);
+    expect(fake.evalCalls).toEqual([]);
     expect(fake.calls).toEqual(["connect:http://127.0.0.1:9222", "browser.close"]);
   });
 });

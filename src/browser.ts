@@ -7,6 +7,12 @@ import { CAPTURE_INSTALL_HINT } from "./capture.js";
 /** Opt-in gate; attach stays disabled unless the user sets this in the server env. */
 export const ATTACH_ENV = "AWWWARDS_MCP_ATTACH";
 
+/** Browser-side setup; Chrome/Edge 136+ ignore the debugging flag on the default profile. */
+export const ATTACH_SETUP_HINT =
+  "Start Chrome/Edge with --remote-debugging-port=9222 --user-data-dir=<throwaway dir> " +
+  "(version 136+ ignores --remote-debugging-port on the default profile), then open the exact " +
+  "URL in that window — it runs in the throwaway profile, not your everyday one.";
+
 const ENDPOINT_HINT =
   "cdpEndpoint must be a loopback CDP URL: http://127.0.0.1:<port>, http://[::1]:<port>, " +
   "ws://127.0.0.1:<port>/devtools/browser/<id> or ws://[::1]:<port>/devtools/browser/<id>. " +
@@ -28,6 +34,9 @@ function normalizeHref(raw: string): string {
 /** Accepts only the loopback forms in design §4.4; returns the trimmed endpoint. */
 export function validateCdpEndpoint(endpoint: string): { endpoint: string } | { error: string } {
   const trimmed = endpoint.trim();
+  // Raw delimiters are rejected before parsing: an empty "?" or "#" leaves
+  // u.search/u.hash empty, so checking the parsed fields alone would pass it.
+  if (trimmed.includes("?") || trimmed.includes("#")) return { error: ENDPOINT_HINT };
   let u: URL;
   try {
     u = new URL(trimmed);
@@ -86,7 +95,7 @@ export async function attachPage(
     return {
       error:
         `CDP attach failed (${valid.endpoint}): ${err instanceof Error ? err.message : String(err)}. ` +
-        "Start the browser with --remote-debugging-port and retry.",
+        ATTACH_SETUP_HINT,
     };
   }
   const pages: any[] = [];

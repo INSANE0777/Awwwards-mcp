@@ -599,11 +599,20 @@ export interface WaitOpts {
 // references would be undefined in the page (tsc dist never injects them).
 // Install a no-op shim before navigation so tsx-run captures behave like
 // compiled ones. Only snippets serialized via page.evaluate need this.
+export const SNIPPET_SHIM_SOURCE =
+  `globalThis.__name = globalThis.__name || ((target, name) => { try { Object.defineProperty(target, "name", { value: name, configurable: true }); } catch {} return target; });`;
+
 export async function installSnippetShims(page: any): Promise<void> {
   if (typeof page.addInitScript !== "function") return; // fake pages in tests
-  await page.addInitScript(
-    `globalThis.__name = (target, name) => { try { Object.defineProperty(target, "name", { value: name, configurable: true }); } catch {} return target; };`,
-  );
+  await page.addInitScript(SNIPPET_SHIM_SOURCE);
+}
+
+// Attached pages are already loaded, so addInitScript never runs for them.
+// One-shot string evaluate installs the same no-op shim before the scan:
+// harmless on compiled builds, required when the server runs under tsx.
+export async function installAttachedShim(page: any): Promise<void> {
+  if (typeof page.evaluate !== "function") return; // fake pages in tests
+  await page.evaluate(SNIPPET_SHIM_SOURCE);
 }
 
 // Scroll through the page so lazy-rendered sections have layout before a
@@ -665,6 +674,7 @@ export async function analyzePageStructure(
     if ("error" in attached) return attached;
     try {
       // No goto, no settle, no preScroll: attach only reads the user's tab.
+      await installAttachedShim(attached.page);
       const raw = (await attached.page.evaluate(SCAN_SNIPPET, {
         responsive: false,
       })) as ScanResult;

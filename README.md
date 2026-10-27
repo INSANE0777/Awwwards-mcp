@@ -214,11 +214,18 @@ package automatically if present.
 ### Read-only attach to your own browser
 
 `analyze_page_structure` can scan a page you already have open instead of
-launching its own browser: start Chrome/Edge with
-`--remote-debugging-port=9222`, open the exact URL, set
-`AWWWARDS_MCP_ATTACH=1` in the server's environment (restart the server), then
-pass `cdpEndpoint: "http://127.0.0.1:9222"` — or `http://[::1]:9222`, or a
-`ws://127.0.0.1:9222/devtools/browser/<id>` endpoint.
+launching its own browser. Start Chrome/Edge with a **throwaway profile** —
+version 136+ ignores `--remote-debugging-port` on the default profile:
+
+```bash
+chrome --remote-debugging-port=9222 --user-data-dir=<throwaway dir>
+```
+
+Open the exact URL in the window that starts: it runs in the throwaway profile,
+not your everyday one, so it carries none of your normal cookies or logins.
+Then set `AWWWARDS_MCP_ATTACH=1` in the server's environment (restart the
+server), and pass `cdpEndpoint: "http://127.0.0.1:9222"` — or
+`http://[::1]:9222`, or a `ws://127.0.0.1:9222/devtools/browser/<id>` endpoint.
 
 - **Loopback only.** The endpoint must be `127.0.0.1` or `[::1]`; HTTPS/WSS,
   credentials, queries, fragments, non-loopback hosts and extra paths are

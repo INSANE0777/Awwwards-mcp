@@ -62,6 +62,9 @@ describe("validateCdpEndpoint", () => {
     "http://192.168.1.5:9222",
     "http://127.0.0.1",
     "http://user:pass@127.0.0.1:9222",
+    "http://127.0.0.1:9222/?",
+    "http://127.0.0.1:9222/#",
+    "ws://127.0.0.1:9222/devtools/browser/abc?",
     "http://127.0.0.1:9222/?token=abc",
     "http://127.0.0.1:9222/#frag",
     "http://127.0.0.1:9222/json/version",
@@ -130,6 +133,26 @@ describe("attachPage", () => {
     );
     expect("error" in res).toBe(true);
     expect(loaded).toBe(false);
+  });
+
+  it("explains the throwaway-profile setup when the connection fails", async () => {
+    const res = await attachPage(
+      async () => ({
+        chromium: {
+          connectOverCDP: async () => {
+            throw new Error("ECONNREFUSED 127.0.0.1:9222");
+          },
+        },
+      }),
+      "http://127.0.0.1:9222",
+      "https://example.com",
+    );
+    expect("error" in res).toBe(true);
+    if ("error" in res) {
+      expect(res.error).toContain("ECONNREFUSED");
+      expect(res.error).toContain("--user-data-dir");
+      expect(res.error).toContain("throwaway profile");
+    }
   });
 });
 
