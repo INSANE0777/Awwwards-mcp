@@ -389,10 +389,22 @@ describe("SCAN_SNIPPET responsive predicates (source-lock)", () => {
   });
 
   it("§7: a marquee inside an overflow-x scroller is excluded from offences", () => {
-    expect(src).toContain('s.overflowX === "auto" || s.overflowX === "scroll" || s.overflowX === "hidden"');
+    expect(src).toContain('s.overflowX === "auto" || s.overflowX === "scroll"');
+    expect(src).toContain('s.overflowX === "hidden" && !isRoot');
+    expect(src).toContain('String(s.transform || "none") !== "none" && !isRoot');
     expect(src).toContain("!insideScroller(el)");
-    expect(src).toContain('String(s.transform || "none") !== "none"');
     expect(src).toContain("depth < 100");
+  });
+
+  // A hidden clip or transform on body/html applies to the whole page, so it
+  // must not excuse offenders: otherwise `overflow-x:hidden` on the root
+  // reports pageOverflow with an empty offender list. No DOM executor here,
+  // so the root exception is source-locked per the house pattern.
+  it("a root overflow-x:hidden or transform still reports overflow offenders", () => {
+    expect(src).toContain("const isRoot = cur === doc.body || cur === doc.documentElement;");
+    expect(src).toContain('s.overflowX === "hidden" && !isRoot');
+    expect(src).toContain('String(s.transform || "none") !== "none" && !isRoot');
+    expect(src).toContain("right > viewportWidth + 1 && !insideScroller(el)");
   });
 
   it("counts small text only when the element owns a direct text node below 12px", () => {

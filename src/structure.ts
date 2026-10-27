@@ -274,11 +274,13 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
         let depth = 0;
         // Walk to the document root; 100 is only a hostile-DOM safety bound.
         while (cur && cur.nodeType === 1 && depth < 100) {
+          // A clip/transform on body or html is page-wide: it would mask every
+          // offender, so only a descendant ancestor may exclude an element.
+          const isRoot = cur === doc.body || cur === doc.documentElement;
           const s = g.getComputedStyle(cur);
-          if (s.overflowX === "auto" || s.overflowX === "scroll" || s.overflowX === "hidden") {
-            return true;
-          }
-          if (String(s.transform || "none") !== "none") return true;
+          if (s.overflowX === "auto" || s.overflowX === "scroll") return true;
+          if (s.overflowX === "hidden" && !isRoot) return true;
+          if (String(s.transform || "none") !== "none" && !isRoot) return true;
           cur = cur.parentElement;
           depth++;
         }
