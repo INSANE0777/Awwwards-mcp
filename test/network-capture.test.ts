@@ -4,16 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // The 50 MB guard is asserted through stat, so the cap test never allocates a
-// 50 MB fixture. A negative value falls through to the real stat.
+// 50 MB fixture. A negative value falls through to the real stat. readFile is
+// wrapped so the cap test can prove the oversized file is never read.
 const mockedFileSize = vi.hoisted(() => ({ value: -1 }));
+const readFileSpy = vi.hoisted(() => vi.fn());
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
+  readFileSpy.mockImplementation(actual.readFile as any);
   return {
     ...actual,
     stat: async (...args: any[]) => {
       const result = await (actual.stat as any)(...args);
       return mockedFileSize.value < 0 ? result : { ...result, size: mockedFileSize.value };
     },
+    readFile: (...args: any[]) => readFileSpy(...args),
   };
 });
 
@@ -33,6 +37,7 @@ function tempHar(body: unknown, name = "capture.har"): string {
 }
 afterEach(() => {
   mockedFileSize.value = -1;
+  readFileSpy.mockClear();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -160,6 +165,63 @@ describe("analyzeNetworkCapture", () => {
     }
   });
 
+  it("redacts 16–31 hex reset tokens and 20+ mixed alphanumeric segments", async () => {
+    const res = await analyzeNetworkCapture(join(FIXTURES, "short-token.har"));
+    if ("error" in res) throw new Error(res.error);
+    expect(res.groups.map((g) => g.pathTemplate)).toEqual(["/reset/{redacted}"]);
+    expect(res.templatedGroups).toBe(1);
+    expect(JSON.stringify(res)).not.toContain("a1b2c3d4e5f6a7b8");
+
+    const mixed = await analyzeNetworkCapture(
+      tempHar(har([entry("https://api.example.com/session/abc123def456ghi789jkl012")])),
+    );
+    if ("error" in mixed) throw new Error(mixed.error);
+    expect(mixed.groups[0].pathTemplate).toBe("/session/{redacted}");
+    expect(JSON.stringify(mixed)).not.toContain("abc123def456ghi789jkl012");
+  });
+
+  it("redacts = and three-dot segments, and length-caps long ISO datetimes", async () => {
+    const path = tempHar(har([
+      entry("https://api.example.com/callback/token=secret-value"),
+      entry("https://api.example.com/files/archive...zip/download"),
+      entry("https://api.example.com/exports/2024-05-01T12:00:00.000Z/report"),
+      entry("https://api.example.com/exports/2024-05-01T12:00:00.000+05:30/report"),
+    ]));
+    const res = await analyzeNetworkCapture(path);
+    if ("error" in res) throw new Error(res.error);
+    expect(res.groups.map((g) => g.pathTemplate)).toEqual([
+      "/callback/{redacted}",
+      "/exports/{date}/report",
+      "/exports/{redacted}/report",
+      "/files/{redacted}/download",
+    ]);
+    expect(res.templatedGroups).toBe(4);
+    expect(JSON.stringify(res)).not.toContain("secret-value");
+  });
+
+  it("never returns headers, postData or response bodies", async () => {
+    const res = await analyzeNetworkCapture(join(FIXTURES, "realistic.har"));
+    if ("error" in res) throw new Error(res.error);
+    expect(res.groups).toHaveLength(2);
+    expect(res.note).toContain("never returned");
+    expect(res.note).not.toContain("never read");
+
+    const json = JSON.stringify(res);
+    for (const secret of [
+      "header-secret-abc123",
+      "cookie-secret-def456",
+      "response-cookie-secret-xyz",
+      "body-secret-ghi789",
+      "basic-secret-jkl012",
+      "postdata-secret-mno345",
+      "response-secret-pqr678",
+      "Bearer ",
+      "Basic ",
+    ]) {
+      expect(json).not.toContain(secret);
+    }
+  });
+
   it("caps content types and query names at 20", async () => {
     const query = Array.from({ length: 25 }, (_, i) => `q${i}=value-${i}`).join("&");
     const entries = Array.from({ length: 21 }, (_, i) =>
@@ -179,7 +241,7 @@ describe("analyzeNetworkCapture", () => {
     if ("error" in one) throw new Error(one.error);
     expect(one.groups).toHaveLength(1);
     expect(one.groups[0].count).toBe(3);
-    expect(one.templatedGroups).toBe(1);
+    expect(one.templatedGroups).toBe(2);
     expect(one.evidenceCoverage.status).toBe("complete");
 
     const all = await analyzeNetworkCapture(validPath, { top: 999 });
@@ -244,10 +306,12 @@ describe("analyzeNetworkCapture", () => {
   });
 
   it("rejects files above the 50 MB cap before reading", async () => {
+    readFileSpy.mockClear();
     mockedFileSize.value = MAX_HAR_BYTES + 1;
     expect(await analyzeNetworkCapture(validPath)).toEqual({
       error: "HAR file exceeds the 50 MB cap",
     });
+    expect(readFileSpy).not.toHaveBeenCalled();
   });
 
   it("handler returns the report and flags malformed files as errors", async () => {

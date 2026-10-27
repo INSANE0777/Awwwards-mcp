@@ -31,7 +31,7 @@ export interface NetworkCaptureResult {
 }
 
 const NOTE =
-  "Offline HAR 1.2 API surface only: request/response bodies, headers, cookies and query values are never read or returned; recorded URLs are never fetched.";
+  "Offline HAR 1.2 API surface only: request/response bodies, headers (including Authorization and cookies), postData and query values are never returned; recorded URLs are never fetched.";
 
 type JsonObject = Record<string, unknown>;
 const isObject = (v: unknown): v is JsonObject =>
@@ -41,6 +41,7 @@ const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX_RE = /^[0-9a-f]{32,}$/i;
+const SHORT_HEX_RE = /^[0-9a-f]{16,31}$/i;
 
 // First matching rule wins, in the binding order (design §4.1).
 const TEMPLATE_RULES: [RegExp, string][] = [
@@ -58,18 +59,32 @@ function templateSegment(raw: string): string {
   } catch {
     // Malformed percent escape: check the raw segment instead.
   }
-  // UUID/hex ids are longer than the 24-char redaction threshold by
-  // definition, so those two structured shapes win over the length rule;
-  // everything else long/high-entropy is redacted before templating.
-  const structuredId = UUID_RE.test(decoded) || HEX_RE.test(decoded);
+
+  const uuid = UUID_RE.test(decoded);
+  const longHex = HEX_RE.test(decoded);
+  const shortHex = SHORT_HEX_RE.test(decoded);
+  const mixedToken =
+    !longHex &&
+    decoded.length >= 20 &&
+    /[a-z]/i.test(decoded) &&
+    /\d/.test(decoded) &&
+    !/[-_.]/.test(decoded);
+
+  // Explicit secret markers and short high-entropy tokens always redact.
   if (
     decoded.includes("@") ||
     decoded.includes("=") ||
     decoded.includes("...") ||
-    (!structuredId && decoded.length > 24)
+    shortHex ||
+    mixedToken
   ) {
     return "{redacted}";
   }
+
+  // The generic length cap runs before templating, except for the two
+  // structured ids that exceed 24 chars by definition.
+  if (!uuid && !longHex && decoded.length > 24) return "{redacted}";
+
   for (const [re, token] of TEMPLATE_RULES) if (re.test(decoded)) return token;
   return raw; // keep the original encoding (e.g. %2F stays one segment)
 }
@@ -202,6 +217,7 @@ export async function analyzeNetworkCapture(
   const top = typeof requestedTop === "number" && Number.isFinite(requestedTop)
     ? Math.min(Math.max(Math.trunc(requestedTop), 1), MAX_TOP)
     : DEFAULT_TOP;
+  const templatedGroups = ordered.filter((item) => item.templated).length;
   const shown = ordered.slice(0, top);
 
   const limitations: string[] = [];
@@ -217,7 +233,7 @@ export async function analyzeNetworkCapture(
       limitations,
     }),
     groups: shown.map((item) => item.group),
-    templatedGroups: shown.filter((item) => item.templated).length,
+    templatedGroups,
     note: NOTE,
   };
 }
