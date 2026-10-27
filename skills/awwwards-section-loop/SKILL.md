@@ -151,6 +151,8 @@ verify its band, lock, next. Whole-page desktop + 390 mobile parity last.
   includes measured perf (fps, dropped frames, long tasks) and anti-pattern
   counts from instrumented live probes. Runs a real browser — expect
   ~2 min per call.
+- `audit_url compact:true` — quick perf and anti-pattern checks when you only
+  need the summary, not the full evidence.
 - `capture_pose_3d` — camera path for shared-canvas units (step 0).
 - `analyze_scroll_map` / `analyze_hover_census` - per-section motion
   census to build from. `analyze_scroll_map` rows now carry keyframe

@@ -209,7 +209,8 @@ at. Run them BEFORE recording - then record only what they can't express:
   layout thrash) plus an anti-pattern scan (transitioning blur, infinite
   loops, animated layout properties, transition:all) and names the worst
   offender in the evidence. Use it as the "is my build heavy" instrument
-  before polishing, not only at the end.
+  before polishing, not only at the end. Pass `compact: true` for verdict-only
+  checks (verdict, overall, band and motion scores).
 - `analyze_scroll_map` - per-element scroll census: which elements animate,
   their triggers (scroll/pin/scrub), durations, easings — now with real
   VALUES: per-anim keyframe matrices (from→to like `translateY(56px) → 0`)

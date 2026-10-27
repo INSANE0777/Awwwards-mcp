@@ -69,6 +69,30 @@ queries keep AND semantics: every token must hit the same site.
 | `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds and dumps the listing; later calls report the delta. Each first-seen winner's Elements section is backfilled into the searchable element corpus, so new winners are element-searchable immediately. |
 | `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
 
+### Routing
+
+| You want | Use |
+|----------|-----|
+| Sites matching filters or free text | `search_sites` — the site index with filters. |
+| Curated inspiration boards | `get_collections` — curated moodboards, not a search index. |
+| Agencies, studios or freelancers | `search_directory` — agencies/studios, not sites. |
+| Annual Awards categories, nominees or one nominee | `get_annual_*` — Annual Awards only. |
+| Full design DNA for one site or a shortlist | `get_site_details` — one `slug`, or a bounded batch of `slugs`. |
+| Performance evidence for one URL | `audit_url` — one URL, no reference. |
+| A scored build-vs-reference comparison | `verify_build` — two URLs, scored comparison. |
+| Accessibility evidence for a live page | `analyze_accessibility` — evidence census, not compliance. |
+| Section bands and desktop↔mobile changes | `analyze_page_structure` — band map and responsive comparison, not a score. |
+
+`compact:true` is the summary mode for heavy tools — `audit_url`,
+`verify_build`, `analyze_scroll_map`, `analyze_hover_census` and
+`capture_component` return the full payload's field names with less detail.
+Batch detail is `get_site_details { slugs }`, capped at 10: results stay in
+input order, carry compact details only (no images), and report per-slug
+`cached`/`fetched`/`error`/`skipped` status. `analyze_page_structure` with
+`compare: "mobile"` returns responsive evidence alongside `mobileBands`/`diff`
+— page overflow, small text and small tap targets at 390×844 — evidence, not a
+score.
+
 `create_design_brief` turns 2–5 shortlisted references into a cited direction:
 
 1. Search and shortlist references with `search_sites`.

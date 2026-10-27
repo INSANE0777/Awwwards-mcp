@@ -56,7 +56,7 @@ Run this loop before building anything visual:
    layouts, contrast breaks, footer) were never visible in them. For
    mobile-excellence references pass `viewport: "mobile"` — and capture BOTH
    viewports when the desktop and mobile designs diverge.
-6. **Get the design DNA as follow-up evidence.** Call `get_site_details` on the top pick when the brief reports missing or weak detail evidence, or when a specific source needs deeper inspection. If it reports a layout-drift error, fall back to judging the shortlisted screenshots, `get_site_elements` (which uses a different parser), or a `capture_live_site` of the site's URL for a first-hand full-page view.
+6. **Get the design DNA as follow-up evidence.** Call `get_site_details` on the top pick when the brief reports missing or weak detail evidence, or when a specific source needs deeper inspection. If it reports a layout-drift error, fall back to judging the shortlisted screenshots, `get_site_elements` (which uses a different parser), or a `capture_live_site` of the site's URL for a first-hand full-page view. For a shortlist, `get_site_details { slugs }` gives bounded enrichment: up to 10 sites in one call, compact details, no images.
 7. **Study MOTION before building (element videos, not posters).** Call
    `get_site_elements` on shortlisted sites — it returns per-element video
    URLs (preloader, page transition, case study, about…). **Download those
