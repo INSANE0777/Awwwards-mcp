@@ -686,16 +686,27 @@ export async function installAttachedShim(page: any): Promise<void> {
   await page.evaluate(SNIPPET_SHIM_SOURCE);
 }
 
+// Hard caps for one preScroll walk. The in-page function cannot close over
+// module scope (page.evaluate re-serializes it), so the same literals are
+// repeated below and pinned by test/structure.test.ts — keep them in sync.
+export const MAX_PRESCROLL_STEPS = 80;
+export const PRE_SCROLL_DEADLINE_MS = 8_000;
+
 // Scroll through the page so lazy-rendered sections have layout before a
 // screenshot or band scan (spec requirement; 450px steps, brief settle, back
 // to top). Shared by captureLiveSite and analyzePageStructure — this is the
 // ONE implementation; capture.ts imports it. Scrolls the detected inner
 // scroll container when the page has one (body-pinned sites), else window.
+// Both walks stop at MAX_PRESCROLL_STEPS/8s even when scrollHeight keeps
+// growing, and always reset to the top.
 export async function preScroll(page: any): Promise<void> {
   await page.evaluate(async function () {
     const g = globalThis as any;
     const doc = g.document;
     const step = 450;
+    const maxSteps = 80; // MAX_PRESCROLL_STEPS
+    const deadlineMs = 8000; // PRE_SCROLL_DEADLINE_MS
+    const started = Date.now();
     // Mirror of SCAN_SNIPPET's findScrollRoot, kept inline (no nested named
     // function): this evaluate can run before the tsx __name shim is installed.
     let scroller: any = null;
@@ -722,17 +733,25 @@ export async function preScroll(page: any): Promise<void> {
       }
     } catch {}
     if (scroller) {
-      for (let y = 0; y < scroller.scrollHeight; y += step) {
+      let y = 0;
+      let steps = 0;
+      while (steps < maxSteps && Date.now() - started < deadlineMs && y < scroller.scrollHeight) {
         scroller.scrollTop = y;
         await new Promise((r) => setTimeout(r, 40));
+        y += step;
+        steps++;
       }
       scroller.scrollTop = 0;
       await new Promise((r) => setTimeout(r, 150));
       return;
     }
-    for (let y = 0; y < doc.documentElement.scrollHeight; y += step) {
+    let y = 0;
+    let steps = 0;
+    while (steps < maxSteps && Date.now() - started < deadlineMs && y < doc.documentElement.scrollHeight) {
       g.window.scrollTo(0, y);
       await new Promise((r) => setTimeout(r, 40));
+      y += step;
+      steps++;
     }
     g.window.scrollTo(0, 0);
     await new Promise((r) => setTimeout(r, 150));

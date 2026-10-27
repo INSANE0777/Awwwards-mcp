@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES, waitForOverlays } from "../src/capture.js";
+import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES, isBlockingOverlay, waitForOverlays } from "../src/capture.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -14,44 +14,104 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+describe("isBlockingOverlay", () => {
+  const viewport = { width: 1000, height: 800 };
+  const style = (over: Partial<Record<string, string>> = {}) => ({
+    position: "fixed",
+    zIndex: "100",
+    opacity: "1",
+    visibility: "visible",
+    display: "block",
+    ...over,
+  });
+  const rect = { width: 900, height: 720 };
+
+  it("blocks only fixed elements covering ≥90% in both axes", () => {
+    expect(isBlockingOverlay(rect, style(), viewport)).toBe(true);
+    expect(isBlockingOverlay(rect, style({ position: "absolute" }), viewport)).toBe(false);
+    expect(isBlockingOverlay({ width: 899, height: 720 }, style(), viewport)).toBe(false);
+    expect(isBlockingOverlay({ width: 900, height: 719 }, style(), viewport)).toBe(false);
+  });
+
+  it("requires z-index ≥100 and opacity >0.05", () => {
+    expect(isBlockingOverlay(rect, style({ zIndex: "99" }), viewport)).toBe(false);
+    expect(isBlockingOverlay(rect, style({ zIndex: "auto" }), viewport)).toBe(false);
+    expect(isBlockingOverlay(rect, style({ zIndex: "101" }), viewport)).toBe(true);
+    expect(isBlockingOverlay(rect, style({ opacity: "0.05" }), viewport)).toBe(false);
+    expect(isBlockingOverlay(rect, style({ opacity: "0" }), viewport)).toBe(false);
+    expect(isBlockingOverlay(rect, style({ opacity: "0.051" }), viewport)).toBe(true);
+    expect(isBlockingOverlay(rect, style({ opacity: undefined as any }), viewport)).toBe(true); // missing → 1
+  });
+
+  it("rejects hidden/none and malformed candidates", () => {
+    expect(isBlockingOverlay(rect, style({ visibility: "hidden" }), viewport)).toBe(false);
+    expect(isBlockingOverlay(rect, style({ display: "none" }), viewport)).toBe(false);
+    expect(isBlockingOverlay(null, style(), viewport)).toBe(false);
+    expect(isBlockingOverlay(rect, null, viewport)).toBe(false);
+  });
+});
+
 describe("waitForOverlays", () => {
-  it("no-ops on a page without waitForFunction", async () => {
+  const blocking = {
+    rect: { width: 900, height: 720 },
+    style: { position: "fixed", zIndex: "100", opacity: "1", visibility: "visible", display: "block" },
+    viewport: { width: 1000, height: 800 },
+  };
+
+  it("no-ops on a page without evaluate", async () => {
     await expect(waitForOverlays({})).resolves.toBeUndefined();
     await expect(waitForOverlays(undefined)).resolves.toBeUndefined();
   });
 
-  it("polls the overlay predicate at 250ms with the given timeout", async () => {
-    const calls: Array<{ fn: unknown; arg: unknown; opts: unknown }> = [];
+  it("polls every 250ms until no blocking candidate remains", async () => {
+    let polls = 0;
+    const waits: number[] = [];
     const page = {
-      waitForFunction: async (fn: unknown, arg: unknown, opts: unknown) => {
-        calls.push({ fn, arg, opts });
+      evaluate: async () => {
+        polls++;
+        return polls <= 2 ? [blocking] : [];
+      },
+      waitForTimeout: async (ms: number) => {
+        waits.push(ms);
       },
     };
-    await waitForOverlays(page, 1234);
-    expect(calls).toHaveLength(1);
-    expect(typeof calls[0]!.fn).toBe("function");
-    expect(calls[0]!.opts).toEqual({ timeout: 1234, polling: 250 });
+    await waitForOverlays(page);
+    expect(polls).toBe(3);
+    expect(waits).toEqual([250, 250]);
   });
 
-  it("swallows a wait timeout", async () => {
+  it("stops at the timeout without throwing", async () => {
+    let polls = 0;
     const page = {
-      waitForFunction: async () => {
-        throw new Error("Timeout 10000ms exceeded");
+      evaluate: async () => {
+        polls++;
+        return [blocking];
+      },
+      waitForTimeout: async () => {},
+    };
+    await expect(waitForOverlays(page, 0)).resolves.toBeUndefined();
+    expect(polls).toBe(1); // no extra poll after the deadline
+  });
+
+  it("swallows evaluate errors (page closed mid-wait)", async () => {
+    const page = {
+      evaluate: async () => {
+        throw new Error("Target closed");
       },
     };
     await expect(waitForOverlays(page)).resolves.toBeUndefined();
   });
 
   it("captureLiveSite waits by default and waitForOverlay:false skips", async () => {
-    const waited: string[] = [];
+    let evals = 0;
     const overlayFake = () => ({
       launch: async () => ({
         newPage: async () => ({
           goto: async () => {},
           waitForTimeout: async () => {},
-          evaluate: async () => 500,
-          waitForFunction: async () => {
-            waited.push("wait");
+          evaluate: async () => {
+            evals++;
+            return 500; // preScroll result; not an overlay candidate list
           },
           screenshot: async ({ path }: { path: string }) => {
             const fs = await import("node:fs/promises");
@@ -63,14 +123,15 @@ describe("waitForOverlays", () => {
       }),
     });
     await captureLiveSite("https://example.com", tmpDir(), async () => ({ chromium: overlayFake() }));
-    expect(waited).toHaveLength(1);
+    expect(evals).toBe(2); // preScroll + one overlay poll
+    evals = 0;
     await captureLiveSite(
       "https://example.com",
       tmpDir(),
       async () => ({ chromium: overlayFake() }),
       { waitForOverlay: false },
     );
-    expect(waited).toHaveLength(1); // still only the default run
+    expect(evals).toBe(1); // preScroll only
   });
 });
 

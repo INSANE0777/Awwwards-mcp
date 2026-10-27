@@ -26,43 +26,87 @@ export interface CaptureOpts extends WaitOpts {
   waitForOverlay?: boolean;
 }
 
-// Polls until no visible fixed-position element covers ≥90% of the viewport in
-// both axes with z-index ≥ 100 — a preloader that would otherwise be the whole
-// screenshot. Pages that keep one mounted forever hit the timeout, which is
-// swallowed: a late overlay is better than a failed capture. Fake/older pages
-// without waitForFunction are treated as overlay-free.
-//
-// The predicate is helper-free on purpose: tsx's keepNames injects __name()
-// around nested named functions, and capture does not install the page shim.
-export async function waitForOverlays(page: any, timeoutMs = 10_000): Promise<void> {
-  if (typeof page?.waitForFunction !== "function") return;
-  try {
-    await page.waitForFunction(
-      function () {
-        const g = globalThis as any;
-        const doc = g.document;
-        const vw = doc.documentElement.clientWidth || g.innerWidth || 1;
-        const vh = doc.documentElement.clientHeight || g.innerHeight || 1;
-        const els = doc.querySelectorAll("*");
-        for (let i = 0; i < els.length; i++) {
-          const s = g.getComputedStyle(els[i]);
-          if (String(s.position) !== "fixed") continue;
-          const r = els[i].getBoundingClientRect();
-          if (r.width < 0.9 * vw || r.height < 0.9 * vh) continue;
-          const z = parseInt(String(s.zIndex), 10);
-          if (!(z >= 100)) continue;
-          const opacity = parseFloat(String(s.opacity ?? "1"));
-          if (!(opacity > 0.05)) continue;
-          if (String(s.visibility) === "hidden" || String(s.display) === "none") continue;
-          return false;
-        }
-        return true;
+export interface OverlayCandidate {
+  rect: { width: number; height: number };
+  style: { position: string; zIndex: string; opacity: string; visibility: string; display: string };
+  viewport: { width: number; height: number };
+}
+
+// PURE: would this fixed element cover the screenshot? ≥90% of the viewport
+// in BOTH axes, z-index ≥100, opacity >0.05 and visible. Kept as a Node-side
+// helper so waitForOverlays and tests share one rule; the in-page snippet only
+// collects candidates.
+export function isBlockingOverlay(
+  rect: { width: number; height: number } | null | undefined,
+  style: OverlayCandidate["style"] | null | undefined,
+  viewport: { width: number; height: number },
+): boolean {
+  if (!rect || !style) return false;
+  if (style.position !== "fixed") return false;
+  if (rect.width < 0.9 * viewport.width || rect.height < 0.9 * viewport.height) return false;
+  const z = parseInt(String(style.zIndex), 10);
+  if (!(z >= 100)) return false;
+  const opacity = parseFloat(String(style.opacity ?? "1"));
+  if (!(opacity > 0.05)) return false;
+  if (style.visibility === "hidden" || style.display === "none") return false;
+  return true;
+}
+
+// Runs IN THE PAGE via page.evaluate: one pass over fixed-position elements,
+// returning their geometry + the style fields isBlockingOverlay checks. No
+// nested named helpers (capture installs no tsx __name shim); capped at 50.
+export const OVERLAY_SNIPPET = function (): OverlayCandidate[] {
+  const g = globalThis as any;
+  const doc = g.document;
+  const viewport = {
+    width: doc.documentElement.clientWidth || g.innerWidth || 1,
+    height: doc.documentElement.clientHeight || g.innerHeight || 1,
+  };
+  const out: OverlayCandidate[] = [];
+  const els = doc.querySelectorAll("*");
+  for (let i = 0; i < els.length && out.length < 50; i++) {
+    const s = g.getComputedStyle(els[i]);
+    if (String(s.position) !== "fixed") continue;
+    const r = els[i].getBoundingClientRect();
+    out.push({
+      rect: { width: r.width, height: r.height },
+      style: {
+        position: String(s.position),
+        zIndex: String(s.zIndex),
+        opacity: String(s.opacity ?? "1"),
+        visibility: String(s.visibility),
+        display: String(s.display),
       },
-      undefined,
-      { timeout: timeoutMs, polling: 250 },
-    );
-  } catch {
-    /* overlay never cleared (or page closed): capture what is there */
+      viewport: viewport,
+    });
+  }
+  return out;
+};
+
+// Polls every 250ms until no candidate blocks the viewport — a preloader that
+// would otherwise be the whole screenshot. Pages that keep one mounted forever
+// hit the timeout, which is swallowed: a late overlay is better than a failed
+// capture. Fake/older pages without evaluate are treated as overlay-free.
+export async function waitForOverlays(page: any, timeoutMs = 10_000): Promise<void> {
+  if (typeof page?.evaluate !== "function") return;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    let found: any;
+    try {
+      found = await page.evaluate(OVERLAY_SNIPPET);
+    } catch {
+      return; // page closed mid-wait
+    }
+    const blocked =
+      Array.isArray(found) &&
+      found.some((c: any) => !!c?.viewport && isBlockingOverlay(c.rect, c.style, c.viewport));
+    if (!blocked || Date.now() >= deadline) return;
+    try {
+      if (typeof page.waitForTimeout === "function") await page.waitForTimeout(250);
+      else await new Promise((r) => setTimeout(r, 250));
+    } catch {
+      return;
+    }
   }
 }
 

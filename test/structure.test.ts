@@ -6,7 +6,9 @@ import {
   collapseBands,
   analyzePageStructure,
   coordinateY,
+  MAX_PRESCROLL_STEPS,
   preScroll,
+  PRE_SCROLL_DEADLINE_MS,
   selectorFromParts,
   splitCollapsedBands,
   diffBands,
@@ -653,6 +655,108 @@ describe("inner scroll root", () => {
     expect(scan).toContain("out.scrollRoot = scrollRootLabel(scroller)");
     expect(scroll).toContain("scroller.scrollTop = y");
     expect(scroll).toContain("scroller.scrollTop = 0");
+  });
+});
+
+// The pre-scroll walk must terminate even when a page grows its scrollHeight
+// on every scroll: 80 × 450px steps / 8s hard cap, then back to the top.
+describe("preScroll caps", () => {
+  const withFakes = async (doc: any, win: any, run: () => Promise<void>) => {
+    const g = globalThis as any;
+    const saved = {
+      document: g.document,
+      window: g.window,
+      setTimeout: g.setTimeout,
+      getComputedStyle: g.getComputedStyle,
+    };
+    g.document = doc;
+    g.window = win;
+    g.getComputedStyle = () => ({ overflowY: "auto", display: "block", visibility: "visible" });
+    g.setTimeout = (cb: any) => saved.setTimeout(cb, 0); // no real 40ms settle in tests
+    try {
+      await run();
+    } finally {
+      g.document = saved.document;
+      g.window = saved.window;
+      g.setTimeout = saved.setTimeout;
+      g.getComputedStyle = saved.getComputedStyle;
+    }
+  };
+
+  it("caps the window walk when scrollHeight keeps growing, then resets", async () => {
+    const scrolled: number[] = [];
+    let height = 1000;
+    const doc = {
+      documentElement: {
+        get scrollHeight() {
+          return height;
+        },
+        clientHeight: 900,
+      },
+      body: {},
+      querySelectorAll: () => [],
+    };
+    const win = {
+      scrollTo: (_x: number, y: number) => {
+        scrolled.push(y);
+        height += 4500; // would never terminate without the cap
+      },
+    };
+    await withFakes(doc, win, () =>
+      preScroll({ evaluate: async (fn: any) => fn() }),
+    );
+    expect(scrolled).toHaveLength(MAX_PRESCROLL_STEPS + 1);
+    expect(scrolled[MAX_PRESCROLL_STEPS]).toBe(0); // reset
+    expect(Math.max(...scrolled)).toBe(450 * (MAX_PRESCROLL_STEPS - 1));
+  });
+
+  it("caps the inner-scroller walk and resets scrollTop", async () => {
+    const tops: number[] = [];
+    let height = 2000;
+    let top = 0;
+    const el = {
+      tagName: "DIV",
+      id: "page",
+      classList: [],
+      clientHeight: 900,
+      get scrollHeight() {
+        return height;
+      },
+      get scrollTop() {
+        return top;
+      },
+      set scrollTop(v: number) {
+        top = v;
+        tops.push(v);
+        height += 4500;
+      },
+      getBoundingClientRect: () => ({ width: 1440, height: 900 }),
+    };
+    const doc = {
+      documentElement: { scrollHeight: 900, clientHeight: 900 },
+      body: {},
+      querySelectorAll: (sel: string) => (sel === "*" ? [el] : []),
+    };
+    const win = {
+      scrollTo: () => {
+        throw new Error("window must not scroll when an inner root exists");
+      },
+    };
+    await withFakes(doc, win, () =>
+      preScroll({ evaluate: async (fn: any) => fn() }),
+    );
+    expect(tops).toHaveLength(MAX_PRESCROLL_STEPS + 1);
+    expect(tops[MAX_PRESCROLL_STEPS]).toBe(0); // reset
+    expect(Math.max(...tops)).toBe(450 * (MAX_PRESCROLL_STEPS - 1));
+  });
+
+  it("source-locks the cap literals and applies them to both walks", () => {
+    const src = String(preScroll);
+    expect(src).toContain(`maxSteps = ${MAX_PRESCROLL_STEPS}`);
+    expect(PRE_SCROLL_DEADLINE_MS).toBe(8000);
+    expect(src).toMatch(/deadlineMs = (8e3|8000)/); // esbuild prints 8000 as 8e3
+    expect(src).toContain("Date.now() - started < deadlineMs");
+    expect(src.match(/steps < maxSteps/g)).toHaveLength(2);
   });
 });
 
