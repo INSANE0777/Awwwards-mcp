@@ -85,6 +85,9 @@ export interface EdgeScanChunk {
 export interface ImportGraph {
   edges: ImportEdge[];
   unresolved: number;
+  // True only when a cap actually dropped a unique candidate — an exact-cap
+  // graph is complete, not truncated.
+  truncated: boolean;
 }
 
 export const MAX_EDGES_PER_CHUNK = 20;
@@ -106,34 +109,46 @@ export function extractEdges(chunks: EdgeScanChunk[]): ImportGraph {
   const capturedUrls = new Set(chunks.map((c) => c.url));
   const seen = new Set<string>();
   let unresolved = 0;
-  for (const chunk of chunks) {
-    if (edges.length >= MAX_EDGES_TOTAL) break;
-    let perChunk = 0;
+  let truncated = false;
+
+  // Lazy per-chunk stream: dedupe happens on pull, so hitting a cap costs one
+  // extra candidate (proof something was dropped) and no scan of the rest.
+  function* candidates(chunk: EdgeScanChunk): Generator<{ to: string; kind: ImportEdgeKind; raw: string }> {
     for (const [re, kind] of EDGE_FAMILIES) {
       for (const m of chunk.text.matchAll(re)) {
-        if (perChunk >= MAX_EDGES_PER_CHUNK || edges.length >= MAX_EDGES_TOTAL) break;
         const to = m[1] ?? "";
         const key = `${chunk.index}\u0000${kind}\u0000${to}`;
         if (seen.has(key)) continue; // dedupe first-wins
         seen.add(key);
-        perChunk++;
-        edges.push({ from: chunk.index, to, kind, raw: m[0] });
-        // Resolved ONLY by landing exactly on a captured URL; webpack ids are
-        // registry numbers that can never be checked — counted unresolved.
-        let landed = false;
-        if (kind !== "webpack-id") {
-          try {
-            landed = capturedUrls.has(new URL(to, chunk.url).href);
-          } catch {
-            landed = false;
-          }
-        }
-        if (!landed) unresolved++;
+        yield { to, kind, raw: m[0] };
       }
-      if (edges.length >= MAX_EDGES_TOTAL) break;
     }
   }
-  return { edges, unresolved };
+
+  for (const chunk of chunks) {
+    let perChunk = 0;
+    for (const candidate of candidates(chunk)) {
+      if (perChunk >= MAX_EDGES_PER_CHUNK || edges.length >= MAX_EDGES_TOTAL) {
+        truncated = true;
+        break;
+      }
+      const { to, kind, raw } = candidate;
+      perChunk++;
+      edges.push({ from: chunk.index, to, kind, raw });
+      // Resolved ONLY by landing exactly on a captured URL; webpack ids are
+      // registry numbers that can never be checked — counted unresolved.
+      let landed = false;
+      if (kind !== "webpack-id") {
+        try {
+          landed = capturedUrls.has(new URL(to, chunk.url).href);
+        } catch {
+          landed = false;
+        }
+      }
+      if (!landed) unresolved++;
+    }
+  }
+  return { edges, unresolved, truncated };
 }
 
 // ---- opt-in bundle intelligence (`bundleIntel`) ---------------------------
@@ -267,7 +282,7 @@ export function extractBundleIntel(
     moduleGraph: {
       nodes: chunks.length,
       edges: scanned.edges.length,
-      truncated: scanned.edges.length >= MAX_EDGES_TOTAL,
+      truncated: scanned.truncated,
       externalSpecifiers,
     },
   };
@@ -584,6 +599,9 @@ export async function captureBundleForensics(
           graph,
         )
       : undefined;
+    // Coverage describes CAPTURE evidence only; unpack warnings stay in the
+    // normal warnings field and must not downgrade what was captured.
+    const captureWarnings = [...warnings];
 
     // Optional unpack pass: hard-capped (first 10 QUALIFYING chunks, 2MB each
     // — see the loop), each chunk try/caught — a webcrack crash or odd result
@@ -677,7 +695,8 @@ export async function captureBundleForensics(
             evidenceCoverage: coverageFrom({
               collected: chunks.length,
               excluded: Math.max(0, targets.length - baseSaved),
-              limitations: warnings,
+              total: targets.length,
+              limitations: captureWarnings,
             }),
           }
         : {}),

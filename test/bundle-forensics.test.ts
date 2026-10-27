@@ -653,6 +653,16 @@ describe("extractEdges (D1: static import edges)", () => {
     expect(g.edges).toHaveLength(400);
     expect(g.unresolved).toBe(400);
     expect(g.edges.filter((e) => e.from >= 23)).toHaveLength(0);
+    expect(g.truncated).toBe(true); // 625 candidates → caps actually dropped edges
+  });
+
+  it("exact caps are not truncation: 20/20 per chunk and 400/400 total stay complete", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => `import x${i} from "./m${i}.js";`).join("");
+    expect(extractEdges([mk(0, A, twenty)]).truncated).toBe(false);
+    const exact = Array.from({ length: 20 }, (_, c) => mk(c, `${pageOrigin}/e${c}.js`, twenty));
+    const g = extractEdges(exact);
+    expect(g.edges).toHaveLength(400);
+    expect(g.truncated).toBe(false); // exactly the cap, nothing dropped
   });
 });
 
@@ -783,6 +793,71 @@ describe("bundle intelligence (opt-in bundleIntel)", () => {
     ]);
   });
 
+  it("coverage: all candidates failing yields unknown, partial collection yields partial", async () => {
+    const fixtureMap = {
+      [BUNDLE_PAGE]: bundleFixture("entry.html"),
+      [BUNDLE_A]: bundleFixture("chunk-a.js"),
+      [BUNDLE_B]: bundleFixture("chunk-b.js"),
+    };
+
+    const failed = await captureBundleForensics(BUNDLE_PAGE, {
+      fetchFn: fakeFetchMap({ [BUNDLE_PAGE]: bundleFixture("entry.html") }),
+      bundleIntel: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in failed).toBe(false);
+    if ("error" in failed) return;
+    cleanup.push(failed.outDir);
+    // total = 2 HTML-advertised targets, collected = 0 → unknown, not partial.
+    expect(failed.evidenceCoverage).toEqual({
+      status: "unknown",
+      collected: 0,
+      excluded: 2,
+      limitations: [expect.stringContaining(BUNDLE_A), expect.stringContaining(BUNDLE_B)],
+    });
+
+    const partial = await captureBundleForensics(BUNDLE_PAGE, {
+      fetchFn: fakeFetchMap({ [BUNDLE_PAGE]: fixtureMap[BUNDLE_PAGE], [BUNDLE_A]: fixtureMap[BUNDLE_A] }),
+      bundleIntel: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in partial).toBe(false);
+    if ("error" in partial) return;
+    cleanup.push(partial.outDir);
+    expect(partial.evidenceCoverage).toEqual({
+      status: "partial",
+      collected: 1,
+      excluded: 1,
+      limitations: [expect.stringContaining(BUNDLE_B)],
+    });
+  });
+
+  it("coverage ignores unpack warnings (capture complete stays complete)", async () => {
+    const map = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: "var a=1;",
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: fakeFetchMap(map),
+      bundleIntel: true,
+      unpackLoader: async () => ({
+        webcrack: async () => {
+          throw new Error("boom");
+        },
+      }),
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.warnings.join("\n")).toContain("unpack skipped chunk 0: boom");
+    expect(rep.evidenceCoverage).toEqual({
+      status: "complete",
+      collected: 1,
+      excluded: 0,
+      limitations: [],
+    });
+  });
+
   it("never fetches a source map: fetch calls identical with and without intel", async () => {
     const plain = bundleFetch();
     const plainRep = await captureBundleForensics(BUNDLE_PAGE, { fetchFn: plain.fetchFn, unpackLoader: async () => null });
@@ -864,7 +939,7 @@ describe("bundle intelligence (opt-in bundleIntel)", () => {
     ]);
     expect(intel.moduleGraph.nodes).toBe(2);
     expect(intel.moduleGraph.edges).toBe(26);
-    expect(intel.moduleGraph.truncated).toBe(false);
+    expect(intel.moduleGraph.truncated).toBe(true); // chunk 1's 25 imports hit the per-chunk 20 cap
     expect(intel.moduleGraph.externalSpecifiers).toHaveLength(20);
     expect(intel.moduleGraph.externalSpecifiers).toEqual(
       Array.from({ length: 20 }, (_, i) => `pkg-${i}`).sort(),
