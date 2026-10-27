@@ -88,6 +88,11 @@ The user's build/research doesn't wait for the repair. Degrade gracefully:
 - **Capture tools down** (playwright missing): fall back to
   `get_site_details` screenshots (CDN-served, no browser needed) until
   `npm run doctor -- --fix` restores chromium.
+- **One band or a preloader screenshot**: 1.14 detects inner scroll roots
+  (`scrollRoot`) and waits out full-screen loaders. If a page still returns a
+  single band, its content may be in shadow DOM or canvas; inspect and report
+  the limitation instead of treating it as a full band map. `capture_live_site`
+  full-page is still viewport-only on inner-scroll pages; use anchored captures.
 - **Parser drift mid-task**: results may be partially empty (e.g. details
   without palette). Surface which part is missing; don't silently present
   degraded data as complete.

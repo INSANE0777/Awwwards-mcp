@@ -38,7 +38,12 @@ MCP-supporting extension. After registering, the agent restart is needed
 before the tools appear — say so and stop; preferences (step 1) can be
 collected now and persisted so the restarted session lands running.
 Optional env additions: `AWWWARDS_CACHE_DIR` (custom cache location),
-`AWWWARDS_AUTO_UPDATE=1` (background self-update on new releases).
+`AWWWARDS_AUTO_UPDATE=1` (background self-update on new releases),
+`AWWWARDS_MCP_PROFILE=core|full` (`core` exposes 12 build-loop tools instead of 37; default full),
+`AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default 32 MB; oversized results become a truncation JSON),
+`AWWWARDS_MCP_DEBUG_MEMORY=1` (one stderr metrics line per tool call), and
+`AWWWARDS_MCP_ATTACH=1` (allow read-only CDP attach for logged-in pages).
+The one-release legacy `AWARDS_MCP_*` spellings are accepted; canonical is `AWWWARDS_MCP_*`.
 
 ## 1. Ask the user (batched, all at once)
 

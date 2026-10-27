@@ -27,7 +27,7 @@ Scope: whole page or specific sections? A continuous scroll-narrative (fixed sta
 - Per section: `capture_component <url>` with `selector` (id/class), `maxNodes` up to 2000 → geometry, 44 computed style keys, pseudo-elements, inline SVG, text, imgSrc, fonts, colors.
 - Motion: `analyze_scroll_map <url>` (keyframes + `gsapTriggers` numerics; `scrubProbe` on for scrubbed narratives), `analyze_hover_census <url>` (during-hover `activeAnims`), `get_motion_dna <url>`.
 - Canvas/WebGL hero: `capture_pose_3d` → frames/grid; keep `build_pose_stub` output as the camera reference.
-- Screenshots: `capture_live_site` full-page + at each scroll anchor from the band map (this is your QA ground truth, not decoration).
+- Screenshots: `capture_live_site` full-page + at each scroll anchor from the band map (this is your QA ground truth, not decoration). It waits out full-screen preloaders by default. If `analyze_page_structure` returns `scrollRoot`, the page scrolls an inner container: anchor screenshots must drive that container, not `window`, and `capture_live_site` full-page is viewport-only on such pages - capture per anchor with Playwright/your QA script instead of trusting the full-page image.
 - Mechanism unknown after all evidence? `analyze_bundle <url>` (≤40 chunks, 1 req/s, keyword grep, optional webcrack) — understand *how*, still write your own code.
 - API shape: export the network log as a HAR and run `analyze_network_capture <path>` — grouped endpoints and path templates only, no bodies/headers/secrets. Already have the page open in Chrome? `analyze_page_structure` with `cdpEndpoint` scans it without driving it (requires `AWWWARDS_MCP_ATTACH=1`; never navigates, scrolls, clicks or creates tabs).
 
@@ -41,7 +41,7 @@ Scope: whole page or specific sections? A continuous scroll-narrative (fixed sta
 
 ## Phase 3 — QA gate (do not declare done without it)
 
-- Playwright: 390, 768, 1024, 1440, 1728 widths; screenshot every scroll anchor (match the reference capture); compare compositions side by side.
+- Playwright: 390, 768, 1024, 1440, 1728 widths; screenshot every scroll anchor (match the reference capture); compare compositions side by side. For inner-scroll pages (`scrollRoot`), drive the container's `scrollTop` at each anchor; do not assert against a `capture_live_site` full-page shot, which is viewport-only there.
 - Zero console errors, zero 404s, zero horizontal overflow; assert element bounds (name width, card count/hrefs, contact block) at 1440 and 390.
 - Reduced-motion pass at 1440: stacked layout, no overflow.
 - Interaction parity: `verify_flow { buildUrl, referenceUrl, steps }` replays the same 1–6 scroll/click/wait steps and reports per-step `same`/`changed`/`unknown` — use it when a menu, accordion, modal or hover-revealed panel is part of the reference; treat `unknown` as unverified, not as a pass.
