@@ -5,6 +5,8 @@ import {
   buildResponsiveReport,
   collapseBands,
   analyzePageStructure,
+  coordinateY,
+  preScroll,
   selectorFromParts,
   splitCollapsedBands,
   diffBands,
@@ -562,6 +564,95 @@ describe("SCAN_SNIPPET responsive predicates (source-lock)", () => {
       g.scrollX = saved.scrollX;
       g.scrollY = saved.scrollY;
     }
+  });
+});
+
+// Inner scroll containers (body{position:fixed} + div.page{overflow-y:auto}):
+// the scan must report scroller coordinates so bands match the real content
+// height instead of one viewport-tall band.
+describe("inner scroll root", () => {
+  it("coordinateY maps document-root and element-scroller rect tops", () => {
+    expect(coordinateY(100, 500)).toBe(600);
+    expect(coordinateY(100, 500, null)).toBe(600);
+    // Scroller top 20, scrolled 3000: element at viewport 120 sits at content 3100.
+    expect(coordinateY(120, 999, { top: 20, scrollTop: 3000 })).toBe(3100);
+    // Window scroll cancels out of the scroller form (both rects move together).
+    expect(coordinateY(120 + 250, 250, { top: 20 + 250, scrollTop: 3000 })).toBe(3100);
+  });
+
+  it("collapses a scroller scan in scroller coordinates", () => {
+    const raw = {
+      title: "Scroller",
+      totalHeight: 4992,
+      scrollRoot: "div#page.page",
+      candidates: [
+        { tag: "body", label: "body", bg: "rgb(0, 0, 0)", top: 0, height: 4992, textStart: "" },
+        { tag: "section", label: ".hero", bg: "rgb(255, 255, 255)", top: 0, height: 2496, textStart: "Hero" },
+        { tag: "section", label: ".outro", bg: "rgb(0, 0, 255)", top: 2496, height: 2496, textStart: "Outro" },
+      ],
+    };
+    const bands = collapseBands(raw.candidates, raw.totalHeight);
+    expect(bands.map((b) => [b.offsetTop, b.height, b.label])).toEqual([
+      [0, 2496, ".hero"],
+      [2496, 2496, ".outro"],
+    ]);
+    expect(splitCollapsedBands(bands, [1500]).map((b) => b.offsetTop)).toEqual([0, 2496]);
+  });
+
+  it("passes the scanned scrollRoot through to PageStructure", async () => {
+    const fake = {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async () => {},
+          waitForTimeout: async () => {},
+          evaluate: async () => ({
+            title: "Pinned Body",
+            totalHeight: 4000,
+            scrollRoot: "div#page.page",
+            candidates: [band({ label: "body", top: 0, height: 4000 })],
+          }),
+        }),
+        close: async () => {},
+      }),
+    };
+    const res = await analyzePageStructure("https://example.com", async () => ({ chromium: fake }));
+    expect("error" in res).toBe(false);
+    if (!("error" in res)) expect(res.scrollRoot).toBe("div#page.page");
+  });
+
+  it("omits scrollRoot for document-root scans", async () => {
+    const fake = {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async () => {},
+          waitForTimeout: async () => {},
+          evaluate: async () => ({
+            title: "Normal",
+            totalHeight: 800,
+            candidates: [band({ label: "body", top: 0, height: 800 })],
+          }),
+        }),
+        close: async () => {},
+      }),
+    };
+    const res = await analyzePageStructure("https://example.com", async () => ({ chromium: fake }));
+    expect("error" in res).toBe(false);
+    if (!("error" in res)) expect("scrollRoot" in res).toBe(false);
+  });
+
+  it("SCAN_SNIPPET detection and preScroll mirror each other (source-lock)", () => {
+    const scan = String(SCAN_SNIPPET);
+    const scroll = String(preScroll);
+    for (const src of [scan, scroll]) {
+      expect(src).toContain("el === doc.body || el === doc.documentElement");
+      expect(src).toContain("el.scrollHeight > el.clientHeight + 100");
+      expect(src).toContain('String(s.overflowY) !== "auto" && String(s.overflowY) !== "scroll"');
+    }
+    expect(scan).toContain("de.scrollHeight > de.clientHeight + 100"); // document scroll wins
+    expect(scan).toContain("r.top - scrollerTop + scrollerScrollTop");
+    expect(scan).toContain("out.scrollRoot = scrollRootLabel(scroller)");
+    expect(scroll).toContain("scroller.scrollTop = y");
+    expect(scroll).toContain("scroller.scrollTop = 0");
   });
 });
 

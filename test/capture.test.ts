@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES } from "../src/capture.js";
+import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES, waitForOverlays } from "../src/capture.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -12,6 +12,66 @@ const tmpDir = () => {
 };
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+describe("waitForOverlays", () => {
+  it("no-ops on a page without waitForFunction", async () => {
+    await expect(waitForOverlays({})).resolves.toBeUndefined();
+    await expect(waitForOverlays(undefined)).resolves.toBeUndefined();
+  });
+
+  it("polls the overlay predicate at 250ms with the given timeout", async () => {
+    const calls: Array<{ fn: unknown; arg: unknown; opts: unknown }> = [];
+    const page = {
+      waitForFunction: async (fn: unknown, arg: unknown, opts: unknown) => {
+        calls.push({ fn, arg, opts });
+      },
+    };
+    await waitForOverlays(page, 1234);
+    expect(calls).toHaveLength(1);
+    expect(typeof calls[0]!.fn).toBe("function");
+    expect(calls[0]!.opts).toEqual({ timeout: 1234, polling: 250 });
+  });
+
+  it("swallows a wait timeout", async () => {
+    const page = {
+      waitForFunction: async () => {
+        throw new Error("Timeout 10000ms exceeded");
+      },
+    };
+    await expect(waitForOverlays(page)).resolves.toBeUndefined();
+  });
+
+  it("captureLiveSite waits by default and waitForOverlay:false skips", async () => {
+    const waited: string[] = [];
+    const overlayFake = () => ({
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async () => {},
+          waitForTimeout: async () => {},
+          evaluate: async () => 500,
+          waitForFunction: async () => {
+            waited.push("wait");
+          },
+          screenshot: async ({ path }: { path: string }) => {
+            const fs = await import("node:fs/promises");
+            await fs.writeFile(path, Buffer.from("png-bytes"));
+            return Buffer.from("png-bytes");
+          },
+        }),
+        close: async () => {},
+      }),
+    });
+    await captureLiveSite("https://example.com", tmpDir(), async () => ({ chromium: overlayFake() }));
+    expect(waited).toHaveLength(1);
+    await captureLiveSite(
+      "https://example.com",
+      tmpDir(),
+      async () => ({ chromium: overlayFake() }),
+      { waitForOverlay: false },
+    );
+    expect(waited).toHaveLength(1); // still only the default run
+  });
 });
 
 describe("captureLiveSite", () => {

@@ -468,6 +468,7 @@ export interface Handlers {
     viewport?: ViewportName;
     inline?: boolean;
     maxInlineBytes?: number;
+    waitForOverlay?: boolean;
   }): Promise<ToolResponse>;
   analyze_page_structure(args: {
     url: string;
@@ -1608,6 +1609,7 @@ export function createHandlers(deps: {
     viewport?: ViewportName;
     inline?: boolean;
     maxInlineBytes?: number;
+    waitForOverlay?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1615,7 +1617,7 @@ export function createHandlers(deps: {
       // the injectable playwright loader - opts must land in fourth place.
       const capture =
         deps.captureFn ??
-        ((url: string, imagesDir: string, opts?: WaitOpts) =>
+        ((url: string, imagesDir: string, opts?: CaptureOpts) =>
           import("./capture.js").then((m) => m.captureLiveSite(url, imagesDir, undefined, opts)));
       // The tool schema defaults viewport to "desktop" (zod); the ?? keeps
       // direct handler calls on the same explicit path.
@@ -1624,6 +1626,7 @@ export function createHandlers(deps: {
         viewport: args.viewport ?? "desktop",
         inline: args.inline,
         maxInlineBytes: args.maxInlineBytes,
+        waitForOverlay: args.waitForOverlay,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       if (result.base64 === undefined) {

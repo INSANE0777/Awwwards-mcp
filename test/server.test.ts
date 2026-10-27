@@ -2398,7 +2398,9 @@ describe("C3 compact response modes", () => {
     expect(body.sampleSelectors).toEqual(["a.cta", "nav li"]);
     expect(body.note).toBe("touch-only context — hover interactions skipped");
 
-    const full = await h.analyze_hover_census({ url: "https://example.com/page" });
+    // compact:false (the reported TypeError case): full payload, no throw.
+    const full = await h.analyze_hover_census({ url: "https://example.com/page", compact: false });
+    expect(full.isError).toBeFalsy();
     const fullBody = JSON.parse((full.content[0] as any).text);
     expect(fullBody.samples).toHaveLength(2);
     expect(fullBody.samples[0].changedProps).toEqual(["transform"]);

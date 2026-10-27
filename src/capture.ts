@@ -22,6 +22,48 @@ export interface CaptureOpts extends WaitOpts {
   inline?: boolean;
   /** Base64 length above which the preview is omitted (default 2_500_000). */
   maxInlineBytes?: number;
+  /** false skips waiting for a full-screen preloader overlay to clear (default true). */
+  waitForOverlay?: boolean;
+}
+
+// Polls until no visible fixed-position element covers ≥90% of the viewport in
+// both axes with z-index ≥ 100 — a preloader that would otherwise be the whole
+// screenshot. Pages that keep one mounted forever hit the timeout, which is
+// swallowed: a late overlay is better than a failed capture. Fake/older pages
+// without waitForFunction are treated as overlay-free.
+//
+// The predicate is helper-free on purpose: tsx's keepNames injects __name()
+// around nested named functions, and capture does not install the page shim.
+export async function waitForOverlays(page: any, timeoutMs = 10_000): Promise<void> {
+  if (typeof page?.waitForFunction !== "function") return;
+  try {
+    await page.waitForFunction(
+      function () {
+        const g = globalThis as any;
+        const doc = g.document;
+        const vw = doc.documentElement.clientWidth || g.innerWidth || 1;
+        const vh = doc.documentElement.clientHeight || g.innerHeight || 1;
+        const els = doc.querySelectorAll("*");
+        for (let i = 0; i < els.length; i++) {
+          const s = g.getComputedStyle(els[i]);
+          if (String(s.position) !== "fixed") continue;
+          const r = els[i].getBoundingClientRect();
+          if (r.width < 0.9 * vw || r.height < 0.9 * vh) continue;
+          const z = parseInt(String(s.zIndex), 10);
+          if (!(z >= 100)) continue;
+          const opacity = parseFloat(String(s.opacity ?? "1"));
+          if (!(opacity > 0.05)) continue;
+          if (String(s.visibility) === "hidden" || String(s.display) === "none") continue;
+          return false;
+        }
+        return true;
+      },
+      undefined,
+      { timeout: timeoutMs, polling: 250 },
+    );
+  } catch {
+    /* overlay never cleared (or page closed): capture what is there */
+  }
 }
 
 export type CaptureResult = { file: string; base64?: string; inlineOmitted?: boolean } | { error: string };
@@ -59,6 +101,7 @@ export async function captureLiveSite(
     // settle window; networkidle already means the network went quiet.
     if (waitStrategy === "load") await page.waitForTimeout(3000);
     await preScroll(page);
+    if (opts?.waitForOverlay !== false) await waitForOverlays(page);
     // Viewport goes into the name: the same URL captured at desktop and mobile
     // must keep both files (issue #23). Return the buffer playwright already
     // gave us — re-reading the file races a concurrent capture of the same URL.

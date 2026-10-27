@@ -26,6 +26,8 @@ export interface PageStructure {
   title: string;
   totalHeight: number;
   bands: PageBand[];
+  /** Detected inner scroll container (`tag#id.class`); absent when the page scrolls on the document root. */
+  scrollRoot?: string;
   /** Mobile-only element evidence; absent unless the capture asked for it. */
   responsive?: ResponsiveReport;
   /** Additive marker: this scan ran on an attached page and never navigated. */
@@ -73,6 +75,8 @@ export interface ScanResult {
   title: string;
   totalHeight: number;
   candidates: RawBand[];
+  /** Detected inner scroll container (`tag#id.class`); absent for document-root scrolling. */
+  scrollRoot?: string;
   /** Landmark y-tops (headings + distinct-bg children ≥400px). Omitted when collection threw. */
   landmarks?: number[];
   /** Mobile element evidence; omitted unless the snippet was called with responsive:true. */
@@ -98,7 +102,61 @@ export interface ScanResult {
 export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResult {
   const g = globalThis as any;
   const doc = g.document;
-  const totalHeight = Math.round(doc.documentElement.scrollHeight);
+
+  // The real scroll container. Sites that pin body (position:fixed) and scroll
+  // an inner div never grow documentElement.scrollHeight, so without this the
+  // whole page reads as one viewport-tall band. Only when the document itself
+  // does not scroll (otherwise a code block or nav menu would win): largest
+  // visible element whose overflow-y auto/scroll actually overflows;
+  // body/html never qualify. Mirrored inline in preScroll.
+  function findScrollRoot(): any {
+    let best: any = null;
+    let bestArea = 0;
+    try {
+      const de = doc.documentElement;
+      if (de.scrollHeight > de.clientHeight + 100) return null;
+      const all = doc.querySelectorAll("*");
+      for (let i = 0; i < all.length; i++) {
+        const el = all[i];
+        if (el === doc.body || el === doc.documentElement) continue;
+        if (!(el.scrollHeight > el.clientHeight + 100)) continue;
+        const s = g.getComputedStyle(el);
+        if (String(s.overflowY) !== "auto" && String(s.overflowY) !== "scroll") continue;
+        if (String(s.display) === "none" || String(s.visibility) === "hidden") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        const area = r.width * r.height;
+        if (area > bestArea) {
+          bestArea = area;
+          best = el;
+        }
+      }
+    } catch {}
+    return best;
+  }
+
+  function scrollRootLabel(el: any): string {
+    const tag = String(el.tagName || "").toLowerCase();
+    const id = el.id ? "#" + String(el.id) : "";
+    const cls = el.classList && el.classList.length ? "." + String(el.classList[0]) : "";
+    return tag + id + cls;
+  }
+
+  const scroller = findScrollRoot();
+  const scrollerRect = scroller ? scroller.getBoundingClientRect() : null;
+  const scrollerTop = scrollerRect ? scrollerRect.top : 0;
+  const scrollerScrollTop = scroller ? scroller.scrollTop || 0 : 0;
+  const totalHeight = Math.round(
+    scroller ? scroller.scrollHeight : doc.documentElement.scrollHeight,
+  );
+
+  // Content y in the scanned scroller's coordinates: the document root adds
+  // window scroll; an element scroller subtracts its viewport top and adds its
+  // own scrollTop (mirrors the pure coordinateY helper).
+  function coordY(r: any): number {
+    return Math.round(scrollerRect ? r.top - scrollerTop + scrollerScrollTop : r.top + g.scrollY);
+  }
+
   const bodyW = doc.body.getBoundingClientRect().width || 1;
   const bodyBg = g.getComputedStyle(doc.body).backgroundColor;
   const candidates: RawBand[] = [
@@ -139,7 +197,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
           tag: el.tagName.toLowerCase(),
           label: (el.id ? "#" + el.id : "") + (el.classList.length ? "." + String(el.classList[0]) : ""),
           bg: s.backgroundColor,
-          top: Math.round(r.top + g.scrollY),
+          top: coordY(r),
           height: Math.round(r.height),
           textStart: (el.textContent ?? "").trim().slice(0, 60),
         });
@@ -159,7 +217,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   try {
     const tops: number[] = [];
     for (const h of doc.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
-      tops.push(Math.round(h.getBoundingClientRect().top + g.scrollY));
+      tops.push(coordY(h.getBoundingClientRect()));
     }
     let walked = 0;
     function walkLandmarks(el: any, depth: number): void {
@@ -169,7 +227,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
         const r = el.getBoundingClientRect();
         const bg = g.getComputedStyle(el).backgroundColor;
         if (r.height >= 400 && bg !== g.getComputedStyle(el.parentElement).backgroundColor) {
-          tops.push(Math.round(r.top + g.scrollY));
+          tops.push(coordY(r));
         }
       }
       for (const child of el.children) walkLandmarks(child, depth + 1);
@@ -185,7 +243,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
       const secs = doc.querySelectorAll("section, article, [role=main]");
       for (let i = 0; i < secs.length && secTops.length < 12; i++) {
         try {
-          secTops.push(Math.round(secs[i].getBoundingClientRect().top + g.scrollY));
+          secTops.push(coordY(secs[i].getBoundingClientRect()));
         } catch {}
       }
     } catch {}
@@ -197,6 +255,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     // landmarks stays undefined — the scan degrades to candidates only
   }
   const out: ScanResult = { title: doc.title, totalHeight, candidates };
+  if (scroller) out.scrollRoot = scrollRootLabel(scroller);
   if (landmarks) out.landmarks = landmarks;
   // Responsive evidence, mobile captures only. One pass in document
   // coordinates; every rule is independent and the whole block degrades to no
@@ -256,7 +315,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
         return {
           parts: selectorParts(el),
           x: Math.round(r.left + g.scrollX),
-          y: Math.round(r.top + g.scrollY),
+          y: coordY(r),
           w: Math.round(r.width),
           h: Math.round(r.height),
           detail: detail,
@@ -360,6 +419,18 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   }
   return out;
 };
+
+// PURE: content y in the scanned scroll container's coordinate space.
+// Document-root scrolling adds window.scrollY to the viewport rect; an inner
+// scroller subtracts its own viewport top and adds its scrollTop. Mirrored
+// inline in SCAN_SNIPPET (which cannot import module helpers).
+export function coordinateY(
+  rectTop: number,
+  docScrollY: number,
+  scroller?: { top: number; scrollTop: number } | null,
+): number {
+  return Math.round(scroller ? rectTop - scroller.top + scroller.scrollTop : rectTop + docScrollY);
+}
 
 // PURE: joins raw selector parts (innermost-first) into a readable path.
 // The page snippet collects the parts because page.evaluate cannot import the
@@ -618,12 +689,48 @@ export async function installAttachedShim(page: any): Promise<void> {
 // Scroll through the page so lazy-rendered sections have layout before a
 // screenshot or band scan (spec requirement; 450px steps, brief settle, back
 // to top). Shared by captureLiveSite and analyzePageStructure — this is the
-// ONE implementation; capture.ts imports it.
+// ONE implementation; capture.ts imports it. Scrolls the detected inner
+// scroll container when the page has one (body-pinned sites), else window.
 export async function preScroll(page: any): Promise<void> {
   await page.evaluate(async function () {
     const g = globalThis as any;
+    const doc = g.document;
     const step = 450;
-    for (let y = 0; y < g.document.documentElement.scrollHeight; y += step) {
+    // Mirror of SCAN_SNIPPET's findScrollRoot, kept inline (no nested named
+    // function): this evaluate can run before the tsx __name shim is installed.
+    let scroller: any = null;
+    let bestArea = 0;
+    try {
+      const de = doc.documentElement;
+      if (!(de.scrollHeight > de.clientHeight + 100)) {
+        const all = doc.querySelectorAll("*");
+        for (let i = 0; i < all.length; i++) {
+          const el = all[i];
+          if (el === doc.body || el === doc.documentElement) continue;
+          if (!(el.scrollHeight > el.clientHeight + 100)) continue;
+          const s = g.getComputedStyle(el);
+          if (String(s.overflowY) !== "auto" && String(s.overflowY) !== "scroll") continue;
+          if (String(s.display) === "none" || String(s.visibility) === "hidden") continue;
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) continue;
+          const area = r.width * r.height;
+          if (area > bestArea) {
+            bestArea = area;
+            scroller = el;
+          }
+        }
+      }
+    } catch {}
+    if (scroller) {
+      for (let y = 0; y < scroller.scrollHeight; y += step) {
+        scroller.scrollTop = y;
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      scroller.scrollTop = 0;
+      await new Promise((r) => setTimeout(r, 150));
+      return;
+    }
+    for (let y = 0; y < doc.documentElement.scrollHeight; y += step) {
       g.window.scrollTo(0, y);
       await new Promise((r) => setTimeout(r, 40));
     }
@@ -683,6 +790,7 @@ export async function analyzePageStructure(
         title: raw.title,
         totalHeight: raw.totalHeight,
         bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
+        ...(raw.scrollRoot ? { scrollRoot: raw.scrollRoot } : {}),
         attached: true,
       };
     } finally {
@@ -719,6 +827,7 @@ export async function analyzePageStructure(
       totalHeight: raw.totalHeight,
       bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
     };
+    if (raw.scrollRoot) structure.scrollRoot = raw.scrollRoot;
     if (raw.responsive) structure.responsive = buildResponsiveReport(raw.responsive, profile);
     return structure;
   } finally {

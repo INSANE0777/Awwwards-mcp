@@ -392,6 +392,12 @@ tool(
       .describe(
         "Byte budget for the inline base64 preview (default 2500000); larger previews are saved without an inline image",
       ),
+    waitForOverlay: z
+      .boolean()
+      .default(true)
+      .describe(
+        "wait up to 10s after the pre-scroll for a full-screen fixed preloader (≥90% viewport, z-index ≥100) to clear; false captures immediately",
+      ),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.capture_live_site(args)),
