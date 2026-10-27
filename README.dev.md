@@ -9,7 +9,7 @@ structured, how the data flows, and how to work on it without breaking it.
 A free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/). No API key, no account: it politely
 scrapes public pages (1 request/second, robots.txt-compliant paths), caches
-them in local SQLite, and serves them through 35 MCP tools — screenshots,
+them in local SQLite, and serves them through 37 MCP tools — screenshots,
 design DNA, band maps and motion recordings included.
 
 ```
@@ -32,7 +32,7 @@ design DNA, band maps and motion recordings included.
         └───────────────────────────┬───────────────────────────┘
                                     │
         ┌───────────────────────────▼───────────────────────────┐
-        │ src/server.ts  35 MCP tools over createHandlers(deps) │
+        │ src/server.ts  37 MCP tools over createHandlers(deps) │
         └───────────────────────────┬───────────────────────────┘
                                     │
                     src/cli.ts ── stdio McpServer (awwwards-mcp)
@@ -59,7 +59,8 @@ Note: it spawns a real browser.
 | `server.ts` | ~700 | All MCP tool handlers + search merge semantics. The biggest and most rule-dense module — see [search semantics](#search_sites-semantics) before touching it. |
 | `motion.ts` | ~429 | `recordSiteMotion`: webm recording + ffmpeg filmstrip under a strict 30 s budget (documented timing table at the top of the file). Virtual SVG cursor, per-call `mkdtemp` isolation, 10-min stale-tmp sweep, 60 s ffmpeg deadline. |
 | `motion-sheet.ts` | ~375 | `buildMotionSheet`: Motion Evidence Sheet from a recording + timeline — keyframes at phase-kind transitions (≤9), pairwise difference masks, onion composite, `motion-sheet.md` + static `sheet.html` with a pure-CSS timeline strip. All ffmpeg injectable; throws so the caller can degrade to the filmstrip. Wired via `recordSiteMotion`'s injectable `sheetFn`. |
-| `structure.ts` | ~413 | Band map. `SCAN_SNIPPET` runs in-page via `page.evaluate` (self-contained, reaches DOM through `globalThis` — the Node tsconfig has no DOM lib). `collapseBands` is pure: 8 px sweep, smallest-covering candidate wins, sliver absorb, max-40 cap. `diffBands` is the pure label-matched desktop→mobile diff behind `compare:"mobile"` (`heightDelta`, added/removed/reordered). Owns the ONE `preScroll` shared with capture. |
+| `structure.ts` | ~413 | Band map. `SCAN_SNIPPET` runs in-page via `page.evaluate` (self-contained, reaches DOM through `globalThis` — the Node tsconfig has no DOM lib). `collapseBands` is pure: 8 px sweep, smallest-covering candidate wins, sliver absorb, max-40 cap. `diffBands` is the pure label-matched desktop→mobile diff behind `compare:"mobile"` (`heightDelta`, added/removed/reordered). Owns the ONE `preScroll` shared with capture. `analyzePageStructure` also has a read-only attach path (`cdpEndpoint`, gated by `AWWWARDS_MCP_ATTACH=1`) that scans an already-open page without goto/preScroll. |
+| `browser.ts` | ~110 | Read-only loopback CDP attach (design §4.4): `validateCdpEndpoint` accepts only `http://127.0.0.1:<port>` / `http://[::1]:<port>` and `ws://…/devtools/browser/<id>`; `attachPage` connects over CDP and returns the existing page whose normalized href matches exactly (no launch, goto or new page; no-match errors list origins only); `closeAttached` disconnects without closing pages. |
 | `capture.ts` | ~66 | Full-page screenshot. Intentionally circular import with `structure.ts` (call-time-only bindings; ESM resolves it). |
 | `a11y.ts` | ~640 | Evidence-only accessibility census. `A11Y_SNIPPET` (function declarations + `globalThis`, no arrows, re-serializable) samples ≤200 visible text nodes with computed colour + the element-first background stack (backgroundColor + computed opacity per ancestor, ≤20 layers), images (≤300), heading ladder, focusables + stylesheet `outline:none` rules (≤5000 rules, cross-origin sheets counted blocked), unlabeled controls (≤200) and lang/title. `reduceA11y` is pure: samples under any ancestor opacity group (<0.999) are skipped and counted in `coverage.skippedOpacityGroups` — never approximated, because opacity applies to text as well as backgrounds. Fully opaque chains composite bottom-up over the white canvas (`compositeBackground`/`contrastRatioOverLayers`/`contrastRatio` exported; `hasOpacityGroup` rejects opacity groups) before computing WCAG ratios; background images, gradients and pseudo-elements are not modelled, so contrast stays heuristic there. `analyzeAccessibility` accepts http(s) only, uses the lazy playwright loader (45 s goto + 3 s settle, desktop 1440×900 profile by default (mobile 390×844 with viewport: "mobile")) and always stamps `heuristic: true` + "Evidence only — not a WCAG pass/fail". Powers `analyze_accessibility`. |
 | `census.ts` | ~407 | per-element scroll/SVG motion census (snippet + reducer + capture); powers `analyze_scroll_map`. |

@@ -472,6 +472,7 @@ export interface Handlers {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     compare?: "mobile";
+    cdpEndpoint?: string;
   }): Promise<ToolResponse>;
   record_site_motion(args: {
     url: string;
@@ -1635,8 +1636,21 @@ export function createHandlers(deps: {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     compare?: "mobile";
+    cdpEndpoint?: string;
   }): Promise<ToolResponse> {
     try {
+      // Read-only attach scans one open page; the compare pass opens its own
+      // mobile capture, so the two contracts cannot be mixed.
+      if (args.cdpEndpoint !== undefined && args.compare !== undefined) {
+        return {
+          content: [
+            text(
+              'cdpEndpoint (read-only attach) cannot be combined with compare:"mobile": the compare pass opens its own mobile capture. Remove compare or cdpEndpoint.',
+            ),
+          ],
+          isError: true,
+        };
+      }
       // Lazy default: playwright is only touched when the tool actually runs.
       // maxBands from the tool schema is forwarded so the analyzer honors the
       // caller's cap (falling back to the analyzer's own default of 40).
@@ -1651,6 +1665,7 @@ export function createHandlers(deps: {
       const primaryOpts: WaitOpts = {
         waitStrategy: args.waitStrategy,
         viewport,
+        ...(args.cdpEndpoint !== undefined ? { cdpEndpoint: args.cdpEndpoint } : {}),
       };
       // Only the mobile capture scans elements; a mobile primary IS that capture.
       if (wantsResponsive && viewport === "mobile") primaryOpts.responsive = true;

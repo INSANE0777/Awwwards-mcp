@@ -13,6 +13,14 @@ Coverage honesty, output economy and responsive evidence.
 - `analyze_page_structure compare:"mobile"` returns element-level `responsive` evidence: page overflow, overflow offenders, small text, small tap targets, document rects and selectors, per-kind caps. No screenshots, no hidden-band or wide-fixed checks.
 - README routing table, compact guidance, and skill notes.
 
+### Web reverse-engineering extension (P1-P5)
+
+- `analyze_network_capture(path, top?)` - offline HAR 1.2 API-surface evidence: requests grouped by method + origin + templated path (dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and high-entropy segments redacted), with counts, statuses, content types and query names only. 50 MB / 2000-entry caps; `evidenceCoverage` discloses exclusions; bodies, headers and query values are never returned.
+- `analyze_bundle bundleIntel: true` - opt-in quoted routes, vendor signatures, source-map presence (never fetched) and module graph; default output keys are unchanged without the flag.
+- `verify_flow` - step-aligned interaction comparison: the same 1-6 scroll/click/wait steps on a build and a reference, then path, scroll delta, skeleton hash, text hash and element count per step. `same` only when both sides are complete and untruncated; truncated or failed states are `unknown`. Two fresh launches, never attach, no screenshots.
+- `analyze_page_structure cdpEndpoint` - read-only loopback CDP attach to a browser the user started: requires `AWWWARDS_MCP_ATTACH=1`, selects an already-open page whose normalized href matches exactly, never navigates or creates pages, and disconnects without closing anything. Rejects `compare: "mobile"`, a custom viewport and responsive evidence; the result carries `attached: true` additively.
+- `evidenceCoverage` on the new surfaces (HAR, flow, opt-in bundle intel); tool count 37; README tool/routing rows and attach setup section, README.dev counts, skill pointers, annotation hints.
+
 ## v1.13.0 - 2026-10-25
 
 Discovery, sources, and inspection: 35 tools, with award data from Awwwards' official API,

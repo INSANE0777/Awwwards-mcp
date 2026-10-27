@@ -55,10 +55,12 @@ queries keep AND semantics: every token must hit the same site.
 | `analyze_scroll_map` | Per-element scroll-motion census of any URL: selector path, trigger source (gsap-scrolltrigger / native css scroll & view timelines / data-attr / css-keyframe / SMIL), animated props, duration, easing, scrub/pin flags and SVG stroke draw-ins — the rebuild recipe an agent can wire straight into GSAP timelines. Optional `scrubProbe` re-drives the page through ≤8 scroll steps and samples each scrubbed trigger's real progress curve (`scrubCurves`); every payload ends with a `choreography` block — `hints[]` (selector/value/source) and `groups` read from `gsapTriggers` tween vars and stepped sibling `delayMs`. (needs [playwright](https://playwright.dev)). |
 | `analyze_hover_census` | Hover-interaction census: extracts `:hover` rules from stylesheets, then samples up to 20 interactive elements before/after hover — transform/color/filter diffs plus transition timing (ms + easing). The hover recipe for rebuilds, no video required. (needs [playwright](https://playwright.dev)). |
 | `analyze_bundle` | Bundle forensics for a live page: fetches the page once, downloads its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks / 10MB / 1 request/second), saves + hashes them locally, optionally de-obfuscates with webcrack if installed, and greps keywords across the code — chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Optional `edges` adds the static import graph over the captured chunks. Needs no browser. |
+| `analyze_network_capture` | Offline API-surface evidence from a local HAR 1.2 file (a browser DevTools export): requests grouped by method + origin + path template (dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and long high-entropy segments redacted), with counts, statuses, content types and query names only. Reads the file only — never fetches recorded URLs and never returns bodies, headers or query values. 50 MB / 2000-entry caps; `evidenceCoverage` discloses what was excluded. No network. |
 | `audit_url` | Runtime + static performance **evidence** for any live URL — never a grade. Runtime: installed Chrome/Edge over raw CDP (no playwright) measures fps, dropped frames, long tasks/animations and layout thrash (`perf: {error}` when no browser exists). Static: fetches the page HTML + up to 8 same-origin CSS/JS assets (≤2MB each, one shared 1 req/s limiter, 10s default timeouts), resolving refs against the final post-redirect page URL; asset redirects leaving that origin are rejected. Scans them for animation anti-patterns and returns severity-sorted findings (`count`, `worst`, ≤50 `findings`, `coverage: {assetsScanned, failed}`) so `worst` is always included. Each half degrades independently. Personal, non-commercial use; audit only URLs you are authorised to inspect. |
 | `analyze_accessibility` | Accessibility **evidence** from a live page — explicitly not a WCAG pass/fail. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background **composited bottom-up from the ancestor stack** for fully opaque chains (colour alpha layers; reported as final `rgb()`), then the contrast ratio (worst pairs + selector paths). A sample under any ancestor CSS opacity group (<1) is **excluded from ratios** and counted in `coverage.skippedOpacityGroups` — never approximated. Background images, gradients and pseudo-elements are not composited either, so contrast stays heuristic there. Also: image alt coverage; heading ladder issues; focusable/positive-tabindex counts plus `outline:none` stylesheet rules; unlabeled form controls; document `lang`/title. Returns `coverage`, `heuristic: true` and the note "Evidence only — not a WCAG pass/fail". Accepts http(s) URLs only; degrades to `{error}` when playwright is missing. (needs [playwright](https://playwright.dev)). |
 | `build_project` | Convert a single-file exact rebuild (any local `.html`, e.g. the rebuild flow's `full-page-exact.html`) into a runnable **Vite**, **Astro** or **Next.js** project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (`useEffect` + `gsap.context` on Next), assets carried. Reads a local file and writes the project dir — the suite's one local-write tool. |
 | `verify_build` | Score a build against a reference site: band-map compare (Dice score) + motion-fingerprint diff (trigger mix, scrub/pin, easing vocabulary, native scroll timelines) → 0–100 score, pass/warn/fail verdict and evidence lines. The design-loop gate: build → verify that band's score → fix → re-verify. Optional `domDiff` adds a body-subtree structural diff (missing/extra/reordered/rect drift) between reference and build. (needs [playwright](https://playwright.dev)). |
+| `verify_flow` | Step-aligned interaction-flow comparison: runs the same 1–6 scroll/click/wait steps on a build and a reference URL (two fresh headless launches, desktop or mobile) and compares path, scroll delta, skeleton hash, text hash and element count after each step. `same` only when both sides are complete and untruncated — truncated or failed states are `unknown`. No screenshots; a click can still trigger client-side mutations. (needs [playwright](https://playwright.dev)). |
 | `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000), fonts, colors and element animations — for pixel-informed rebuilds. Adds `typography` usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each, `sampled` node count) and a deduped `paletteSummary` (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). `compact: true` omits both summaries. Runs on any URL. (needs [playwright](https://playwright.dev)). |
 | `capture_pose_3d` | Hero canvas reference frames → camera pose grid; runs on any URL. Samples the page's largest canvas at up to 10 scroll steps with per-step scroll ratios, a `pose-grid-v1` grid ready for 3D replay (`viewport: "mobile"` supported). (needs [playwright](https://playwright.dev)). |
 | `build_pose_stub` | Pose grid → offline three.js+GSAP replay skeleton. Renders a `pose-grid-v1` grid as a standalone scroll-scrubbed stub page: frames preloaded inline, camera path interpolated between snapshot scroll ratios, reduced-motion static fallback; optional `analyze_scroll_map` census adds st/pin/ease suggestions. Pure build — no page fetches. |
@@ -82,6 +84,8 @@ queries keep AND semantics: every token must hit the same site.
 | A scored build-vs-reference comparison | `verify_build` — two URLs, scored comparison. |
 | Accessibility evidence for a live page | `analyze_accessibility` — evidence census, not compliance. |
 | Section bands and desktop↔mobile changes | `analyze_page_structure` — band map and responsive comparison, not a score. |
+| API calls a page makes | `analyze_network_capture` — offline HAR evidence, not a live network tool. |
+| Did my build keep an interaction flow? | `verify_flow` — step-aligned state comparison, not a visual score. |
 
 `compact:true` is the summary mode for heavy tools — `audit_url`,
 `verify_build`, `analyze_scroll_map`, `analyze_hover_census` and
@@ -206,6 +210,30 @@ npm install -g playwright && npx playwright install chromium
 
 `record_site_motion` additionally uses ffmpeg; it resolves the `ffmpeg-static`
 package automatically if present.
+
+### Read-only attach to your own browser
+
+`analyze_page_structure` can scan a page you already have open instead of
+launching its own browser: start Chrome/Edge with
+`--remote-debugging-port=9222`, open the exact URL, set
+`AWWWARDS_MCP_ATTACH=1` in the server's environment (restart the server), then
+pass `cdpEndpoint: "http://127.0.0.1:9222"` — or `http://[::1]:9222`, or a
+`ws://127.0.0.1:9222/devtools/browser/<id>` endpoint.
+
+- **Loopback only.** The endpoint must be `127.0.0.1` or `[::1]`; HTTPS/WSS,
+  credentials, queries, fragments, non-loopback hosts and extra paths are
+  rejected.
+- **No navigation.** The server selects the existing page whose normalized URL
+  matches `url` exactly; if none matches it returns an error listing the open
+  origins (never paths). It creates no tabs, takes no screenshots, clicks
+  nothing and never scrolls the page.
+- **No compare.** `compare: "mobile"`, a custom `viewport` and responsive
+  evidence are rejected in attach mode because each would drive the page.
+- **Disconnect only.** When the scan ends the server disconnects from CDP; your
+  browser and tabs stay open.
+- **Off by default.** Without `AWWWARDS_MCP_ATTACH=1` the tool returns an error
+  explaining the gate, so an agent cannot attach to a browser you did not offer.
+  Keep the debugging port bound to loopback.
 
 ## Skills
 

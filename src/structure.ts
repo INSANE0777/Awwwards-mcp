@@ -1,3 +1,4 @@
+import { attachPage, closeAttached, validateCdpEndpoint, ATTACH_ENV } from "./browser.js";
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
 import { resolveViewport, type ViewportName, type ViewportProfile } from "./viewport.js";
 
@@ -27,6 +28,8 @@ export interface PageStructure {
   bands: PageBand[];
   /** Mobile-only element evidence; absent unless the capture asked for it. */
   responsive?: ResponsiveReport;
+  /** Additive marker: this scan ran on an attached page and never navigated. */
+  attached?: boolean;
 }
 
 /** Raw element evidence serialized out of the page (selector parts are innermost-first). */
@@ -587,6 +590,8 @@ export interface WaitOpts {
   viewport?: ViewportName;
   /** Mobile only: collect overflow, small-text and small-tap-target evidence. */
   responsive?: boolean;
+  /** Read-only attach: loopback CDP endpoint (requires AWWWARDS_MCP_ATTACH=1). */
+  cdpEndpoint?: string;
 }
 
 // tsx (esbuild keepNames) injects __name()/__defProp helpers at module scope;
@@ -624,11 +629,55 @@ export async function analyzePageStructure(
   maxBands?: number,
   opts?: WaitOpts,
 ): Promise<PageStructure | { error: string }> {
+  const endpoint = opts?.cdpEndpoint;
+  if (endpoint !== undefined) {
+    if (process.env[ATTACH_ENV] !== "1") {
+      return {
+        error:
+          `Read-only attach is disabled. Set ${ATTACH_ENV}=1 in the MCP server's environment and restart it, then retry with cdpEndpoint. ` +
+          "Attach connects to a loopback browser you started, scans one already-open page without navigating and disconnects without closing it.",
+      };
+    }
+    const valid = validateCdpEndpoint(endpoint);
+    if ("error" in valid) return valid;
+    // The attached page owns its viewport and scroll position: only scan as-is.
+    if (opts?.viewport !== undefined && opts.viewport !== "desktop") {
+      return {
+        error:
+          "cdpEndpoint attaches to an already-open page, so a custom viewport is unavailable. Omit viewport (the page's own viewport is used).",
+      };
+    }
+    if (opts?.responsive === true) {
+      return {
+        error:
+          "cdpEndpoint is read-only and never scrolls the attached page, so responsive evidence is unavailable. Drop responsive, or run a launched compare without cdpEndpoint.",
+      };
+    }
+  }
   let chromium: any;
   try {
     ({ chromium } = await loader());
   } catch {
     return { error: CAPTURE_INSTALL_HINT };
+  }
+  if (endpoint !== undefined) {
+    const attached = await attachPage(async () => ({ chromium }), endpoint, url);
+    if ("error" in attached) return attached;
+    try {
+      // No goto, no settle, no preScroll: attach only reads the user's tab.
+      const raw = (await attached.page.evaluate(SCAN_SNIPPET, {
+        responsive: false,
+      })) as ScanResult;
+      return {
+        url,
+        title: raw.title,
+        totalHeight: raw.totalHeight,
+        bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
+        attached: true,
+      };
+    } finally {
+      await closeAttached(attached.browser);
+    }
   }
   let browser: any;
   try {

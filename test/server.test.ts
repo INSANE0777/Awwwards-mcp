@@ -1525,6 +1525,52 @@ describe("analyze_page_structure", () => {
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.responsive).toEqual(REPORT);
   });
+
+  it("rejects compare:mobile with cdpEndpoint before calling the analyzer", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    let calls = 0;
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async () => {
+        calls++;
+        return { url: "https://example.com", title: "T", totalHeight: 0, bands: [] };
+      },
+    });
+    const res = await h.analyze_page_structure({
+      url: "https://example.com",
+      compare: "mobile",
+      cdpEndpoint: "http://127.0.0.1:9222",
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("cdpEndpoint");
+    expect(calls).toBe(0);
+  });
+
+  it("passes cdpEndpoint to the analyzer and keeps the attached marker", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<{ cdpEndpoint?: string; viewport?: string }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      analyzeFn: async (url: string, _maxBands?: number, opts?: any) => {
+        seen.push(opts);
+        return { url, title: "T", totalHeight: 500, bands: [], attached: true };
+      },
+    });
+    const res = await h.analyze_page_structure({
+      url: "https://example.com",
+      cdpEndpoint: "http://127.0.0.1:9222",
+    });
+    expect(res.isError).toBeUndefined();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ cdpEndpoint: "http://127.0.0.1:9222", viewport: "desktop" });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.attached).toBe(true);
+    expect("mobileBands" in parsed).toBe(false);
+  });
 });
 
 describe("record_site_motion", () => {

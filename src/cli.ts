@@ -375,7 +375,7 @@ server.tool(
 
 server.tool(
   "analyze_page_structure",
-  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build. compare:\"mobile\" also captures at 390×844 and returns mobileBands + diff {heightDelta, bandsAdded, bandsRemoved, reordered} plus responsive evidence: horizontal overflow, small text and small tap targets.",
+  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build. compare:\"mobile\" also captures at 390×844 and returns mobileBands + diff {heightDelta, bandsAdded, bandsRemoved, reordered} plus responsive evidence: horizontal overflow, small text and small tap targets. cdpEndpoint instead attaches read-only to a browser you started (AWWWARDS_MCP_ATTACH=1) and scans the already-open matching page without navigating it.",
   {
     url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
     maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
@@ -385,6 +385,10 @@ server.tool(
       .enum(["mobile"])
       .optional()
       .describe("Also capture at 390×844 (mobile): adds mobileBands + diff; if the mobile capture fails you still get the desktop result plus mobileError; absent keeps the desktop response unchanged"),
+    cdpEndpoint: z
+      .string()
+      .optional()
+      .describe("Read-only attach to a browser YOU started: loopback CDP endpoint (http://127.0.0.1:9222, http://[::1]:9222, or ws://127.0.0.1:9222/devtools/browser/<id>). Requires AWWWARDS_MCP_ATTACH=1 in the server env; selects an already-open page whose URL matches exactly — never navigates, clicks or captures, and disconnects without closing it. Not available with compare or a non-desktop viewport"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),

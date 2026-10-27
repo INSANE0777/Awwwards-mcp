@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -832,6 +832,160 @@ describe("analyzePageStructure", () => {
     // Exact equality: the desktop default must inject no mobile flags and no
     // extra fields into newPage.
     expect(captured[0]).toEqual({ viewport: { width: 1440, height: 900 } });
+  });
+});
+
+describe("analyzePageStructure attach mode", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const SCAN = {
+    title: "Attached Page",
+    totalHeight: 900,
+    candidates: [
+      band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 900 }),
+    ],
+  };
+
+  // Fake browser with no newPage: any launch/page-creation fallback throws.
+  function attachFake(pageUrl = "https://example.com/", scan: any = SCAN) {
+    const evals: any[] = [];
+    const calls: string[] = [];
+    const page = {
+      url: () => pageUrl,
+      evaluate: async (_fn: unknown, arg?: unknown) => {
+        evals.push(arg);
+        return scan;
+      },
+      goto: async () => {
+        calls.push("goto");
+      },
+      waitForTimeout: async () => {
+        calls.push("wait");
+      },
+      close: async () => {
+        calls.push("page.close");
+      },
+    };
+    const browser = {
+      contexts: () => [
+        {
+          pages: () => [page],
+          close: async () => {
+            calls.push("context.close");
+          },
+        },
+      ],
+      close: async () => {
+        calls.push("browser.close");
+      },
+    };
+    const chromium = {
+      launch: async () => {
+        calls.push("launch");
+        return browser;
+      },
+      connectOverCDP: async (endpoint: string) => {
+        calls.push("connect:" + endpoint);
+        return browser;
+      },
+    };
+    return { evals, calls, page, loader: async () => ({ chromium }) };
+  }
+
+  it("requires AWWWARDS_MCP_ATTACH=1 and never loads playwright otherwise", async () => {
+    let loaded = false;
+    const res = await analyzePageStructure(
+      "https://example.com",
+      async () => {
+        loaded = true;
+        return {};
+      },
+      40,
+      { cdpEndpoint: "http://127.0.0.1:9222" },
+    );
+    expect("error" in res).toBe(true);
+    if ("error" in res) expect(res.error).toContain("AWWWARDS_MCP_ATTACH=1");
+    expect(loaded).toBe(false);
+  });
+
+  it("scans the attached page without launch, goto, settle or preScroll", async () => {
+    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
+    const fake = attachFake();
+    const res = await analyzePageStructure(
+      "https://example.com",
+      fake.loader,
+      40,
+      { cdpEndpoint: "http://127.0.0.1:9222" },
+    );
+    expect("error" in res).toBe(false);
+    if (!("error" in res)) {
+      expect(res.attached).toBe(true);
+      expect(res.title).toBe("Attached Page");
+      expect(res.totalHeight).toBe(900);
+      expect(res.bands.map((b) => b.label)).toEqual(["body"]);
+    }
+    expect(fake.calls).toEqual(["connect:http://127.0.0.1:9222", "browser.close"]);
+    // One evaluate: the scan only (preScroll would add an argument-less call).
+    expect(fake.evals).toEqual([{ responsive: false }]);
+  });
+
+  it("rejects an invalid endpoint before loading playwright", async () => {
+    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
+    let loaded = false;
+    const res = await analyzePageStructure(
+      "https://example.com",
+      async () => {
+        loaded = true;
+        return {};
+      },
+      40,
+      { cdpEndpoint: "https://127.0.0.1:9222" },
+    );
+    expect("error" in res).toBe(true);
+    expect(loaded).toBe(false);
+  });
+
+  it("rejects a custom viewport in attach mode", async () => {
+    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
+    const fake = attachFake();
+    const res = await analyzePageStructure(
+      "https://example.com",
+      fake.loader,
+      40,
+      { viewport: "mobile", cdpEndpoint: "http://127.0.0.1:9222" },
+    );
+    expect("error" in res).toBe(true);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("rejects a responsive scan in attach mode", async () => {
+    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
+    const fake = attachFake();
+    const res = await analyzePageStructure(
+      "https://example.com",
+      fake.loader,
+      40,
+      { responsive: true, cdpEndpoint: "http://127.0.0.1:9222" },
+    );
+    expect("error" in res).toBe(true);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("errors when no open page matches and disconnects", async () => {
+    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
+    const fake = attachFake("https://other.test/page");
+    const res = await analyzePageStructure(
+      "https://example.com",
+      fake.loader,
+      40,
+      { cdpEndpoint: "http://127.0.0.1:9222" },
+    );
+    expect("error" in res).toBe(true);
+    if ("error" in res) expect(res.error).toContain("https://other.test");
+    expect(fake.evals).toEqual([]);
+    expect(fake.calls).toEqual(["connect:http://127.0.0.1:9222", "browser.close"]);
   });
 });
 
