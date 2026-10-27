@@ -47,7 +47,7 @@ queries keep AND semantics: every token must hit the same site.
 | `get_annual_nominees` | Nominees in one Annual Awards category, hydrated on demand at 1 request/second (default 10, max 20). Site summaries include `siteSlug` and `inLocalIndex` so agents can jump to `get_site_details` when the daily index has the site. |
 | `get_annual_nominee` | One Annual Awards nominee in full — site: date, description, designBy, country, images/videos; agency: location, avatar, award tag counts, featured projects. Accepts a UUID, a full `/api/annual/nominees/...` path, or category+slug; the slug form may hydrate up to 20 uncached nominees at 1 req/s (~20s worst case), so prefer an id when known. Media URLs are reference-only (`mediaNote: "reference-only"`); nothing is downloaded. |
 | `capture_live_site` | Optional: fresh full-page screenshot of any live URL. Waits for `load` + a settle window with a bounded pre-scroll, so heavy sites work (`waitStrategy: "networkidle"` available). Pass `viewport: "mobile"` for the 390×844 iPhone-class render (`"desktop"` 1440×900 default). (needs [playwright](https://playwright.dev)). |
-| `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Compare a reference site's structure against your build. Same heavy-site-friendly wait (`waitStrategy: "networkidle"` available); `viewport: "mobile"` analyzes the phone-class layout (`"desktop"` default). `compare: "mobile"` adds a second 390×844 capture and returns `mobileBands` + `diff: {heightDelta, bandsAdded, bandsRemoved, reordered}` (label-matched); if the mobile capture fails you still get the desktop result plus `mobileError`. Absent, the response is unchanged. (needs [playwright](https://playwright.dev)). |
+| `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Compare a reference site's structure against your build. Same heavy-site-friendly wait (`waitStrategy: "networkidle"` available); `viewport: "mobile"` analyzes the phone-class layout (`"desktop"` default). `compare: "mobile"` adds a second 390×844 capture and returns `mobileBands` + `diff: {heightDelta, bandsAdded, bandsRemoved, reordered}` (label-matched); if the mobile capture fails you still get the desktop result plus `mobileError`. Absent, the response is unchanged. `cdpEndpoint` instead attaches to a browser you started (loopback only, requires `AWWWARDS_MCP_ATTACH=1`) and scans the already-open matching page — it never navigates, scrolls, clicks or creates tabs, and disconnects without closing yours. (needs [playwright](https://playwright.dev)). |
 | `record_site_motion` | Optional: short motion-through video of a live URL — preloader, scroll-triggered and hover/cursor animations. Returns an inline filmstrip JPEG plus the saved .webm path. `viewport: "mobile"` records at phone size — the filmstrip renders at the selected viewport, no pillarboxing (`"desktop"` default). Every recording also produces a **Motion Evidence Sheet** (`sheet.html` + `motion-sheet.md`): census-directed keyframes, consecutive-frame diff masks, an onion-skin composite, a cursor-trail overlay and a phase timeline — motion video turned into a document a model can actually read. Degrades gracefully: recording never fails because the sheet does. (needs [playwright](https://playwright.dev) + ffmpeg-static). |
 | `search_elements` | Search the inspiration-elements gallery (footer, hero, pricing, 404…) by free text; ranks BM25 over title/author/category. |
 | `get_element` | One element record: title, category, author, built-with stack, related elements and its media URL (image or video) pointing at awwwards' CDN. |
@@ -211,7 +211,7 @@ npm install -g playwright && npx playwright install chromium
 `record_site_motion` additionally uses ffmpeg; it resolves the `ffmpeg-static`
 package automatically if present.
 
-### Read-only attach to your own browser
+### Attach to your own browser
 
 `analyze_page_structure` can scan a page you already have open instead of
 launching its own browser. Start Chrome/Edge with a **throwaway profile** —
@@ -229,11 +229,14 @@ server), and pass `cdpEndpoint: "http://127.0.0.1:9222"` — or
 
 - **Loopback only.** The endpoint must be `127.0.0.1` or `[::1]`; HTTPS/WSS,
   credentials, queries, fragments, non-loopback hosts and extra paths are
-  rejected.
-- **No navigation.** The server selects the existing page whose normalized URL
-  matches `url` exactly; if none matches it returns an error listing the open
-  origins (never paths). It creates no tabs, takes no screenshots, clicks
-  nothing and never scrolls the page.
+  rejected. For an `http://` endpoint the server reads `/json/version` itself
+  (5 s timeout) and refuses to connect unless the returned
+  `webSocketDebuggerUrl` is also a loopback ws URL.
+- **Never navigates, scrolls, clicks or creates tabs.** The server selects the
+  existing page whose normalized URL matches `url` exactly; if none matches it
+  returns an error listing the open origins (never paths). It takes no
+  screenshots and changes nothing on the page except an idempotent
+  `globalThis.__name` helper used by dev-mode snippet runs.
 - **No compare.** `compare: "mobile"`, a custom `viewport` and responsive
   evidence are rejected in attach mode because each would drive the page.
 - **Disconnect only.** When the scan ends the server disconnects from CDP; your

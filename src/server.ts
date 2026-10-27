@@ -1639,13 +1639,13 @@ export function createHandlers(deps: {
     cdpEndpoint?: string;
   }): Promise<ToolResponse> {
     try {
-      // Read-only attach scans one open page; the compare pass opens its own
+      // Attach scans one open page; the compare pass opens its own
       // mobile capture, so the two contracts cannot be mixed.
       if (args.cdpEndpoint !== undefined && args.compare !== undefined) {
         return {
           content: [
             text(
-              'cdpEndpoint (read-only attach) cannot be combined with compare:"mobile": the compare pass opens its own mobile capture. Remove compare or cdpEndpoint.',
+              'cdpEndpoint (attach) cannot be combined with compare:"mobile": the compare pass opens its own mobile capture. Remove compare or cdpEndpoint.',
             ),
           ],
           isError: true,

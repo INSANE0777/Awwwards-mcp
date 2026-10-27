@@ -29,7 +29,7 @@ Scope: whole page or specific sections? A continuous scroll-narrative (fixed sta
 - Canvas/WebGL hero: `capture_pose_3d` → frames/grid; keep `build_pose_stub` output as the camera reference.
 - Screenshots: `capture_live_site` full-page + at each scroll anchor from the band map (this is your QA ground truth, not decoration).
 - Mechanism unknown after all evidence? `analyze_bundle <url>` (≤40 chunks, 1 req/s, keyword grep, optional webcrack) — understand *how*, still write your own code.
-- API shape: export the network log as a HAR and run `analyze_network_capture <path>` — grouped endpoints and path templates only, no bodies/headers/secrets. Already have the page open in Chrome? `analyze_page_structure` with `cdpEndpoint` scans it read-only (requires `AWWWARDS_MCP_ATTACH=1`; never navigates).
+- API shape: export the network log as a HAR and run `analyze_network_capture <path>` — grouped endpoints and path templates only, no bodies/headers/secrets. Already have the page open in Chrome? `analyze_page_structure` with `cdpEndpoint` scans it without driving it (requires `AWWWARDS_MCP_ATTACH=1`; never navigates, scrolls, clicks or creates tabs).
 
 ## Phase 2 — Build
 

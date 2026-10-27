@@ -847,6 +847,9 @@ describe("analyzePageStructure attach mode", () => {
       band({ label: "body", bg: "rgb(16, 21, 42)", top: 0, height: 900 }),
     ],
   };
+  // ws input avoids http discovery (covered in browser.test.ts) so these tests
+  // never touch the network.
+  const ATTACH_WS = "ws://127.0.0.1:9222/devtools/browser/test";
 
   // Fake browser with no newPage: any launch/page-creation fallback throws.
   function attachFake(pageUrl = "https://example.com/", scan: any = SCAN) {
@@ -921,7 +924,7 @@ describe("analyzePageStructure attach mode", () => {
       "https://example.com",
       fake.loader,
       40,
-      { cdpEndpoint: "http://127.0.0.1:9222" },
+      { cdpEndpoint: ATTACH_WS },
     );
     expect("error" in res).toBe(false);
     if (!("error" in res)) {
@@ -930,26 +933,12 @@ describe("analyzePageStructure attach mode", () => {
       expect(res.totalHeight).toBe(900);
       expect(res.bands.map((b) => b.label)).toEqual(["body"]);
     }
-    expect(fake.calls).toEqual(["connect:http://127.0.0.1:9222", "browser.close"]);
+    expect(fake.calls).toEqual(["connect:" + ATTACH_WS, "browser.close"]);
     // Two evaluates: the one-shot dev shim, then the scan (preScroll would add
     // an argument-less call after them).
     expect(fake.evalCalls).toHaveLength(2);
     expect(String(fake.evalCalls[0]!.fn)).toContain("globalThis.__name");
     expect(fake.evalCalls[1]).toEqual({ fn: SCAN_SNIPPET, arg: { responsive: false } });
-  });
-
-  it("installs the one-shot __name shim before the scan evaluate", async () => {
-    vi.stubEnv("AWWWARDS_MCP_ATTACH", "1");
-    const fake = attachFake();
-    await analyzePageStructure(
-      "https://example.com",
-      fake.loader,
-      40,
-      { cdpEndpoint: "http://127.0.0.1:9222" },
-    );
-    expect(fake.evalCalls).toHaveLength(2);
-    expect(fake.evalCalls[0]!.fn).toContain("globalThis.__name");
-    expect(fake.evalCalls[1]!.fn).toBe(SCAN_SNIPPET);
   });
 
   it("rejects an invalid endpoint before loading playwright", async () => {
@@ -1001,12 +990,12 @@ describe("analyzePageStructure attach mode", () => {
       "https://example.com",
       fake.loader,
       40,
-      { cdpEndpoint: "http://127.0.0.1:9222" },
+      { cdpEndpoint: ATTACH_WS },
     );
     expect("error" in res).toBe(true);
     if ("error" in res) expect(res.error).toContain("https://other.test");
     expect(fake.evalCalls).toEqual([]);
-    expect(fake.calls).toEqual(["connect:http://127.0.0.1:9222", "browser.close"]);
+    expect(fake.calls).toEqual(["connect:" + ATTACH_WS, "browser.close"]);
   });
 });
 

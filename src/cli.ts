@@ -375,7 +375,7 @@ server.tool(
 
 server.tool(
   "analyze_page_structure",
-  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build. compare:\"mobile\" also captures at 390×844 and returns mobileBands + diff {heightDelta, bandsAdded, bandsRemoved, reordered} plus responsive evidence: horizontal overflow, small text and small tap targets. cdpEndpoint instead attaches read-only to a browser you started (AWWWARDS_MCP_ATTACH=1) and scans the already-open matching page without navigating it.",
+  "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build. compare:\"mobile\" also captures at 390×844 and returns mobileBands + diff {heightDelta, bandsAdded, bandsRemoved, reordered} plus responsive evidence: horizontal overflow, small text and small tap targets. cdpEndpoint instead attaches to a browser you started (AWWWARDS_MCP_ATTACH=1) and scans the already-open matching page: it never navigates, scrolls, clicks or creates tabs.",
   {
     url: z.string().url().describe("Absolute URL (https:// or file://) of the page to analyze"),
     maxBands: z.number().int().min(5).max(60).default(40).describe("Cap on returned bands"),
@@ -388,7 +388,7 @@ server.tool(
     cdpEndpoint: z
       .string()
       .optional()
-      .describe("Read-only attach to a browser YOU started: loopback CDP endpoint (http://127.0.0.1:9222, http://[::1]:9222, or ws://127.0.0.1:9222/devtools/browser/<id>). Requires AWWWARDS_MCP_ATTACH=1 in the server env; selects an already-open page whose URL matches exactly — never navigates, clicks or captures, and disconnects without closing it. Not available with compare or a non-desktop viewport"),
+      .describe("Attach to a browser YOU started (requires AWWWARDS_MCP_ATTACH=1): loopback CDP endpoint (http://127.0.0.1:9222, http://[::1]:9222, or ws://127.0.0.1:9222/devtools/browser/<id>; an http endpoint is resolved via /json/version and its ws URL re-validated before connecting). Selects an already-open page whose URL matches exactly — never navigates, scrolls, clicks or creates tabs — and disconnects without closing it. Not available with compare or a non-desktop viewport"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_page_structure(args)),

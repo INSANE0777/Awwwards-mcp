@@ -1,7 +1,9 @@
-// Read-only loopback CDP attach (design §4.4). Attaches to a browser the user
-// already started and returns an EXISTING page whose normalized href matches;
-// never navigates, creates or closes pages. Disconnecting is browser.close(),
-// which Playwright documents as a disconnect for a connected browser.
+// Loopback CDP attach (design §4.4). Attaches to a browser the user already
+// started and returns an EXISTING page whose normalized href matches; it never
+// navigates, scrolls, clicks or creates tabs. HTTP endpoints are resolved via
+// /json/version and the returned ws URL is re-validated before Playwright sees
+// it. Disconnecting is browser.close(), which Playwright documents as a
+// disconnect for a connected browser.
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
 
 /** Opt-in gate; attach stays disabled unless the user sets this in the server env. */
@@ -21,6 +23,13 @@ const ENDPOINT_HINT =
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]"]);
 const WS_BROWSER_PATH = /^\/devtools\/browser\/[A-Za-z0-9_-]+$/;
 const MAX_ORIGINS = 20;
+export const DISCOVERY_TIMEOUT_MS = 5000;
+
+/** Minimal fetch seam so tests never open a socket; global fetch is the default. */
+export type FetchLike = (
+  url: string,
+  init?: { signal?: AbortSignal },
+) => Promise<{ ok?: boolean; status?: number; json: () => Promise<unknown> }>;
 
 /** Canonical href for exact-match comparison; invalid URLs compare as-is. */
 function normalizeHref(raw: string): string {
@@ -69,13 +78,56 @@ function availableOrigins(pages: any[]): string[] {
 }
 
 /**
+ * Resolve an http CDP endpoint to the browser's ws endpoint and re-validate it:
+ * whatever /json/version returns is untrusted until it passes the same loopback
+ * rules as a user-supplied ws URL.
+ */
+async function discoverWsEndpoint(
+  httpEndpoint: string,
+  fetchFn: FetchLike,
+): Promise<{ endpoint: string } | { error: string }> {
+  const versionUrl = new URL("/json/version", httpEndpoint).href;
+  let payload: unknown;
+  try {
+    const res = await fetchFn(versionUrl, { signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS) });
+    if (res.ok === false) {
+      return {
+        error: `CDP discovery failed (${versionUrl}): HTTP ${res.status ?? "error"}. ${ATTACH_SETUP_HINT}`,
+      };
+    }
+    payload = await res.json();
+  } catch (err) {
+    return {
+      error:
+        `CDP discovery failed (${versionUrl}): ${err instanceof Error ? err.message : String(err)}. ` +
+        ATTACH_SETUP_HINT,
+    };
+  }
+  const raw =
+    payload && typeof payload === "object" && typeof (payload as any).webSocketDebuggerUrl === "string"
+      ? ((payload as any).webSocketDebuggerUrl as string)
+      : "";
+  const ws = raw ? validateCdpEndpoint(raw) : { error: "" };
+  if ("error" in ws || new URL(ws.endpoint).protocol !== "ws:") {
+    return {
+      error:
+        `CDP discovery (${versionUrl}) returned no usable loopback webSocketDebuggerUrl; refusing to connect. ` +
+        ATTACH_SETUP_HINT,
+    };
+  }
+  return ws;
+}
+
+/**
  * Connect over CDP and select the already-open page whose normalized href
- * equals `url`. NotFound disconnects before returning the error.
+ * equals `url`. http endpoints are discovered to ws first; no-match
+ * disconnects before returning the error.
  */
 export async function attachPage(
   loader: () => Promise<any>,
   endpoint: string,
   url: string,
+  fetchFn: FetchLike = (input, init) => fetch(input, init),
 ): Promise<{ browser: any; page: any } | { error: string }> {
   const valid = validateCdpEndpoint(endpoint);
   if ("error" in valid) return valid;
@@ -88,9 +140,17 @@ export async function attachPage(
   if (!chromium || typeof chromium.connectOverCDP !== "function") {
     return { error: CAPTURE_INSTALL_HINT };
   }
+  // A user-supplied ws URL is already validated; an http endpoint must be
+  // resolved and its ws URL validated before Playwright receives a host.
+  let target = valid.endpoint;
+  if (new URL(target).protocol === "http:") {
+    const discovered = await discoverWsEndpoint(target, fetchFn);
+    if ("error" in discovered) return discovered;
+    target = discovered.endpoint;
+  }
   let browser: any;
   try {
-    browser = await chromium.connectOverCDP(valid.endpoint);
+    browser = await chromium.connectOverCDP(target);
   } catch (err) {
     return {
       error:

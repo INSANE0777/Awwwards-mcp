@@ -13,6 +13,22 @@ const fakePage = (url: string): FakePage => ({
   close: vi.fn(async () => {}),
 });
 
+const WS_TARGET = "ws://127.0.0.1:9222/devtools/browser/discovered";
+
+/** Fake /json/version: records the discovery URL, returns a ws (or nothing). */
+function fakeFetch(ws: string | null = WS_TARGET) {
+  const calls: string[] = [];
+  const fn = async (url: string) => {
+    calls.push(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => (ws === null ? {} : { webSocketDebuggerUrl: ws }),
+    };
+  };
+  return { calls, fn };
+}
+
 // Fake chromium + browser: no newPage at all, so a page-creation fallback
 // would throw instead of silently passing.
 function fakeLoader(pages: FakePage[], calls: string[] = []) {
@@ -80,10 +96,13 @@ describe("attachPage", () => {
   it("connects over CDP and selects the page with the exact normalized href", async () => {
     const target = fakePage("https://example.com/");
     const { chromium, loader } = fakeLoader([fakePage("https://other.test/"), target]);
-    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://example.com");
+    const discovery = fakeFetch();
+    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://example.com", discovery.fn);
     expect("error" in res).toBe(false);
     if (!("error" in res)) expect(res.page).toBe(target);
-    expect(chromium.connectOverCDP).toHaveBeenCalledWith("http://127.0.0.1:9222");
+    // http input: discovery first, then Playwright gets the validated ws URL.
+    expect(discovery.calls).toEqual(["http://127.0.0.1:9222/json/version"]);
+    expect(chromium.connectOverCDP).toHaveBeenCalledWith(WS_TARGET);
     expect(chromium.launch).not.toHaveBeenCalled();
     // No navigation and no page creation (the fake has no newPage at all).
     expect(target.goto).not.toHaveBeenCalled();
@@ -92,7 +111,8 @@ describe("attachPage", () => {
   it("does not fall back when only a near-miss href is open", async () => {
     const pages = [fakePage("https://example.com/path"), fakePage("https://example.com/")];
     const { chromium, loader } = fakeLoader(pages);
-    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://example.com/path/");
+    const discovery = fakeFetch();
+    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://example.com/path/", discovery.fn);
     expect("error" in res).toBe(true);
     if ("error" in res) {
       expect(res.error).toContain("No open page matches");
@@ -108,7 +128,8 @@ describe("attachPage", () => {
       fakePage("http://second.test/x"),
     ];
     const { loader } = fakeLoader(pages);
-    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://want.test/");
+    const discovery = fakeFetch();
+    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://want.test/", discovery.fn);
     expect("error" in res).toBe(true);
     if ("error" in res) {
       expect(res.error).toContain("https://other.test");
@@ -135,6 +156,47 @@ describe("attachPage", () => {
     expect(loaded).toBe(false);
   });
 
+  it("refuses a non-loopback ws URL returned by discovery", async () => {
+    const { chromium, loader } = fakeLoader([fakePage("https://example.com/")]);
+    const discovery = fakeFetch("ws://evil.test:9222/devtools/browser/abc");
+    const res = await attachPage(loader, "http://127.0.0.1:9222", "https://example.com", discovery.fn);
+    expect("error" in res).toBe(true);
+    if ("error" in res) {
+      expect(res.error).toContain("refusing to connect");
+      expect(res.error).toContain("--user-data-dir");
+    }
+    expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("errors when discovery fails instead of connecting to the http endpoint", async () => {
+    const { chromium, loader } = fakeLoader([fakePage("https://example.com/")]);
+    const res = await attachPage(
+      loader,
+      "http://127.0.0.1:9222",
+      "https://example.com",
+      async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    );
+    expect("error" in res).toBe(true);
+    if ("error" in res) {
+      expect(res.error).toContain("CDP discovery failed");
+      expect(res.error).toContain("ECONNREFUSED");
+    }
+    expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("keeps the direct ws input path without discovery", async () => {
+    const target = fakePage("https://example.com/");
+    const { chromium, loader } = fakeLoader([target]);
+    const discovery = fakeFetch();
+    const res = await attachPage(loader, WS_TARGET, "https://example.com/", discovery.fn);
+    expect("error" in res).toBe(false);
+    if (!("error" in res)) expect(res.page).toBe(target);
+    expect(discovery.calls).toEqual([]);
+    expect(chromium.connectOverCDP).toHaveBeenCalledWith(WS_TARGET);
+  });
+
   it("explains the throwaway-profile setup when the connection fails", async () => {
     const res = await attachPage(
       async () => ({
@@ -144,7 +206,7 @@ describe("attachPage", () => {
           },
         },
       }),
-      "http://127.0.0.1:9222",
+      WS_TARGET,
       "https://example.com",
     );
     expect("error" in res).toBe(true);

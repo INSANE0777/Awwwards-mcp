@@ -590,7 +590,7 @@ export interface WaitOpts {
   viewport?: ViewportName;
   /** Mobile only: collect overflow, small-text and small-tap-target evidence. */
   responsive?: boolean;
-  /** Read-only attach: loopback CDP endpoint (requires AWWWARDS_MCP_ATTACH=1). */
+  /** Attach to a loopback CDP endpoint (requires AWWWARDS_MCP_ATTACH=1); never navigates, scrolls, clicks or creates tabs. */
   cdpEndpoint?: string;
 }
 
@@ -643,8 +643,8 @@ export async function analyzePageStructure(
     if (process.env[ATTACH_ENV] !== "1") {
       return {
         error:
-          `Read-only attach is disabled. Set ${ATTACH_ENV}=1 in the MCP server's environment and restart it, then retry with cdpEndpoint. ` +
-          "Attach connects to a loopback browser you started, scans one already-open page without navigating and disconnects without closing it.",
+          `Attach is disabled. Set ${ATTACH_ENV}=1 in the MCP server's environment and restart it, then retry with cdpEndpoint. ` +
+          "Attach connects to a loopback browser you started, scans one already-open page without navigating, scrolling, clicking or creating tabs, and disconnects without closing it.",
       };
     }
     const valid = validateCdpEndpoint(endpoint);
@@ -659,7 +659,7 @@ export async function analyzePageStructure(
     if (opts?.responsive === true) {
       return {
         error:
-          "cdpEndpoint is read-only and never scrolls the attached page, so responsive evidence is unavailable. Drop responsive, or run a launched compare without cdpEndpoint.",
+          "cdpEndpoint never scrolls the attached page, so responsive evidence is unavailable. Drop responsive, or run a launched compare without cdpEndpoint.",
       };
     }
   }
