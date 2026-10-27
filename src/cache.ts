@@ -178,11 +178,16 @@ export class Cache {
     this.withDb(() => {});
   }
 
-  // Opt-in retention: AWWARDS_MCP_IMAGE_RETENTION_DAYS=N prunes image files
-  // older than N days once at construction. Best-effort — an unreadable or
-  // locked file never blocks opening the cache; 0/unset keeps images forever.
+  // Opt-in retention: AWWWARDS_MCP_IMAGE_RETENTION_DAYS=N (legacy
+  // AWARDS_MCP_IMAGE_RETENTION_DAYS also accepted) prunes image files older
+  // than N days once at construction. Best-effort: an unreadable or locked
+  // file never blocks opening the cache; 0/unset keeps images forever.
   private pruneImages(): void {
-    const days = Number(process.env.AWWARDS_MCP_IMAGE_RETENTION_DAYS ?? 0);
+    const raw =
+      process.env.AWWWARDS_MCP_IMAGE_RETENTION_DAYS ??
+      process.env.AWARDS_MCP_IMAGE_RETENTION_DAYS ??
+      0;
+    const days = Number(raw);
     if (!Number.isFinite(days) || days <= 0) return;
     const cutoff = this.now() - days * 24 * 60 * 60 * 1000;
     try {

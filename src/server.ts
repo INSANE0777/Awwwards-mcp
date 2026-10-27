@@ -1624,12 +1624,12 @@ export function createHandlers(deps: {
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       if (result.base64 === undefined) {
+        const note =
+          args.inline === false
+            ? "(inline preview disabled)"
+            : "(inline preview omitted: too large; open the file or pass inline:true)";
         return {
-          content: [
-            text(
-              `Full-page capture of ${args.url} saved to ${result.file} (inline preview omitted: too large; open the file or pass inline:true)`,
-            ),
-          ],
+          content: [text(`Full-page capture of ${args.url} saved to ${result.file} ${note}`)],
         };
       }
       return {

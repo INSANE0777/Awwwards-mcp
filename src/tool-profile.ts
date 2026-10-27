@@ -4,7 +4,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // The 12 tool core an agent needs for the capture -> analyze -> build -> verify
-// loop. AWARDS_MCP_PROFILE=core registers only these; default full has all 37.
+// loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 37.
 export const CORE_TOOL_NAMES: readonly string[] = [
   "search_sites",
   "get_site_details",
@@ -20,15 +20,21 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   "get_collections",
 ];
 
-export const DEFAULT_MAX_RESPONSE_BYTES = 8_000_000;
+export const DEFAULT_MAX_RESPONSE_BYTES = 32_000_000;
+
+// Canonical AWWWARDS_MCP_* names, with the one-release AWARDS_MCP_* fallback
+// from v1.14.0. The new value wins even when set to an empty string.
+export function envValue(env: NodeJS.ProcessEnv, suffix: string): string | undefined {
+  return env[`AWWWARDS_MCP_${suffix}`] ?? env[`AWARDS_MCP_${suffix}`];
+}
 
 export function isCoreTool(name: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.AWARDS_MCP_PROFILE !== "core") return true;
+  if (envValue(env, "PROFILE") !== "core") return true;
   return CORE_TOOL_NAMES.includes(name);
 }
 
 function maxResponseBytes(env: NodeJS.ProcessEnv): number {
-  const raw = Number(env.AWARDS_MCP_MAX_RESPONSE_BYTES);
+  const raw = Number(envValue(env, "MAX_RESPONSE_BYTES"));
   return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : DEFAULT_MAX_RESPONSE_BYTES;
 }
 
@@ -48,14 +54,15 @@ function payloadBytes(result: unknown): number {
 }
 
 const note = (): string =>
-  "Response exceeded AWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.";
+  "Response exceeded AWWWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.";
 
 type ServerLike = Pick<McpServer, "tool" | "registerTool">;
 
 // Registers through server.tool or server.registerTool. In core profile a
 // non-core name is silently skipped. The final function argument (the handler)
-// is wrapped: response size is enforced, and AWARDS_MCP_DEBUG_MEMORY=1 emits one
-// JSON line per call on stderr (never stdout — stdout is the JSON-RPC channel).
+// is wrapped: response size is enforced, and AWWWARDS_MCP_DEBUG_MEMORY=1 emits
+// one JSON line per call on stderr (never stdout — stdout is the JSON-RPC
+// channel).
 export function registerGuarded(
   server: ServerLike,
   method: "tool" | "registerTool",
@@ -70,14 +77,17 @@ export function registerGuarded(
   const handler = args[last];
   if (typeof handler === "function") {
     const limit = maxResponseBytes(env);
-    const debugMemory = env.AWARDS_MCP_DEBUG_MEMORY === "1";
+    const debugMemory = envValue(env, "DEBUG_MEMORY") === "1";
     args[last] = async (...callArgs: unknown[]) => {
       const started = performance.now();
       try {
         const result = await handler(...callArgs);
         const bytes = payloadBytes(result);
-        if (bytes > limit) {
+        if (bytes > limit && result && typeof result === "object") {
+          // Keep isError, structuredContent and every other non-content field;
+          // only the payload is replaced by the truncation notice.
           return {
+            ...(result as Record<string, unknown>),
             content: [
               {
                 type: "text",

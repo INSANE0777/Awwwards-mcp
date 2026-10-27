@@ -68,11 +68,14 @@ export async function captureLiveSite(
       "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + "-" + vp + ".png",
     );
     const buf = (await page.screenshot({ path: file, fullPage: true })) as Buffer;
-    const base64 = buf.toString("base64");
-    if (opts?.inline === false || base64.length > (opts?.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES)) {
+    // Check inline:false and the size budget from the raw PNG first: base64 is
+    // exact at 4*ceil(n/3), so a large capture never pays for the conversion.
+    if (opts?.inline === false) return { file, inlineOmitted: true };
+    const base64Length = Math.ceil(buf.length / 3) * 4;
+    if (base64Length > (opts?.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES)) {
       return { file, inlineOmitted: true };
     }
-    return { file, base64 };
+    return { file, base64: buf.toString("base64") };
   } finally {
     try {
       await browser.close();

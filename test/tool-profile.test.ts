@@ -29,7 +29,7 @@ function cliToolNames(): string[] {
 describe("tool profile", () => {
   it("core profile registers only the 12 core tools and skips the rest", () => {
     const { server, regs } = fakeServer();
-    const env = { AWARDS_MCP_PROFILE: "core" };
+    const env = { AWWWARDS_MCP_PROFILE: "core" };
     const handler = async () => ({ content: [] });
     for (const name of CORE_TOOL_NAMES) {
       registerGuarded(server as any, "tool", [name, "d", {}, {}, handler], env);
@@ -41,7 +41,12 @@ describe("tool profile", () => {
     expect(isCoreTool("search_sites", env)).toBe(true);
     expect(isCoreTool("compare_sites", env)).toBe(false);
     expect(isCoreTool("compare_sites", {})).toBe(true); // full is the default
-    expect(isCoreTool("compare_sites", { AWARDS_MCP_PROFILE: "full" })).toBe(true);
+    expect(isCoreTool("compare_sites", { AWWWARDS_MCP_PROFILE: "full" })).toBe(true);
+    // One-release legacy fallback; the canonical name wins when both are set.
+    expect(isCoreTool("compare_sites", { AWARDS_MCP_PROFILE: "core" })).toBe(false);
+    expect(
+      isCoreTool("search_sites", { AWARDS_MCP_PROFILE: "full", AWWWARDS_MCP_PROFILE: "core" }),
+    ).toBe(true);
   });
 
   it("full profile (default) registers all 37 tools, unchanged", () => {
@@ -56,7 +61,14 @@ describe("tool profile", () => {
     expect(regs.map((r) => r.name)).toEqual(names);
   });
 
-  it("returns a truncated JSON block when text+image bytes exceed the limit", async () => {
+  it("core names are a subset of actual cli registrations (no typos)", () => {
+    const names = cliToolNames();
+    expect(CORE_TOOL_NAMES).toHaveLength(12);
+    expect(new Set(CORE_TOOL_NAMES).size).toBe(12);
+    for (const name of CORE_TOOL_NAMES) expect(names).toContain(name);
+  });
+
+  it("truncates over-budget payloads but preserves isError and other fields", async () => {
     const { server, regs } = fakeServer();
     registerGuarded(
       server as any,
@@ -67,15 +79,19 @@ describe("tool profile", () => {
         {},
         {},
         async () => ({
+          isError: true,
+          structuredContent: { keep: true },
           content: [
             { type: "text", text: "abcd" },
             { type: "image", data: "0123456789", mimeType: "image/png" },
           ],
         }),
       ],
-      { AWARDS_MCP_MAX_RESPONSE_BYTES: "10" },
+      { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "10" },
     );
     const result = await regs[0].handler!();
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ keep: true });
     expect(result.content).toEqual([
       {
         type: "text",
@@ -84,18 +100,39 @@ describe("tool profile", () => {
           tool: "big_tool",
           bytes: 14,
           limit: 10,
-          note: "Response exceeded AWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.",
+          note: "Response exceeded AWWWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.",
         }),
       },
     ]);
   });
 
-  it("passes payloads under the default 8MB limit through unchanged", async () => {
+  it("accepts the legacy env name but the canonical name wins", async () => {
+    const payload = { content: [{ type: "text", text: "abcd" }, { type: "image", data: "0123456789" }] };
+    const legacy = fakeServer();
+    registerGuarded(legacy.server as any, "tool", ["t", "d", {}, {}, async () => payload], {
+      AWARDS_MCP_MAX_RESPONSE_BYTES: "10",
+    });
+    expect((await legacy.regs[0].handler!()).content[0].text).toContain('"truncated":true');
+
+    const both = fakeServer();
+    registerGuarded(both.server as any, "tool", ["t", "d", {}, {}, async () => payload], {
+      AWWWARDS_MCP_MAX_RESPONSE_BYTES: "100",
+      AWARDS_MCP_MAX_RESPONSE_BYTES: "10",
+    });
+    expect(await both.regs[0].handler!()).toBe(payload);
+  });
+
+  it("keeps a legitimate >8MB capture_pose payload under the 32MB default", async () => {
+    const payload = {
+      content: [
+        { type: "text", text: "x".repeat(9_000_000) },
+        { type: "image", data: "A".repeat(1_000_000), mimeType: "image/png" },
+      ],
+    };
     const { server, regs } = fakeServer();
-    const payload = { content: [{ type: "text", text: "ok" }] };
-    registerGuarded(server as any, "tool", ["small_tool", "d", {}, {}, async () => payload], {});
+    registerGuarded(server as any, "tool", ["capture_pose_3d", "d", {}, {}, async () => payload], {});
     expect(await regs[0].handler!()).toBe(payload);
-    expect(DEFAULT_MAX_RESPONSE_BYTES).toBe(8_000_000);
+    expect(DEFAULT_MAX_RESPONSE_BYTES).toBe(32_000_000);
   });
 
   it("debug memory logging writes one JSON line to stderr, never stdout", async () => {
@@ -110,7 +147,7 @@ describe("tool profile", () => {
         server as any,
         "tool",
         ["dbg_tool", "d", {}, {}, async () => ({ content: [{ type: "text", text: "x" }] })],
-        { AWARDS_MCP_DEBUG_MEMORY: "1" },
+        { AWWWARDS_MCP_DEBUG_MEMORY: "1" },
       );
       await regs[0].handler!();
     } finally {

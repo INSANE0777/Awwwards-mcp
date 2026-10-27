@@ -665,17 +665,58 @@ describe("extractEdges (D1: static import edges)", () => {
     expect(g.truncated).toBe(false); // exactly the cap, nothing dropped
   });
 
-  it("bridges at most a bounded window between import/export and from", () => {
-    const near = `import ${"x".repeat(400)} from "./near.js";`;
-    const far = `import ${"x".repeat(600)} from "./far.js";`;
-    const g = extractEdges([mk(0, A, near + far)]);
-    expect(g.edges.map((e) => e.to)).toEqual(["./near.js"]);
+  it("finds long import and reexport declarations, not just 500-char windows", () => {
+    // Padding to an exact fixture length; the binding list is one long but
+    // syntactically legal identifier, as in bundled vendor chunks.
+    const sized = (head: string, tail: string, total: number) =>
+      head + "x".repeat(total - head.length - tail.length) + tail;
+    const longImport = sized(`import { `, ` } from "./long-import.js";`, 646);
+    const longReexport = sized(`export { `, ` } from "./long-reexport.js";`, 1411);
+    expect(longImport).toHaveLength(646);
+    expect(longReexport).toHaveLength(1411);
+
+    const namedReexport = `export { a as b } from "./named.js";`;
+    const g = extractEdges([mk(0, A, longImport + longReexport + namedReexport)]);
+    expect(g.edges).toEqual([
+      {
+        from: 0,
+        to: "./long-import.js",
+        kind: "esm-import",
+        raw: longImport.slice(0, -1),
+      },
+      {
+        from: 0,
+        to: "./long-reexport.js",
+        kind: "esm-reexport",
+        raw: longReexport.slice(0, -1),
+      },
+      {
+        from: 0,
+        to: "./named.js",
+        kind: "esm-reexport",
+        raw: namedReexport.slice(0, -1),
+      },
+    ]);
+    expect(g.truncated).toBe(false); // long declarations are not silently dropped
+  });
+
+  it("keeps exactly 20 long imports: the per-chunk cap is not false truncation", () => {
+    const sized = (i: number) =>
+      `import { ${"x".repeat(620)} } from "./long-${i}.js";`;
+    const g = extractEdges([mk(0, A, Array.from({ length: 20 }, (_, i) => sized(i)).join(""))]);
+    expect(g.edges).toHaveLength(20);
+    expect(g.truncated).toBe(false);
+  });
+
+  it("drops declarations beyond the 8KB declaration cap", () => {
+    const huge = `import { ${"x".repeat(9000)} } from "./huge.js";`;
+    expect(extractEdges([mk(0, A, huge)]).edges).toEqual([]);
   });
 
   it("stays linear on a 1MB import flood (no cross-statement regex backtracking)", () => {
     // Regression for the old /\bimport\b[^;'"()]*?\bfrom.../ family: with no
     // "from" anywhere, the lazy bridge backtracked over the whole chunk for
-    // every keyword. The linear scanner must return no edges promptly.
+    // every keyword. The statement scanner must return no edges promptly.
     const text = "import ".repeat(Math.ceil((1024 * 1024) / 7));
     const started = performance.now();
     const g = extractEdges([mk(0, A, text)]);

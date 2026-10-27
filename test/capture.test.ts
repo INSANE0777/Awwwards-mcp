@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureLiveSite } from "../src/capture.js";
+import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES } from "../src/capture.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -213,28 +213,28 @@ describe("captureLiveSite", () => {
     }
   });
 
+  const bufferFake = (buf: Buffer) => ({
+    launch: async () => ({
+      newPage: async () => ({
+        goto: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async () => 500,
+        screenshot: async ({ path }: { path: string }) => {
+          const fs = await import("node:fs/promises");
+          await fs.writeFile(path, buf);
+          return buf;
+        },
+      }),
+      close: async () => {},
+    }),
+  });
+
   it("omits a preview whose base64 exceeds maxInlineBytes", async () => {
     const big = Buffer.alloc(300, 1);
     const res = await captureLiveSite(
       "https://example.com",
       tmpDir(),
-      async () => ({
-        chromium: {
-          launch: async () => ({
-            newPage: async () => ({
-              goto: async () => {},
-              waitForTimeout: async () => {},
-              evaluate: async () => 500,
-              screenshot: async ({ path }: { path: string }) => {
-                const fs = await import("node:fs/promises");
-                await fs.writeFile(path, big);
-                return big;
-              },
-            }),
-            close: async () => {},
-          }),
-        },
-      }),
+      async () => ({ chromium: bufferFake(big) }),
       { maxInlineBytes: 32 },
     );
     expect("file" in res).toBe(true);
@@ -243,6 +243,23 @@ describe("captureLiveSite", () => {
       expect(res.inlineOmitted).toBe(true);
       expect(readFileSync(res.file).equals(big)).toBe(true);
     }
+  });
+
+  it("omits a preview above the default 2.5MB base64 budget", async () => {
+    // 1.9MB raw -> 2,533,336 base64 chars, above the default 2,500,000.
+    const big = Buffer.alloc(1_900_000, 1);
+    const res = await captureLiveSite(
+      "https://example.com",
+      tmpDir(),
+      async () => ({ chromium: bufferFake(big) }),
+    );
+    expect("file" in res).toBe(true);
+    if ("file" in res) {
+      expect(res.base64).toBeUndefined();
+      expect(res.inlineOmitted).toBe(true);
+      expect(readFileSync(res.file).equals(big)).toBe(true);
+    }
+    expect(DEFAULT_MAX_INLINE_BYTES).toBe(2_500_000);
   });
 
   it("desktop and mobile captures of the same URL keep distinct files (issue #23)", async () => {

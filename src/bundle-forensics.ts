@@ -93,17 +93,30 @@ export interface ImportGraph {
 export const MAX_EDGES_PER_CHUNK = 20;
 export const MAX_EDGES_TOTAL = 400;
 
-// Minified-tolerant families, extracted by a linear scanner. A lazy
-// cross-statement regex such as /\bimport\b[^;'"()]*?\bfrom.../ backtracks
-// over the whole chunk when a bundle repeats "import " with no "from" (1MB of
-// that took seconds), so keywords are walked once and only a bounded forward
-// window is inspected: at most MAX_EDGE_SPAN chars from the keyword to the
-// specifier's closing quote, stopping at the same statement delimiters the
-// regexes used. Minified single-line bundles still resolve; adversarial input
-// stays O(text).
-const MAX_EDGE_SPAN = 500;
+// Linear statement scanner. The previous lazy cross-statement regexes both
+// backtracked (1MB of "import " took seconds) and, at a 500-char window,
+// silently missed real declarations with long binding lists. One pass now
+// remembers the latest import/export keyword as the declaration start and
+// matches `from` against it, so a declaration can run up to MAX_DECL_SPAN
+// chars without rescanning. `;`, quotes, `(` and `)` end a pending declaration
+// (the old regex bridge's delimiters); `}` does NOT, because it closes
+// `export { ... }` before `from`. Minified single-line bundles still resolve.
+const MAX_DECL_SPAN = 8192;
+const MAX_EDGE_SPAN = 500; // webpack id prefix / digit-run cap
 
-const EDGE_KEYWORD_RE = /\bimport\b|\bexport\b|\brequire\b|\.i\(/g;
+interface PendingDecl {
+  kind: "import" | "export";
+  start: number;
+}
+
+function isWordCode(c: number): boolean {
+  return (
+    (c >= 48 && c <= 57) || // 0-9
+    (c >= 65 && c <= 90) || // A-Z
+    (c >= 97 && c <= 122) || // a-z
+    c === 95 // _
+  );
+}
 
 // Quoted specifier starting exactly at `at`, closed inside [at, limit). Same
 // grammar as ["']([^"']+)["']: non-empty, neither quote inside.
@@ -123,29 +136,6 @@ function readSpecifier(
   return null;
 }
 
-// `... from "x"` inside the statement window. The bridge keeps the old regex
-// semantics: ; ' " ( and ) end the candidate; \bfrom\b then whitespace then a
-// quote. A non-quote after `from` just resumes the search.
-function readFromSpecifier(
-  text: string,
-  start: number,
-  limit: number,
-): { to: string; end: number } | null {
-  for (let i = start; i < limit; i++) {
-    const ch = text[i];
-    if (ch === ";" || ch === '"' || ch === "'" || ch === "(" || ch === ")") return null;
-    if (ch !== "f" || !text.startsWith("from", i)) continue;
-    const before = i === 0 ? "" : text[i - 1];
-    const after = text[i + 4] ?? "";
-    if (/\w/.test(before) || /\w/.test(after)) continue;
-    let p = i + 4;
-    while (p < limit && /\s/.test(text[p])) p++;
-    const spec = readSpecifier(text, p, limit);
-    if (spec) return spec;
-  }
-  return null;
-}
-
 interface EdgeCandidate {
   to: string;
   kind: ImportEdgeKind;
@@ -155,56 +145,107 @@ interface EdgeCandidate {
 // One text pass, family-major output (imports, bare imports, reexports,
 // requires, webpack ids) so dedupe/cap order is unchanged.
 function scanEdgeCandidates(text: string): EdgeCandidate[] {
+  const len = text.length;
   const imports: EdgeCandidate[] = [];
   const bareImports: EdgeCandidate[] = [];
   const reexports: EdgeCandidate[] = [];
   const requires: EdgeCandidate[] = [];
   const webpackIds: EdgeCandidate[] = [];
+  let pending: PendingDecl | null = null;
+  let wordStart = -1; // start of the current word run, -1 outside one
 
-  for (const m of text.matchAll(EDGE_KEYWORD_RE)) {
-    const start = m.index;
-    const token = m[0];
-    const end = start + token.length;
-    const limit = Math.min(text.length, start + MAX_EDGE_SPAN);
-    if (token === "import") {
-      let p = end;
-      while (p < limit && /\s/.test(text[p])) p++;
-      const bare = readSpecifier(text, p, limit);
-      if (bare) {
-        bareImports.push({ to: bare.to, kind: "esm-import", raw: text.slice(start, bare.end) });
+  for (let i = 0; i < len; i++) {
+    const c = text.charCodeAt(i);
+    if (pending !== null && i - pending.start > MAX_DECL_SPAN) pending = null;
+
+    if (!isWordCode(c)) {
+      if (c === 46 /* . */) {
+        // Webpack module id: `e.i(870178)`. The prefix is the word run ending
+        // just before the dot (capped so the raw candidate stays bounded).
+        if (text.charCodeAt(i + 1) === 105 && text.charCodeAt(i + 2) === 40 && wordStart >= 0) {
+          const prefix = Math.max(wordStart, i - MAX_EDGE_SPAN);
+          const digitsAt = i + 3;
+          let q = digitsAt;
+          const digitLimit = Math.min(len, digitsAt + MAX_EDGE_SPAN);
+          while (q < digitLimit && text.charCodeAt(q) >= 48 && text.charCodeAt(q) <= 57) q++;
+          if (q - digitsAt >= 4 && text.charCodeAt(q) === 41) {
+            webpackIds.push({
+              to: text.slice(digitsAt, q),
+              kind: "webpack-id",
+              raw: text.slice(prefix, q + 1),
+            });
+          }
+        }
+        pending = null; // member access cannot be part of a declaration
+      } else if (
+        c === 59 || // ;
+        c === 40 || // (
+        c === 41 || // )
+        c === 34 || // "
+        c === 39 // '
+      ) {
+        pending = null;
+      }
+      wordStart = -1;
+      continue;
+    }
+
+    if (i > 0 && isWordCode(text.charCodeAt(i - 1))) continue; // inside a word
+    wordStart = i;
+
+    if (c === 105 && text.startsWith("import", i) && !isWordCode(text.charCodeAt(i + 6))) {
+      let p = i + 6;
+      while (p < len && text.charCodeAt(p) <= 32) p++;
+      const next = text.charCodeAt(p);
+      if (next === 34 || next === 39) {
+        const spec = readSpecifier(text, p, len);
+        if (spec) {
+          bareImports.push({ to: spec.to, kind: "esm-import", raw: text.slice(i, spec.end) });
+          pending = null;
+          i = spec.end - 1;
+          wordStart = -1;
+          continue;
+        }
+      }
+      // `import.meta` and dynamic `import(` are not static declarations.
+      if (next === 46 || next === 40) {
+        pending = null;
         continue;
       }
-      const from = readFromSpecifier(text, end, limit);
-      if (from) imports.push({ to: from.to, kind: "esm-import", raw: text.slice(start, from.end) });
-    } else if (token === "export") {
-      const from = readFromSpecifier(text, end, limit);
-      if (from) {
-        reexports.push({ to: from.to, kind: "esm-reexport", raw: text.slice(start, from.end) });
-      }
-    } else if (token === "require") {
-      let p = end;
-      while (p < limit && /\s/.test(text[p])) p++;
-      if (text[p] !== "(") continue;
+      pending = { kind: "import", start: i };
+    } else if (c === 101 && text.startsWith("export", i) && !isWordCode(text.charCodeAt(i + 6))) {
+      pending = { kind: "export", start: i };
+    } else if (c === 114 && text.startsWith("require", i) && !isWordCode(text.charCodeAt(i + 7))) {
+      let p = i + 7;
+      while (p < len && text.charCodeAt(p) <= 32) p++;
+      if (text.charCodeAt(p) !== 40) continue;
       p++;
-      while (p < limit && /\s/.test(text[p])) p++;
-      const spec = readSpecifier(text, p, limit);
-      if (spec) requires.push({ to: spec.to, kind: "cjs-require", raw: text.slice(start, spec.end) });
-    } else {
-      // `.i(` — recover the \w+ id prefix backwards (bounded), then take the
-      // ≥4 digits + ")" the old webpack family required.
-      const dot = start;
-      let prefix = dot;
-      while (prefix > 0 && dot - prefix < MAX_EDGE_SPAN && /\w/.test(text[prefix - 1])) prefix--;
-      if (prefix === dot) continue;
-      let q = end;
-      while (q < limit && text[q] >= "0" && text[q] <= "9") q++;
-      if (q - end >= 4 && text[q] === ")") {
-        webpackIds.push({
-          to: text.slice(end, q),
-          kind: "webpack-id",
-          raw: text.slice(prefix, q + 1),
-        });
+      while (p < len && text.charCodeAt(p) <= 32) p++;
+      const spec = readSpecifier(text, p, len);
+      if (spec) {
+        requires.push({ to: spec.to, kind: "cjs-require", raw: text.slice(i, spec.end) });
+        pending = null;
+        i = spec.end - 1;
+        wordStart = -1;
       }
+    } else if (c === 102 && text.startsWith("from", i) && !isWordCode(text.charCodeAt(i + 4))) {
+      if (pending === null) continue;
+      const start = pending.start;
+      if (i - start > MAX_DECL_SPAN) {
+        pending = null;
+        continue;
+      }
+      let p = i + 4;
+      while (p < len && text.charCodeAt(p) <= 32) p++;
+      const spec = readSpecifier(text, p, len);
+      if (!spec) continue; // a `from` identifier inside the binding list
+      const kind: ImportEdgeKind = pending.kind === "import" ? "esm-import" : "esm-reexport";
+      const candidate = { to: spec.to, kind, raw: text.slice(start, spec.end) };
+      if (kind === "esm-import") imports.push(candidate);
+      else reexports.push(candidate);
+      pending = null;
+      i = spec.end - 1;
+      wordStart = -1;
     }
   }
   return [...imports, ...bareImports, ...reexports, ...requires, ...webpackIds];

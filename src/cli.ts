@@ -67,9 +67,10 @@ const pkgJson = JSON.parse(
 ) as { version: string };
 const server = new McpServer({ name: "awwwards-mcp", version: pkgJson.version });
 
-// Every registration goes through the guard: AWARDS_MCP_PROFILE=core skips
-// non-core tools, AWARDS_MCP_MAX_RESPONSE_BYTES caps text+image payloads, and
-// AWARDS_MCP_DEBUG_MEMORY=1 logs one JSON line per call on stderr.
+// Every registration goes through the guard: AWWWARDS_MCP_PROFILE=core skips
+// non-core tools, AWWWARDS_MCP_MAX_RESPONSE_BYTES caps text+image payloads, and
+// AWWWARDS_MCP_DEBUG_MEMORY=1 logs one JSON line per call on stderr. The
+// legacy AWARDS_MCP_* names are accepted as a one-release fallback.
 const tool = ((...args: any[]) =>
   registerGuarded(server, "tool", args)) as unknown as McpServer["tool"];
 const registerTool = ((...args: any[]) =>

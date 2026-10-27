@@ -12,7 +12,8 @@ const tmpDir = () => {
   return d;
 };
 afterEach(() => {
-  delete process.env.AWWARDS_MCP_IMAGE_RETENTION_DAYS;
+  delete process.env.AWWWARDS_MCP_IMAGE_RETENTION_DAYS;
+  delete process.env.AWARDS_MCP_IMAGE_RETENTION_DAYS;
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -373,7 +374,7 @@ describe("image retention", () => {
     const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
     utimesSync(oldFile, tenDaysAgo, tenDaysAgo);
 
-    process.env.AWWARDS_MCP_IMAGE_RETENTION_DAYS = "7";
+    process.env.AWWWARDS_MCP_IMAGE_RETENTION_DAYS = "7";
     new Cache(root);
 
     expect(existsSync(oldFile)).toBe(false);
@@ -389,6 +390,18 @@ describe("image retention", () => {
     new Cache(root);
 
     expect(existsSync(oldFile)).toBe(true);
+  });
+
+  it("accepts the legacy env name as a fallback", () => {
+    const { root, oldFile } = rootWithImages();
+    writeFileSync(oldFile, "old");
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    utimesSync(oldFile, tenDaysAgo, tenDaysAgo);
+
+    process.env.AWARDS_MCP_IMAGE_RETENTION_DAYS = "7";
+    new Cache(root);
+
+    expect(existsSync(oldFile)).toBe(false);
   });
 });
 
