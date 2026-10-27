@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
@@ -12,6 +12,7 @@ const tmpDir = () => {
   return d;
 };
 afterEach(() => {
+  delete process.env.AWWARDS_MCP_IMAGE_RETENTION_DAYS;
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -354,6 +355,40 @@ describe("elements cache", () => {
     cache.upsertElements([elementRecord({ slug: "new" })]);
     expect(cache.listElements(10).map((r) => r.slug)).toEqual(["new", "old"]);
     expect(cache.listElements(1).map((r) => r.slug)).toEqual(["new"]);
+  });
+});
+
+describe("image retention", () => {
+  const rootWithImages = () => {
+    const root = tmpDir();
+    const images = join(root, "images");
+    mkdirSync(images, { recursive: true });
+    return { root, oldFile: join(images, "old.png"), newFile: join(images, "new.png") };
+  };
+
+  it("prunes image files older than the configured retention window", () => {
+    const { root, oldFile, newFile } = rootWithImages();
+    writeFileSync(oldFile, "old");
+    writeFileSync(newFile, "new");
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    utimesSync(oldFile, tenDaysAgo, tenDaysAgo);
+
+    process.env.AWWARDS_MCP_IMAGE_RETENTION_DAYS = "7";
+    new Cache(root);
+
+    expect(existsSync(oldFile)).toBe(false);
+    expect(existsSync(newFile)).toBe(true);
+  });
+
+  it("keeps old images when retention is unset (default off)", () => {
+    const { root, oldFile } = rootWithImages();
+    writeFileSync(oldFile, "old");
+    const tenYearsAgo = new Date(Date.now() - 3650 * 24 * 60 * 60 * 1000);
+    utimesSync(oldFile, tenYearsAgo, tenYearsAgo);
+
+    new Cache(root);
+
+    expect(existsSync(oldFile)).toBe(true);
   });
 });
 

@@ -184,6 +184,67 @@ describe("captureLiveSite", () => {
     expect(captured[0]).toEqual({ viewport: { width: 1440, height: 900 } });
   });
 
+  it("keeps the inline preview by default for a small screenshot", async () => {
+    const res = await captureLiveSite(
+      "https://example.com",
+      tmpDir(),
+      async () => ({ chromium: optionCapturingFake([]) }),
+    );
+    expect("file" in res).toBe(true);
+    if ("file" in res) {
+      expect(res.base64).toBe(Buffer.from("png-bytes").toString("base64"));
+      expect(res.inlineOmitted).toBeUndefined();
+    }
+  });
+
+  it("omits the inline preview when inline is false, file still saved", async () => {
+    const dir = tmpDir();
+    const res = await captureLiveSite(
+      "https://example.com",
+      dir,
+      async () => ({ chromium: optionCapturingFake([]) }),
+      { inline: false },
+    );
+    expect("file" in res).toBe(true);
+    if ("file" in res) {
+      expect(res.base64).toBeUndefined();
+      expect(res.inlineOmitted).toBe(true);
+      expect(readFileSync(res.file).toString()).toBe("png-bytes");
+    }
+  });
+
+  it("omits a preview whose base64 exceeds maxInlineBytes", async () => {
+    const big = Buffer.alloc(300, 1);
+    const res = await captureLiveSite(
+      "https://example.com",
+      tmpDir(),
+      async () => ({
+        chromium: {
+          launch: async () => ({
+            newPage: async () => ({
+              goto: async () => {},
+              waitForTimeout: async () => {},
+              evaluate: async () => 500,
+              screenshot: async ({ path }: { path: string }) => {
+                const fs = await import("node:fs/promises");
+                await fs.writeFile(path, big);
+                return big;
+              },
+            }),
+            close: async () => {},
+          }),
+        },
+      }),
+      { maxInlineBytes: 32 },
+    );
+    expect("file" in res).toBe(true);
+    if ("file" in res) {
+      expect(res.base64).toBeUndefined();
+      expect(res.inlineOmitted).toBe(true);
+      expect(readFileSync(res.file).equals(big)).toBe(true);
+    }
+  });
+
   it("desktop and mobile captures of the same URL keep distinct files (issue #23)", async () => {
     const dir = tmpDir();
     const desktop = await captureLiveSite(

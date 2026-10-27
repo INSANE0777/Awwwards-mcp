@@ -12,7 +12,19 @@ export const CAPTURE_INSTALL_HINT =
   "Install it where this server runs (globally works for a global install):  npm install -g playwright && npx playwright install chromium\n" +
   "Then retry the capture or structure tool (or restart your agent afterward).";
 
-type CaptureResult = { file: string; base64: string } | { error: string };
+// Inline previews are base64, ~33% larger than the PNG. Past this budget the
+// file is still saved but the preview is omitted so a 30MB retina capture
+// cannot blow up the agent's context window.
+export const DEFAULT_MAX_INLINE_BYTES = 2_500_000;
+
+export interface CaptureOpts extends WaitOpts {
+  /** false omits the base64 preview and keeps only the saved file (default true). */
+  inline?: boolean;
+  /** Base64 length above which the preview is omitted (default 2_500_000). */
+  maxInlineBytes?: number;
+}
+
+export type CaptureResult = { file: string; base64?: string; inlineOmitted?: boolean } | { error: string };
 
 export async function captureLiveSite(
   url: string,
@@ -20,7 +32,7 @@ export async function captureLiveSite(
   // "as string" keeps Playwright an unresolved optional dependency at compile time;
   // Node resolves it (and may throw) at runtime, which the try/catch below handles.
   loader: () => Promise<any> = () => import("playwright" as string),
-  opts?: WaitOpts,
+  opts?: CaptureOpts,
 ): Promise<CaptureResult> {
   let chromium: any;
   try {
@@ -56,7 +68,11 @@ export async function captureLiveSite(
       "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + "-" + vp + ".png",
     );
     const buf = (await page.screenshot({ path: file, fullPage: true })) as Buffer;
-    return { file, base64: buf.toString("base64") };
+    const base64 = buf.toString("base64");
+    if (opts?.inline === false || base64.length > (opts?.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES)) {
+      return { file, inlineOmitted: true };
+    }
+    return { file, base64 };
   } finally {
     try {
       await browser.close();

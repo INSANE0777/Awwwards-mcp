@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// The 50 MB guard is asserted through stat, so the cap test never allocates a
-// 50 MB fixture. A negative value falls through to the real stat. readFile is
-// wrapped so the cap test can prove the oversized file is never read.
+// The 20 MB guard is asserted through stat, so the cap test never allocates a
+// 20 MB fixture. A negative value falls through to the real stat. readFile is
+// wrapped so the cap test can prove the oversized file is never read, and the
+// growth test can hand back more bytes than stat reported.
 const mockedFileSize = vi.hoisted(() => ({ value: -1 }));
 const readFileSpy = vi.hoisted(() => vi.fn());
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -379,13 +380,24 @@ describe("analyzeNetworkCapture", () => {
     );
   });
 
-  it("rejects files above the 50 MB cap before reading", async () => {
+  it("rejects files above the 20 MB cap before reading", async () => {
     readFileSpy.mockClear();
     mockedFileSize.value = MAX_HAR_BYTES + 1;
     expect(await analyzeNetworkCapture(validPath)).toEqual({
-      error: "HAR file exceeds the 50 MB cap",
+      error: "HAR file exceeds the 20 MB cap",
     });
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file that grew past the cap between stat and read", async () => {
+    readFileSpy.mockClear();
+    // stat says small, read hands back more than the cap: the post-read byte
+    // check must catch the race instead of parsing a 20MB+ document.
+    readFileSpy.mockImplementationOnce(async () => "x".repeat(MAX_HAR_BYTES + 1));
+    expect(await analyzeNetworkCapture(validPath)).toEqual({
+      error: "HAR file exceeds the 20 MB cap",
+    });
+    expect(readFileSpy).toHaveBeenCalledTimes(1);
   });
 
   it("handler returns the report and flags malformed files as errors", async () => {

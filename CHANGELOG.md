@@ -7,6 +7,15 @@
 
 Coverage honesty, output economy and responsive evidence.
 
+### Hardening
+
+- Bundle import-graph extraction replaces its lazy cross-statement ESM/reexport regexes with a linear scanner: bounded ≤500-char keyword window, capped candidates, same `raw`/`kind` values and dedupe/cap semantics. A 1 MB `import ` flood now yields no edges in well under a second instead of backtracking.
+- `analyze_network_capture` HAR cap lowered from 50 MB to 20 MB, re-checked after `readFile` so a file that grows mid-read is rejected with the same error; the 2000-entry cap is unchanged.
+- `capture_live_site` inline previews are capped at 2.5 MB of base64; `inline: false` keeps the saved file and returns text-only, and an omitted preview is stated in the response. `CaptureResult` now carries optional `base64` + `inlineOmitted`.
+- `AWARDS_MCP_PROFILE=core|full` (default full) can expose only the 12 build-loop tools; `AWARDS_MCP_MAX_RESPONSE_BYTES` (default 8 MB) replaces oversized responses with a `{truncated:true,...}` JSON block; `AWARDS_MCP_DEBUG_MEMORY=1` logs one JSON line per call on stderr.
+- `AWARDS_MCP_IMAGE_RETENTION_DAYS=N` (default 0 = off) prunes cached screenshots older than N days once at startup, best-effort.
+- README/README.dev resource-limit docs; hardening tests for the scanner, post-read HAR race, screenshot budget, tool profile, response budget, stderr logging and image retention.
+
 - `get_site_details { slugs }` batch enrichment (1-10, ordered, cached/fetched/error/skipped, stops on block, compact details, no images).
 - `get_index_stats` reports per-metric `sample` and `insufficient`; below 30 parsed rows it suppresses colour/motion lists and score averages instead of publishing misleading numbers. This is a deliberate behaviour change for small caches.
 - `audit_url` gains `compact: true` (reduced perf + pre-cap severity counts + nextActions + coverage) and always-present ranked `nextActions`; `verify_build` gains `compact: true` (verdict, scores, band counts).
@@ -15,7 +24,7 @@ Coverage honesty, output economy and responsive evidence.
 
 ### Web reverse-engineering extension (P1-P5)
 
-- `analyze_network_capture(path, top?)` - offline HAR 1.2 API-surface evidence: requests grouped by method + origin + templated path (dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and high-entropy segments redacted), with counts, statuses, content types and query names only. 50 MB / 2000-entry caps; `evidenceCoverage` discloses exclusions; bodies, headers and query values are never returned.
+- `analyze_network_capture(path, top?)` - offline HAR 1.2 API-surface evidence: requests grouped by method + origin + templated path (dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and high-entropy segments redacted), with counts, statuses, content types and query names only. 20 MB / 2000-entry caps; `evidenceCoverage` discloses exclusions; bodies, headers and query values are never returned.
 - `analyze_bundle bundleIntel: true` - opt-in quoted routes, vendor signatures, source-map presence (never fetched) and module graph; default output keys are unchanged without the flag.
 - `verify_flow` - step-aligned interaction comparison: the same 1-6 scroll/click/wait steps on a build and a reference, then path, scroll delta, skeleton hash, text hash and element count per step. `same` only when both sides are complete and untruncated; truncated or failed states are `unknown`. Two fresh launches, never attach, no screenshots.
 - `analyze_page_structure cdpEndpoint` - loopback CDP attach to a browser the user started: requires `AWWWARDS_MCP_ATTACH=1`, selects an already-open page whose normalized href matches exactly, never navigates, scrolls, clicks or creates tabs, and disconnects without closing anything. An `http://` endpoint is resolved via `/json/version` and the returned ws URL is re-validated before connecting. Rejects `compare: "mobile"`, a custom viewport and responsive evidence; the result carries `attached: true` additively.

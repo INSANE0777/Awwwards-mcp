@@ -1,11 +1,13 @@
 // Offline HAR 1.2 API-surface extractor. Reads a local capture file, never
 // fetches a recorded URL, and returns request groups only: no bodies, headers,
-// cookies or query values. Bounds are part of the contract: 50 MB before read,
+// cookies or query values. Bounds are part of the contract: 20 MB before read
+// (re-checked after read so a file that grew mid-read is still rejected),
 // 2000 entries, redacted/templated path segments, capped list fields.
 import { readFile, stat } from "node:fs/promises";
 import { coverageFrom, type EvidenceCoverage } from "./coverage.js";
 
-export const MAX_HAR_BYTES = 50 * 1024 * 1024;
+export const MAX_HAR_BYTES = 20 * 1024 * 1024;
+const TOO_BIG = "HAR file exceeds the 20 MB cap";
 export const MAX_ENTRIES = 2000;
 const DEFAULT_TOP = 50;
 const MAX_TOP = 200;
@@ -133,7 +135,7 @@ export async function analyzeNetworkCapture(
   } catch {
     return { error: "cannot read HAR file" };
   }
-  if (size > MAX_HAR_BYTES) return { error: "HAR file exceeds the 50 MB cap" };
+  if (size > MAX_HAR_BYTES) return { error: TOO_BIG };
 
   let raw: string;
   try {
@@ -141,6 +143,9 @@ export async function analyzeNetworkCapture(
   } catch {
     return { error: "cannot read HAR file" };
   }
+  // stat and read are not atomic: a file that grew between them must not slip
+  // past the cap. Measure the decoded bytes actually read.
+  if (Buffer.byteLength(raw, "utf8") > MAX_HAR_BYTES) return { error: TOO_BIG };
 
   let doc: unknown;
   try {

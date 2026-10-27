@@ -11,14 +11,15 @@ describe("tool annotations", () => {
 
   it("every tool registration declares all four boolean hints", () => {
     // get_site_details uses registerTool because its cross-field .refine
-    // cannot be expressed as a raw parameter shape.
-    const regRe = /server\.(?:tool|registerTool)\(/g;
+    // cannot be expressed as a raw parameter shape. All registrations go
+    // through the guarded tool()/registerTool() wrappers in cli.ts.
+    const regRe = /^(?:tool|registerTool)\(/gm;
     const calls = src.match(regRe) ?? [];
     expect(calls.length).toBe(37);
 
     // Slice out each balanced-parens registration block and require the
     // four hint keys with explicit boolean values inside it.
-    const re = /server\.(?:tool|registerTool)\(/g;
+    const re = /^(?:tool|registerTool)\(/gm;
     let m: RegExpExecArray | null;
     let checked = 0;
     while ((m = re.exec(src))) {
@@ -41,9 +42,9 @@ describe("tool annotations", () => {
   });
 
   it("registers create_design_brief as a read-only idempotent open-world tool", () => {
-    const registrations = src.match(/server\.tool\(\n  "create_design_brief"/g) ?? [];
+    const registrations = src.match(/tool\(\n  "create_design_brief"/g) ?? [];
     expect(registrations).toHaveLength(1);
-    const start = src.indexOf('server.tool(\n  "create_design_brief"');
+    const start = src.indexOf('tool(\n  "create_design_brief"');
     expect(start).toBeGreaterThanOrEqual(0);
     const block = src.slice(start, src.indexOf("\n);", start) + 3);
     expect(block).toContain("slugs:");
@@ -61,7 +62,7 @@ describe("tool annotations", () => {
   });
 
   it("registers analyze_network_capture as a read-only offline tool", () => {
-    const start = src.indexOf('server.tool(\n  "analyze_network_capture"');
+    const start = src.indexOf('tool(\n  "analyze_network_capture"');
     expect(start).toBeGreaterThanOrEqual(0);
     const block = src.slice(start, src.indexOf("\n);", start) + 3);
     expect(block).toContain("path: z.string()");
@@ -73,7 +74,7 @@ describe("tool annotations", () => {
   });
 
   it("registers verify_flow as a non-read-only click tool with bounded steps", () => {
-    const start = src.indexOf('server.registerTool(\n  "verify_flow"');
+    const start = src.indexOf('registerTool(\n  "verify_flow"');
     expect(start).toBeGreaterThanOrEqual(0);
     const block = src.slice(start, src.indexOf("\n);", start) + 3);
     expect(block).toContain("inputSchema: verifyFlowArgsSchema");

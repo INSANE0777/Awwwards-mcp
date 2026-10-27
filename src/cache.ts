@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -171,10 +171,33 @@ export class Cache {
     mkdirSync(rootDir, { recursive: true });
     this.imagesDir = join(rootDir, "images");
     mkdirSync(this.imagesDir, { recursive: true });
+    this.pruneImages();
     this.dbPath = join(rootDir, "cache.db");
     // Create cache.db + schema eagerly so the storage layout exists right
     // after construction. The handle is closed immediately (see withDb).
     this.withDb(() => {});
+  }
+
+  // Opt-in retention: AWWARDS_MCP_IMAGE_RETENTION_DAYS=N prunes image files
+  // older than N days once at construction. Best-effort — an unreadable or
+  // locked file never blocks opening the cache; 0/unset keeps images forever.
+  private pruneImages(): void {
+    const days = Number(process.env.AWWARDS_MCP_IMAGE_RETENTION_DAYS ?? 0);
+    if (!Number.isFinite(days) || days <= 0) return;
+    const cutoff = this.now() - days * 24 * 60 * 60 * 1000;
+    try {
+      for (const name of readdirSync(this.imagesDir)) {
+        const path = join(this.imagesDir, name);
+        try {
+          const st = statSync(path);
+          if (st.isFile() && st.mtimeMs < cutoff) rmSync(path, { force: true });
+        } catch {
+          /* skip unreadable/locked entry */
+        }
+      }
+    } catch {
+      /* images dir unreadable — never block construction */
+    }
   }
 
   // Open → run → close per operation. node:sqlite keeps cache.db open until

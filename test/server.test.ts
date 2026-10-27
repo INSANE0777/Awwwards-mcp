@@ -905,6 +905,44 @@ describe("capture_live_site", () => {
     const res = await h.capture_live_site({ url: "https://example.com" });
     expect((res.content[0] as any).text).toContain("Playwright is not installed");
   });
+
+  it("returns text-only when the capture omits the inline preview", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const h = createHandlers({
+      client,
+      cache,
+      captureFn: async (_url: string, imagesDir: string) => ({
+        file: join(imagesDir, "big.png"),
+        inlineOmitted: true,
+      }),
+    });
+    const res = await h.capture_live_site({ url: "https://example.com", inline: false });
+    expect(res.isError).toBeUndefined();
+    expect(res.content).toHaveLength(1);
+    expect((res.content[0] as any).text).toContain("Full-page capture of https://example.com saved to");
+    expect((res.content[0] as any).text).toContain(
+      "(inline preview omitted: too large; open the file or pass inline:true)",
+    );
+  });
+
+  it("returns text+image when base64 is present and threads inline:false", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<{ inline?: boolean } | undefined> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      captureFn: async (_url: string, imagesDir: string, opts?: { inline?: boolean }) => {
+        seen.push(opts);
+        return { file: join(imagesDir, "shot.png"), base64: Buffer.from("png").toString("base64") };
+      },
+    });
+    const withImage = await h.capture_live_site({ url: "https://example.com" });
+    expect(withImage.content.filter((block) => block.type === "image")).toHaveLength(1);
+    await h.capture_live_site({ url: "https://example.com", inline: false });
+    expect(seen[1]).toMatchObject({ inline: false });
+  });
 });
 
 describe("empty-parse guards", () => {

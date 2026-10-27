@@ -17,6 +17,7 @@ import { captureLiveSite } from "./capture.js";
 import { runIndexer, shouldAutoIndex } from "./indexer.js";
 import { checkForUpdate } from "./version-check.js";
 import { checkEnvironment } from "./env-check.js";
+import { registerGuarded } from "./tool-profile.js";
 
 // The handlers return ToolResponse, which is structurally identical to the
 // SDK's CallToolResult at runtime ({ content, isError? }). CallToolResult's
@@ -66,7 +67,15 @@ const pkgJson = JSON.parse(
 ) as { version: string };
 const server = new McpServer({ name: "awwwards-mcp", version: pkgJson.version });
 
-server.tool(
+// Every registration goes through the guard: AWARDS_MCP_PROFILE=core skips
+// non-core tools, AWARDS_MCP_MAX_RESPONSE_BYTES caps text+image payloads, and
+// AWARDS_MCP_DEBUG_MEMORY=1 logs one JSON line per call on stderr.
+const tool = ((...args: any[]) =>
+  registerGuarded(server, "tool", args)) as unknown as McpServer["tool"];
+const registerTool = ((...args: any[]) =>
+  registerGuarded(server, "registerTool", args)) as unknown as McpServer["registerTool"];
+
+tool(
   "search_sites",
   "Search award-winning websites on Awwwards — the site index with filters. Returns site cards with inline screenshots, live URLs, awards and tags.",
   {
@@ -102,7 +111,7 @@ server.tool(
   (args) => asMcpResult(handlers.search_sites(args)),
 );
 
-server.registerTool(
+registerTool(
   "get_site_details",
   {
     description:
@@ -113,7 +122,7 @@ server.registerTool(
   (args) => asMcpResult(handlers.get_site_details(args)),
 );
 
-server.tool(
+tool(
   "compare_sites",
   "Compare the design DNA of 2–3 Awwwards sites: titles, live URLs, palettes, technologies, elements, awards and jury scores. Text only; missing details are fetched and cached. For your own build vs a reference, use verify_build instead.",
   {
@@ -125,7 +134,7 @@ server.tool(
   (args) => asMcpResult(handlers.compare_sites(args)),
 );
 
-server.tool(
+tool(
   "create_design_brief",
   "Synthesize a cited design direction from 2–5 Awwwards references",
   {
@@ -142,7 +151,7 @@ server.tool(
   (args) => asMcpResult(handlers.create_design_brief(args)),
 );
 
-server.tool(
+tool(
   "get_index_status",
   "Read offline index status: cached site count, progress, last successful finish and error, lock state and freshness. No live requests.",
   {},
@@ -150,7 +159,7 @@ server.tool(
   () => asMcpResult(handlers.get_index_status()),
 );
 
-server.tool(
+tool(
   "get_index_stats",
   "Aggregate metrics over the LOCAL cache only (zero network). ALL-TIME: site count, element count and technology/tag frequency. WINDOWED by windowDays (default 90, 1-3650): cached details, palette colour frequency and jury score stats from at most the 500 most recently fetched detail rows, plus Motion DNA library frequency. Each metric carries coverage labelled 'locally cached subset'; windowDays/detailsCached/detailParseCap appear only on windowed metrics (sites/elements/technologies are explicitly all-time). top caps each frequency list (default 10, 1-50). Aggregates only - no site slugs or titles. Personal, non-commercial use.",
   {
@@ -173,7 +182,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_index_stats(args)),
 );
 
-server.tool(
+tool(
   "get_site_elements",
   "Get the design-element highlights of one Awwwards site: component-level visuals (3D models, video content, mobile layouts, microcopy) with poster images inline and video URLs.",
   {
@@ -186,7 +195,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_site_elements(args)),
 );
 
-server.tool(
+tool(
   "search_elements",
   "Search Awwwards' curated element gallery — award-grade UI components (footers, menus, loaders, transitions, micro-interactions…). " +
     "Usage: pass query text and at most one of category/stack; every result links back to its source element page and parent project.",
@@ -203,7 +212,7 @@ server.tool(
   (args) => asMcpResult(handlers.search_elements(args)),
 );
 
-server.tool(
+tool(
   "get_element",
   "Get one Awwwards element in full: title, author, built-with stack, media URLs, related elements and the parent award-winning project. Use search_elements first for ids.",
   {
@@ -213,7 +222,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_element(args)),
 );
 
-server.tool(
+tool(
   "list_categories",
   "List the filter taxonomy available on Awwwards: award collections, color hexes, tag/technology slugs usable with search_sites, and the annual winner categories.",
   {},
@@ -221,7 +230,7 @@ server.tool(
   () => asMcpResult(handlers.list_categories()),
 );
 
-server.tool(
+tool(
   "get_annual_categories",
   "List the official Awwwards Annual Awards categories (Site of the Year, Agency of the Year, …) with nominee counts. Annual Awards only: this is not the daily site index. Annual data comes from Awwwards' official public read-only API for personal, non-commercial inspiration use; nominee details are hydrated on request. Media URLs are reference-only — nothing is downloaded.",
   {},
@@ -229,7 +238,7 @@ server.tool(
   () => asMcpResult(handlers.get_annual_categories()),
 );
 
-server.tool(
+tool(
   "get_annual_nominees",
   "Annual Awards only: list nominees in one official Awwwards Annual Awards category, hydrated on demand at 1 request/second (default 10, max 20 per call). Site summaries carry siteSlug and inLocalIndex, so an agent can jump to get_site_details when the daily index has the site. Personal, non-commercial inspiration use only; media URLs are reference-only and are never downloaded.",
   {
@@ -248,7 +257,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_annual_nominees(args)),
 );
 
-server.tool(
+tool(
   "get_annual_nominee",
   "Annual Awards only: get one official Awwwards Annual Awards nominee in full: site entries carry date, description, designBy, country, image/video URLs; agency entries carry location, avatar, award tag counts and featured projects. Pass id (a UUID or full /api/annual/nominees/... path) or category+slug; category+slug may hydrate up to 20 uncached nominees at 1 request/second (~20s worst case), so prefer id when known. Personal, non-commercial inspiration use only; media URLs are reference-only and nothing is downloaded.",
   {
@@ -264,7 +273,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_annual_nominee(args)),
 );
 
-server.tool(
+tool(
   "get_collections",
   "Browse Awwwards' curated thematic moodboards, not a search index. Without a slug, lists collections (paginated); with a slug, returns that collection's first page of site cards. Curated slugs look like 'brutalism'; member collections need 'owner/slug'. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
   {
@@ -288,7 +297,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_collections(args)),
 );
 
-server.tool(
+tool(
   "search_directory",
   "Search the Awwwards directory of agencies/studios, not sites. Filters are path-based, so one of country/category/budget applies per request; query is matched client-side over the fetched page. Returns public profile cards (name, slug, location, website, award counts) — contact details are stripped. One page per call, 7-day local cache. Personal, non-commercial inspiration use.",
   {
@@ -318,7 +327,7 @@ server.tool(
   (args) => asMcpResult(handlers.search_directory(args)),
 );
 
-server.tool(
+tool(
   "audit_url",
   "Audit any live page as evidence, not a grade: runtime frame/long-task/layout-thrash measurement via an installed Chrome/Edge over raw CDP (no playwright), plus static animation anti-patterns scanned over the page HTML and up to 8 same-origin CSS/JS assets (bounded: 8 assets, 2MB each, 1 request/second shared limiter, default 10s timeouts). Asset refs resolve against the final post-redirect page URL; asset redirects leaving that origin are rejected. Findings are severity-sorted before the 50-item cap, so `worst` is always present. `nextActions` ranks the first three fixes. compact=true returns the url, a reduced perf block (fps, droppedFrames, longTasks, layoutThrashing), pre-cap antiPatterns counts (count, worst, high, medium, info), coverage, nextActions and note; omit it for the full findings and full perf. Degrades honestly - perf carries {error} when no browser is available and the static scan reports its own error; neither suppresses the other. Personal, non-commercial use; audit only URLs you are authorised to inspect.",
   {
@@ -343,7 +352,7 @@ server.tool(
   (args) => asMcpResult(handlers.audit_url(args)),
 );
 
-server.tool(
+tool(
   "analyze_accessibility",
   "Collect accessibility EVIDENCE from a live page — an evidence census, not a compliance audit. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background composited bottom-up from the ancestor stack (colour alpha layers), then the contrast ratio (worst pairs with selector paths). Samples under any ancestor opacity group (<1) are excluded from ratios and counted in coverage.skippedOpacityGroups, never approximated; background images, gradients and pseudo-elements are not composited either, so contrast stays heuristic there. Also: image alt coverage; heading ladder (skipped levels, multiple h1); focusable/positive-tabindex counts plus outline:none stylesheet rules; unlabeled form controls; document lang/title. Result carries coverage and heuristic:true. http(s) URLs only; requires the optional playwright dependency and degrades to {error}. Personal, non-commercial use.",
   {
@@ -361,19 +370,25 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_accessibility(args)),
 );
 
-server.tool(
+tool(
   "capture_live_site",
   "Take a fresh full-page screenshot of a live website URL using a headless browser. Requires the optional playwright dependency.",
   {
     url: z.string().url().describe("Absolute URL of the site to capture"),
     waitStrategy: waitStrategySchema,
     viewport: viewportSchema,
+    inline: z
+      .boolean()
+      .optional()
+      .describe(
+        "false omits the inline base64 preview (file is still saved); previews over 2.5MB are omitted automatically",
+      ),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   (args) => asMcpResult(handlers.capture_live_site(args)),
 );
 
-server.tool(
+tool(
   "analyze_page_structure",
   "Extract a page's section band map (tag, label, background color, offset, height per band) via a headless browser. Works on live URLs and file:// paths — use it to compare a reference site's structure against your local build. compare:\"mobile\" also captures at 390×844 and returns mobileBands + diff {heightDelta, bandsAdded, bandsRemoved, reordered} plus responsive evidence: horizontal overflow, small text and small tap targets. cdpEndpoint instead attaches to a browser you started (AWWWARDS_MCP_ATTACH=1) and scans the already-open matching page: it never navigates, scrolls, clicks or creates tabs.",
   {
@@ -394,7 +409,7 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_page_structure(args)),
 );
 
-server.tool(
+tool(
   "record_site_motion",
   "Record a short motion-through video of a live website — preloader, scroll-triggered and hover/cursor animations — and return an inline filmstrip JPEG plus the .webm path. Requires the optional playwright and ffmpeg-static dependencies. Also writes a Motion Evidence Sheet (keyframes with census-stamped captions, diff masks, cursor-trail overlay, timeline strip) beside the filmstrip.",
   {
@@ -413,7 +428,7 @@ server.tool(
   (args) => asMcpResult(handlers.record_site_motion(args)),
 );
 
-server.tool(
+tool(
   "get_motion_dna",
   "Get the Motion DNA of a website: animation stack, ScrollTrigger/pin/scrub counts, easing vocabulary and duration distribution. Live captures append a `censusSummary` block (per-source scroll-census counts) from the same single launch. Serves the corpus first; live-captures unseen URLs (headless browser required).",
   {
@@ -424,7 +439,7 @@ server.tool(
   (args) => asMcpResult(handlers.get_motion_dna(args)),
 );
 
-server.tool(
+tool(
   "analyze_scroll_map",
   "Per-element motion census of a live page: what animates, its CSS properties, duration, delay, easing, and what triggered it (GSAP ScrollTrigger, native CSS scroll()/view() timelines, data attributes, SMIL/SVG). Includes svgStrokes list for stroke draw-in effects. Runs on any URL you give it (builds, references) — does not fetch awwwards.com. Run twice (with reducedMotion) to audit prefers-reduced-motion degradation. Optional scrubProbe drives the page and returns real progress curves per scrubbed trigger. compact=true returns a token-diet summary. Every payload also carries a `choreography` block: stagger hints (hint selector/value/source, groups) distilled from GSAP tween vars and stepped delays across sibling animations.",
   {
@@ -442,7 +457,7 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_scroll_map(args)),
 );
 
-server.tool(
+tool(
   "analyze_hover_census",
   ":hover interaction census of a live page: counts hover rules, samples up to 20 interactive elements, and reports which CSS properties change on hover with transition duration and easing. Use it to reproduce micro-interactions and verify interaction-state coverage. On mobile the hover loop is skipped and a note is returned. compact=true returns a token-diet summary. Runs on any URL — does not fetch awwwards.com.",
   {
@@ -460,7 +475,7 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_hover_census(args)),
 );
 
-server.tool(
+tool(
   "analyze_bundle",
   "Bundle forensics for a live page: fetch it once, download its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks, 10MB, 1 request/second), save them locally, optionally de-obfuscate with webcrack if installed, and grep keywords across the code. Returns chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Opt-in bundleIntel adds route, vendor, source-map presence and module-graph evidence; source maps are detected but never fetched, and default output keys are unchanged. Runs on URLs you are authorized to analyze — does not fetch awwwards.com.",
   {
@@ -478,7 +493,7 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_bundle(args))
 );
 
-server.tool(
+tool(
   "analyze_network_capture",
   "Offline API-surface evidence from a local HAR 1.2 file (browser devtools export): groups requests by method + origin + path template (ISO dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and long high-entropy segments redacted), with counts, statuses, content types and query names only. Reads the file only — never fetches recorded URLs, never returns bodies, headers or query values. No network.",
   {
@@ -490,7 +505,7 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_network_capture(args)),
 );
 
-server.registerTool(
+registerTool(
   "verify_flow",
   {
     description:
@@ -501,7 +516,7 @@ server.registerTool(
   (args) => asMcpResult(handlers.verify_flow(args)),
 );
 
-server.tool(
+tool(
   "build_project",
   "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. Pairs with verify_build: build → convert → verify.",
   {
@@ -516,7 +531,7 @@ server.tool(
   (args) => asMcpResult(handlers.build_project(args)),
 );
 
-server.tool(
+tool(
   "verify_build",
   "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
   {
@@ -537,7 +552,7 @@ server.tool(
   (args) => asMcpResult(handlers.verify_build(args)),
 );
 
-server.tool(
+tool(
   "capture_component",
   "Serialize a page component (structure, computed-style tokens, animations) into a portable pack for rebuild tooling. Adds typography usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each + sampled node count) and paletteSummary (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). compact=true returns a token-diet summary and omits both. Runs on any URL — does not fetch awwwards.com.",
   {
@@ -557,7 +572,7 @@ server.tool(
   (args) => asMcpResult(handlers.capture_component(args)),
 );
 
-server.tool(
+tool(
   "capture_pose_3d",
   "Capture a page's WebGL/canvas 3D pose grid: samples the largest canvas (toDataURL, viewport-screenshot fallback) at up to 10 scroll steps with per-step scroll ratios, for reconstructing scroll-driven 3D camera paths. Runs on any URL — does not fetch awwwards.com. Requires the optional playwright dependency.",
   {
@@ -570,7 +585,7 @@ server.tool(
   (args) => asMcpResult(handlers.capture_pose_3d(args)),
 );
 
-server.tool(
+tool(
   "build_pose_stub",
   "Render a captured pose grid (pose-grid-v1 from capture_pose_3d) as a standalone scroll-scrubbed three.js stub page: frames preloaded inline, camera path interpolated between snapshot scroll ratios, prefers-reduced-motion static fallback, optional census-derived st/pin/ease suggestions. Pure build — no page fetches, no awwwards.com access.",
   {
@@ -582,7 +597,7 @@ server.tool(
   (args) => asMcpResult(handlers.build_pose_stub(args)),
 );
 
-server.tool(
+tool(
   "analyze_stack",
   "Fingerprint a page's framework (Next.js/Astro/Nuxt/Remix/SvelteKit/WordPress/Webflow/Framer), CSS framework (Tailwind/Bootstrap), and marker libs from fetched HTML — runs on any URL, one polite request, no browser",
   {
@@ -593,7 +608,7 @@ server.tool(
   (args) => asMcpResult(handlers.analyze_stack(args)),
 );
 
-server.tool(
+tool(
   "build_gsap_stub",
   "Generate a runnable GSAP+ScrollTrigger timeline stub from captured motion evidence (scroll census anims + optional pose grid camera anchors) — pure build from provided JSON, no page fetches",
   { scrollCensus: z.any().describe("ScrollCensus JSON from analyze_scroll_map"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
@@ -601,7 +616,7 @@ server.tool(
   (args) => asMcpResult(handlers.build_gsap_stub(args)),
 );
 
-server.tool(
+tool(
   "build_motion_manifest",
   "Build a motion.manifest.json scaffold from measured evidence: an analyze_page_structure result (bands) + an analyze_scroll_map census, with optional section overrides. Sections are mapped best-effort from each band's tag + first #id/.class token in its label (or sections[].selector) — no markup is available, so DOM initial-state hints are empty; census triggers still attribute to sections by those tokens. Returns { manifest, measured:false, censusAnims, warnings, note }; manifest.measured stays false when the census has no anims/triggers/curves. Never throws ({ error } on invalid input). Pure/offline — no page fetches.",
   {
@@ -617,7 +632,7 @@ server.tool(
   (args) => asMcpResult(handlers.build_motion_manifest(args)),
 );
 
-server.tool(
+tool(
   "search_motion",
   "Search captured Motion DNA records: find sites that pin sections, scrub scroll-driven animation, or run a given animation library. Corpus only — live-capture happens via get_motion_dna.",
   {
@@ -630,7 +645,7 @@ server.tool(
   (args) => asMcpResult(handlers.search_motion(args)),
 );
 
-server.tool(
+tool(
   "new_winners",
   "Poll today's new Awwwards winners as a delta against the previous poll: new-entrant cards since the last call (first call seeds the baseline and reports no delta). Poll daily for a winners feed; pairs with watch_site for structured monitoring.",
   {
@@ -642,7 +657,7 @@ server.tool(
   (args) => asMcpResult(handlers.new_winners(args)),
 );
 
-server.tool(
+tool(
   "watch_site",
   "Longitudinal watchlist over Awwwards listings: track a studio (e.g. 'ToyFight'), a tag/technology slug (e.g. 'webgl'), or a site URL-slug for changes and new entries. add/list/remove; the delta is reported by watch_site list after new_winners or search_sites refreshes the listing.",
   {

@@ -664,6 +664,25 @@ describe("extractEdges (D1: static import edges)", () => {
     expect(g.edges).toHaveLength(400);
     expect(g.truncated).toBe(false); // exactly the cap, nothing dropped
   });
+
+  it("bridges at most a bounded window between import/export and from", () => {
+    const near = `import ${"x".repeat(400)} from "./near.js";`;
+    const far = `import ${"x".repeat(600)} from "./far.js";`;
+    const g = extractEdges([mk(0, A, near + far)]);
+    expect(g.edges.map((e) => e.to)).toEqual(["./near.js"]);
+  });
+
+  it("stays linear on a 1MB import flood (no cross-statement regex backtracking)", () => {
+    // Regression for the old /\bimport\b[^;'"()]*?\bfrom.../ family: with no
+    // "from" anywhere, the lazy bridge backtracked over the whole chunk for
+    // every keyword. The linear scanner must return no edges promptly.
+    const text = "import ".repeat(Math.ceil((1024 * 1024) / 7));
+    const started = performance.now();
+    const g = extractEdges([mk(0, A, text)]);
+    const elapsed = performance.now() - started;
+    expect(g.edges).toEqual([]);
+    expect(elapsed).toBeLessThan(2000);
+  });
 });
 
 describe("captureBundleForensics edges (D1: opt-in static import graph)", () => {
