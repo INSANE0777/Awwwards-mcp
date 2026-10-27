@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compactSiteDetails, createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import { detailArgsSchema } from "../src/detail-schema.js";
 import type { ScrollCensus } from "../src/census.js";
 import type { HoverCensus } from "../src/hover-census.js";
 import type { UnifiedMotionDna } from "../src/motion-dna.js";
@@ -466,17 +467,21 @@ describe("get_site_details batch", () => {
     expect(JSON.stringify(cached)).not.toContain("base64");
   });
 
-  it("rejects both slug and slugs, neither, duplicates and more than 10", async () => {
+  it("rejects both slug and slugs, neither, duplicates, bad shapes and more than 10", async () => {
     const cache = new Cache(tmpDir());
     const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
-    const getHtml = vi.spyOn(client, "getHtml");
+    const getHtml = vi.spyOn(client, "getHtml").mockRejectedValue(new Error("offline"));
     const h = createHandlers({ client, cache });
     const invalid = [
       { slug: "a", slugs: ["b"] },
       {},
       { slugs: ["a", "A"] },
       { slugs: Array.from({ length: 11 }, (_, i) => `s${i}`) },
+      { slugs: [] },
       { slugs: ["../bad"] },
+      { slugs: ["a", 1] },
+      { slug: "" },
+      { slugs: "a" },
     ];
     for (const args of invalid) {
       const res = await h.get_site_details(args as any);
@@ -508,6 +513,60 @@ describe("get_site_details batch", () => {
     expect(getHtml).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps fetching after a per-slug failure and counts it", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    const getHtml = vi.spyOn(client, "getHtml").mockImplementation(async (path: string) => {
+      if (path.includes("/sites/b")) throw new Error("HTTP 500 for https://www.awwwards.com/sites/b");
+      return detailPage(path.split("/sites/")[1] ?? "");
+    });
+    const h = createHandlers({ client, cache });
+    const res = await h.get_site_details({ slugs: ["a", "b", "c"] });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.results.map((r: any) => r.status)).toEqual(["fetched", "error", "fetched"]);
+    expect(parsed.results[1]).toMatchObject({
+      slug: "b", status: "error", error: "HTTP 500 for https://www.awwwards.com/sites/b",
+    });
+    expect(parsed.summary).toEqual({ requested: 3, fetched: 2, cached: 0, failed: 1, skipped: 0 });
+    expect(parsed.blocked).toBeUndefined();
+    expect(getHtml).toHaveBeenCalledTimes(3);
+  });
+
+  it("errors only when every requested slug fails", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    const getHtml = vi.spyOn(client, "getHtml")
+      .mockResolvedValue("<html><body>nothing</body></html>");
+    const h = createHandlers({ client, cache });
+    const slugs = ["a", "b", "c"];
+    const res = await h.get_site_details({ slugs });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.results).toHaveLength(slugs.length);
+    expect(parsed.results.every((r: any) => r.status === "error")).toBe(true);
+    expect(parsed.results.every((r: any) => r.blocked === undefined)).toBe(true);
+    expect(parsed.summary).toEqual({ requested: 3, fetched: 0, cached: 0, failed: 3, skipped: 0 });
+    expect(parsed.blocked).toBeUndefined();
+    expect(getHtml).toHaveBeenCalledTimes(3);
+  });
+
+  it("fetches a full 10-slug batch", async () => {
+    const cache = new Cache(tmpDir());
+    const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
+    const getHtml = vi.spyOn(client, "getHtml").mockImplementation(async (path: string) =>
+      detailPage(path.split("/sites/")[1] ?? ""));
+    const h = createHandlers({ client, cache });
+    const slugs = Array.from({ length: 10 }, (_, i) => `s${i}`);
+    const res = await h.get_site_details({ slugs });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.results.map((r: any) => r.slug)).toEqual(slugs);
+    expect(parsed.results.every((r: any) => r.status === "fetched")).toBe(true);
+    expect(parsed.summary).toEqual({ requested: 10, fetched: 10, cached: 0, failed: 0, skipped: 0 });
+    expect(getHtml).toHaveBeenCalledTimes(10);
+  });
+
   it("returns compactSiteDetails output per entry", async () => {
     const cache = new Cache(tmpDir());
     const client = new AwwwardsClient({ rateLimiter: new RateLimiter(0) });
@@ -519,6 +578,21 @@ describe("get_site_details batch", () => {
     const detail = cache.getMeta<SiteDetails>("detail:a", 7 * 24 * 60 * 60 * 1000);
     expect(detail).not.toBeNull();
     expect(parsed.results[0].details).toEqual(compactSiteDetails(detail!));
+  });
+});
+
+describe("get_site_details schema", () => {
+  it("enforces exactly one of slug or slugs, the 1–10 bound and distinctness", () => {
+    const ok = (args: unknown) => detailArgsSchema.safeParse(args).success;
+    expect(ok({ slugs: ["a"] })).toBe(true);
+    expect(ok({ slug: "a" })).toBe(true);
+    expect(ok({ slugs: Array.from({ length: 10 }, (_, i) => `s${i}`) })).toBe(true);
+    expect(ok({})).toBe(false);
+    expect(ok({ slug: "a", slugs: ["b"] })).toBe(false);
+    expect(ok({ slugs: [] })).toBe(false);
+    expect(ok({ slugs: ["a", "a"] })).toBe(false);
+    expect(ok({ slugs: ["a", "A"] })).toBe(false);
+    expect(ok({ slugs: Array.from({ length: 11 }, (_, i) => `s${i}`) })).toBe(false);
   });
 });
 

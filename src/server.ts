@@ -825,6 +825,12 @@ export function createHandlers(deps: {
     }
   }
 
+  // The one parser-drift explanation shared by every detail caller.
+  function detailDriftMessage(slug: string): string {
+    return "Awwwards layout may have changed: parsed no design data for " + slug +
+      ". The awwwards-mcp parser likely needs an update (or the site page was not found).";
+  }
+
   // Shared by details and comparison: only successful parses seed the detail
   // and elements caches, and neither caller needs an image to do so.
   async function loadDetail(slug: string): Promise<SiteDetails | null> {
@@ -858,12 +864,16 @@ export function createHandlers(deps: {
     return { detail: await loadDetail(slug), source: "fetched" };
   }
 
-  // Ordered batch outcomes; after a BlockedError no further request is made.
-  async function loadDetails(slugs: string[]): Promise<BatchDetailEntry[]> {
+  // Ordered batch outcomes. tolerant=false rethrows the first non-block
+  // failure; stopOnBlocked=false keeps requesting after a block.
+  async function loadDetails(
+    slugs: string[],
+    opts: { tolerant: boolean; stopOnBlocked: boolean } = { tolerant: true, stopOnBlocked: true },
+  ): Promise<BatchDetailEntry[]> {
     const results: BatchDetailEntry[] = [];
     let blocked = false;
     for (const slug of slugs) {
-      if (blocked) {
+      if (blocked && opts.stopOnBlocked) {
         results.push({ slug, status: "skipped", error: "blocked-before-request", blocked: true });
         continue;
       }
@@ -871,20 +881,16 @@ export function createHandlers(deps: {
         const { detail, source } = await loadDetailWithSource(slug);
         results.push(detail
           ? { slug, status: source, details: compactSiteDetails(detail) }
-          : {
-              slug,
-              status: "error",
-              error:
-                "Awwwards layout may have changed: parsed no design data for " + slug +
-                ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
-            });
+          : { slug, status: "error", error: detailDriftMessage(slug) });
       } catch (err) {
-        if (err instanceof BlockedError) blocked = true;
+        const isBlocked = err instanceof BlockedError;
+        if (isBlocked) blocked = true;
+        if (!isBlocked && !opts.tolerant) throw err;
         results.push({
           slug,
           status: "error",
           error: err instanceof Error ? err.message : String(err),
-          ...(err instanceof BlockedError ? { blocked: true as const } : {}),
+          ...(isBlocked ? { blocked: true as const } : {}),
         });
       }
     }
@@ -949,11 +955,7 @@ export function createHandlers(deps: {
       const d = await loadDetail(slug);
       if (!d) {
         return {
-          content: [text(
-            "Awwwards layout may have changed: parsed no design data for " +
-              slug +
-              ". The awwwards-mcp parser likely needs an update (or the site page was not found).",
-          )],
+          content: [text(detailDriftMessage(slug))],
           isError: true,
         };
       }
@@ -1013,10 +1015,7 @@ export function createHandlers(deps: {
       for (const slug of slugs) {
         const detail = await loadDetail(slug);
         if (!detail) {
-          return { content: [text(
-            `Awwwards layout may have changed: parsed no design data for ${slug}. ` +
-              "The awwwards-mcp parser likely needs an update (or the site page was not found).",
-          )], isError: true };
+          return { content: [text(detailDriftMessage(slug))], isError: true };
         }
         const summary = cache.getSite(slug, SITE_TTL_MS);
         sites.push({
