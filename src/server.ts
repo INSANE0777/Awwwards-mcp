@@ -18,6 +18,7 @@ import type { ScrollCensus } from "./census.js";
 import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
+import type { NetworkCaptureResult } from "./network-capture.js";
 import type { VerifyBuildFn, VerifyReport } from "./verify-build.js";
 import type { BuildProjectFn } from "./build-project.js";
 import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
@@ -153,6 +154,12 @@ export type BundleFn = (
   url: string,
   opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean },
 ) => Promise<BundleReport | { error: string }>;
+
+// analyze_network_capture: offline HAR 1.2 parsing — reads a local file only.
+export type NetworkCaptureFn = (
+  path: string,
+  opts?: { top?: number },
+) => Promise<NetworkCaptureResult | { error: string }>;
 
 // build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
 export type { GsapStubFn };
@@ -489,6 +496,7 @@ export interface Handlers {
     walkChunks?: boolean;
     edges?: boolean;
   }): Promise<ToolResponse>;
+  analyze_network_capture(args: { path: string; top?: number }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; compact?: boolean }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
@@ -544,6 +552,7 @@ export function createHandlers(deps: {
   scrollMapFn?: ScrollMapFn;
   hoverCensusFn?: HoverCensusFn;
   bundleFn?: BundleFn;
+  networkCaptureFn?: NetworkCaptureFn;
   verifyBuildFn?: VerifyBuildFn;
   captureComponentFn?: CaptureComponentFn;
   pose3dFn?: Pose3dFn;
@@ -1774,6 +1783,24 @@ export function createHandlers(deps: {
     }
   }
 
+  async function analyze_network_capture(args: {
+    path: string;
+    top?: number;
+  }): Promise<ToolResponse> {
+    try {
+      // Local file only: the module never fetches a recorded URL.
+      const analyze =
+        deps.networkCaptureFn ??
+        ((path: string, opts?: { top?: number }) =>
+          import("./network-capture.js").then((m) => m.analyzeNetworkCapture(path, opts)));
+      const result = await analyze(args.path, { top: args.top });
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function verify_build(args: {
     buildUrl: string;
     referenceUrl: string;
@@ -2196,6 +2223,7 @@ export function createHandlers(deps: {
     analyze_scroll_map,
     analyze_hover_census,
     analyze_bundle,
+    analyze_network_capture,
     verify_build,
     capture_component,
     capture_pose_3d,

@@ -472,6 +472,18 @@ server.tool(
 );
 
 server.tool(
+  "analyze_network_capture",
+  "Offline API-surface evidence from a local HAR 1.2 file (browser devtools export): groups requests by method + origin + path template (ISO dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and long high-entropy segments redacted), with counts, statuses, content types and query names only. Reads the file only — never fetches recorded URLs, never returns bodies, headers or query values. No network.",
+  {
+    path: z.string().min(1).describe("Local path to a HAR 1.2 file"),
+    top: z.number().int().min(1).max(200).optional()
+      .describe("Max groups after sorting (default 50, max 200)"),
+  },
+  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  (args) => asMcpResult(handlers.analyze_network_capture(args)),
+);
+
+server.tool(
   "build_project",
   "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. Pairs with verify_build: build → convert → verify.",
   {
