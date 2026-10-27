@@ -11,7 +11,7 @@ import {
 } from "./awwwards.js";
 import type { Cache } from "./cache.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "./structure.js";
-import type { CaptureOpts, CaptureResult } from "./capture.js";
+import { DEFAULT_MAX_INLINE_BYTES, type CaptureOpts, type CaptureResult } from "./capture.js";
 import { diffBands } from "./structure.js";
 import type { AwardFilter, SearchFilters } from "./awwwards.js";
 import type { ViewportName } from "./viewport.js";
@@ -467,6 +467,7 @@ export interface Handlers {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     inline?: boolean;
+    maxInlineBytes?: number;
   }): Promise<ToolResponse>;
   analyze_page_structure(args: {
     url: string;
@@ -1606,11 +1607,12 @@ export function createHandlers(deps: {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     inline?: boolean;
+    maxInlineBytes?: number;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
       // The default is wrapped because captureLiveSite's third positional is
-      // the injectable playwright loader — opts must land in fourth place.
+      // the injectable playwright loader - opts must land in fourth place.
       const capture =
         deps.captureFn ??
         ((url: string, imagesDir: string, opts?: WaitOpts) =>
@@ -1621,13 +1623,19 @@ export function createHandlers(deps: {
         waitStrategy: args.waitStrategy,
         viewport: args.viewport ?? "desktop",
         inline: args.inline,
+        maxInlineBytes: args.maxInlineBytes,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       if (result.base64 === undefined) {
+        const budget = args.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES;
+        const budgetLabel =
+          budget >= 1_000_000
+            ? `${Number((budget / 1_000_000).toFixed(1))} MB`
+            : `${budget} bytes`;
         const note =
           args.inline === false
-            ? "(inline preview disabled)"
-            : "(inline preview omitted: too large; open the file or pass inline:true)";
+            ? "(inline preview disabled; open the saved file)"
+            : `(inline preview omitted: the PNG exceeds the ${budgetLabel} inline budget; open the saved file or raise maxInlineBytes)`;
         return {
           content: [text(`Full-page capture of ${args.url} saved to ${result.file} ${note}`)],
         };

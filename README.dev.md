@@ -184,11 +184,13 @@ tests import it directly (cli.ts connects to stdio on import).
   `process.memoryUsage()`) on stderr; stdout stays JSON-RPC-only.
 - `AWWWARDS_MCP_IMAGE_RETENTION_DAYS=N` - prune cached images older than N days
   at `Cache` construction; 0/unset keeps them.
-- Screenshots: 2.5 MB base64 inline budget, estimated from the raw buffer
-  (`4*ceil(n/3)`) before conversion; `inline:false` omits the preview. Pose and
-  component inline images count toward the response budget too.
+- Screenshots: 2.5 MB base64 inline budget (`maxInlineBytes` overrides it),
+  estimated from the raw buffer (`4*ceil(n/3)`) before conversion;
+  `inline:false` omits the preview. Pose and component inline images count
+  toward the response budget too.
 - HAR: 20 MB cap, checked before and after `readFile`; 2000 entries.
-- Bundle edges: import/reexport declarations up to 8 KB each.
+- Bundle edges: import/reexport declarations up to 8 KB each; a longer
+  declaration sets `truncated:true` instead of disappearing silently.
 
 The legacy `AWARDS_MCP_*` names (one fewer W, v1.14.0) are accepted as a
 one-release fallback; the canonical `AWWWARDS_MCP_*` value wins.

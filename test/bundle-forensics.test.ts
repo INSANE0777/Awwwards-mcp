@@ -708,9 +708,20 @@ describe("extractEdges (D1: static import edges)", () => {
     expect(g.truncated).toBe(false);
   });
 
-  it("drops declarations beyond the 8KB declaration cap", () => {
+  it("drops declarations beyond the 8KB declaration cap and marks truncated", () => {
     const huge = `import { ${"x".repeat(9000)} } from "./huge.js";`;
-    expect(extractEdges([mk(0, A, huge)]).edges).toEqual([]);
+    const g = extractEdges([mk(0, A, huge)]);
+    expect(g.edges).toEqual([]);
+    expect(g.truncated).toBe(true); // dropped by the declaration cap, not silently lost
+  });
+
+  it("keeps a declaration pending across dots in comments", () => {
+    const source = `import { a } /* x. */ from "./dot.js";`;
+    const g = extractEdges([mk(0, A, source)]);
+    expect(g.edges).toEqual([
+      { from: 0, to: "./dot.js", kind: "esm-import", raw: source.slice(0, -1) },
+    ]);
+    expect(g.truncated).toBe(false);
   });
 
   it("stays linear on a 1MB import flood (no cross-statement regex backtracking)", () => {

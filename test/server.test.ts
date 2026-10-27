@@ -921,11 +921,11 @@ describe("capture_live_site", () => {
     expect(res.isError).toBeUndefined();
     expect(res.content).toHaveLength(1);
     expect((res.content[0] as any).text).toContain("Full-page capture of https://example.com saved to");
-    expect((res.content[0] as any).text).toContain("(inline preview disabled)");
+    expect((res.content[0] as any).text).toContain("(inline preview disabled; open the saved file)");
     expect((res.content[0] as any).text).not.toContain("pass inline:true");
   });
 
-  it("explains an automatic omission and how to force inline", async () => {
+  it("explains an automatic omission and how to raise the budget", async () => {
     const cache = new Cache(tmpDir());
     const { client } = fakeClient();
     const h = createHandlers({
@@ -937,27 +937,44 @@ describe("capture_live_site", () => {
       }),
     });
     const res = await h.capture_live_site({ url: "https://example.com" });
-    expect((res.content[0] as any).text).toContain(
-      "(inline preview omitted: too large; open the file or pass inline:true)",
+    const text = (res.content[0] as any).text;
+    expect(text).toContain(
+      "(inline preview omitted: the PNG exceeds the 2.5 MB inline budget; open the saved file or raise maxInlineBytes)",
     );
+    expect(text).not.toContain("pass inline:true");
   });
 
-  it("returns text+image when base64 is present and threads inline:false", async () => {
+  it("reports the custom maxInlineBytes budget in the omission message", async () => {
     const cache = new Cache(tmpDir());
     const { client } = fakeClient();
-    const seen: Array<{ inline?: boolean } | undefined> = [];
     const h = createHandlers({
       client,
       cache,
-      captureFn: async (_url: string, imagesDir: string, opts?: { inline?: boolean }) => {
+      captureFn: async (_url: string, imagesDir: string) => ({
+        file: join(imagesDir, "big.png"),
+        inlineOmitted: true,
+      }),
+    });
+    const res = await h.capture_live_site({ url: "https://example.com", maxInlineBytes: 1_000_000 });
+    expect((res.content[0] as any).text).toContain("the PNG exceeds the 1 MB inline budget");
+  });
+
+  it("returns text+image when base64 is present and threads inline:false/maxInlineBytes", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const seen: Array<{ inline?: boolean; maxInlineBytes?: number } | undefined> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      captureFn: async (_url: string, imagesDir: string, opts?: { inline?: boolean; maxInlineBytes?: number }) => {
         seen.push(opts);
         return { file: join(imagesDir, "shot.png"), base64: Buffer.from("png").toString("base64") };
       },
     });
     const withImage = await h.capture_live_site({ url: "https://example.com" });
     expect(withImage.content.filter((block) => block.type === "image")).toHaveLength(1);
-    await h.capture_live_site({ url: "https://example.com", inline: false });
-    expect(seen[1]).toMatchObject({ inline: false });
+    await h.capture_live_site({ url: "https://example.com", inline: false, maxInlineBytes: 1234 });
+    expect(seen[1]).toMatchObject({ inline: false, maxInlineBytes: 1234 });
   });
 });
 

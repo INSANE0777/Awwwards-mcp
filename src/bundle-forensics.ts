@@ -142,9 +142,17 @@ interface EdgeCandidate {
   raw: string;
 }
 
+interface EdgeScanResult {
+  candidates: EdgeCandidate[];
+  // A syntactically plausible import/export declaration longer than
+  // MAX_DECL_SPAN was dropped, so the caller must report truncated:true even
+  // when no edge cap was hit.
+  overflowed: boolean;
+}
+
 // One text pass, family-major output (imports, bare imports, reexports,
 // requires, webpack ids) so dedupe/cap order is unchanged.
-function scanEdgeCandidates(text: string): EdgeCandidate[] {
+function scanEdgeCandidates(text: string): EdgeScanResult {
   const len = text.length;
   const imports: EdgeCandidate[] = [];
   const bareImports: EdgeCandidate[] = [];
@@ -152,16 +160,18 @@ function scanEdgeCandidates(text: string): EdgeCandidate[] {
   const requires: EdgeCandidate[] = [];
   const webpackIds: EdgeCandidate[] = [];
   let pending: PendingDecl | null = null;
+  let overflowed = false;
   let wordStart = -1; // start of the current word run, -1 outside one
 
   for (let i = 0; i < len; i++) {
     const c = text.charCodeAt(i);
-    if (pending !== null && i - pending.start > MAX_DECL_SPAN) pending = null;
 
     if (!isWordCode(c)) {
       if (c === 46 /* . */) {
         // Webpack module id: `e.i(870178)`. The prefix is the word run ending
         // just before the dot (capped so the raw candidate stays bounded).
+        // Dots do NOT clear a pending declaration: `import { a } /* x. */
+        // from "./dot.js"` is still one declaration.
         if (text.charCodeAt(i + 1) === 105 && text.charCodeAt(i + 2) === 40 && wordStart >= 0) {
           const prefix = Math.max(wordStart, i - MAX_EDGE_SPAN);
           const digitsAt = i + 3;
@@ -176,7 +186,6 @@ function scanEdgeCandidates(text: string): EdgeCandidate[] {
             });
           }
         }
-        pending = null; // member access cannot be part of a declaration
       } else if (
         c === 59 || // ;
         c === 40 || // (
@@ -231,14 +240,16 @@ function scanEdgeCandidates(text: string): EdgeCandidate[] {
     } else if (c === 102 && text.startsWith("from", i) && !isWordCode(text.charCodeAt(i + 4))) {
       if (pending === null) continue;
       const start = pending.start;
-      if (i - start > MAX_DECL_SPAN) {
-        pending = null;
-        continue;
-      }
       let p = i + 4;
       while (p < len && text.charCodeAt(p) <= 32) p++;
       const spec = readSpecifier(text, p, len);
       if (!spec) continue; // a `from` identifier inside the binding list
+      if (i - start > MAX_DECL_SPAN) {
+        // A real declaration, but past the cap: dropped, so surface truncated.
+        overflowed = true;
+        pending = null;
+        continue;
+      }
       const kind: ImportEdgeKind = pending.kind === "import" ? "esm-import" : "esm-reexport";
       const candidate = { to: spec.to, kind, raw: text.slice(start, spec.end) };
       if (kind === "esm-import") imports.push(candidate);
@@ -248,7 +259,10 @@ function scanEdgeCandidates(text: string): EdgeCandidate[] {
       wordStart = -1;
     }
   }
-  return [...imports, ...bareImports, ...reexports, ...requires, ...webpackIds];
+  return {
+    candidates: [...imports, ...bareImports, ...reexports, ...requires, ...webpackIds],
+    overflowed,
+  };
 }
 
 export function extractEdges(chunks: EdgeScanChunk[]): ImportGraph {
@@ -261,7 +275,9 @@ export function extractEdges(chunks: EdgeScanChunk[]): ImportGraph {
   // Dedupe happens on pull, so hitting a cap costs one extra candidate (proof
   // something was dropped). The per-chunk family-major list is built once.
   function* candidates(chunk: EdgeScanChunk): Generator<{ to: string; kind: ImportEdgeKind; raw: string }> {
-    for (const candidate of scanEdgeCandidates(chunk.text)) {
+    const scan = scanEdgeCandidates(chunk.text);
+    if (scan.overflowed) truncated = true;
+    for (const candidate of scan.candidates) {
       const key = `${chunk.index}\u0000${candidate.kind}\u0000${candidate.to}`;
       if (seen.has(key)) continue; // dedupe first-wins
       seen.add(key);

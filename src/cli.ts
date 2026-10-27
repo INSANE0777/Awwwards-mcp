@@ -382,7 +382,15 @@ tool(
       .boolean()
       .optional()
       .describe(
-        "false omits the inline base64 preview (file is still saved); previews over 2.5MB are omitted automatically",
+        "false omits the inline base64 preview (file is still saved); previews over the inline budget are omitted automatically",
+      ),
+    maxInlineBytes: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Byte budget for the inline base64 preview (default 2500000); larger previews are saved without an inline image",
       ),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
