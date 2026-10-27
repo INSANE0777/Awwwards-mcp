@@ -205,6 +205,18 @@ describe("analyzeNetworkCapture", () => {
     expect(res.groups).toHaveLength(2);
     expect(res.note).toContain("never returned");
     expect(res.note).not.toContain("never read");
+    expect(Object.keys(res.groups[0]).sort()).toEqual([
+      "contentTypes",
+      "count",
+      "method",
+      "origin",
+      "pathTemplate",
+      "queryNames",
+      "statuses",
+    ]);
+    expect(JSON.stringify(res.groups)).not.toMatch(
+      /authorization|cookie|set-cookie|postdata|password|access_token/i,
+    );
 
     const json = JSON.stringify(res);
     for (const secret of [
@@ -220,6 +232,68 @@ describe("analyzeNetworkCapture", () => {
     ]) {
       expect(json).not.toContain(secret);
     }
+  });
+
+  it("keeps pure-digit ids templated and only redacts 16–31 lettered hex", async () => {
+    const digits = [15, 16, 31, 32].map((length) => "7".repeat(length));
+    const hex16 = "a1b2c3d4e5f60718";
+    const hex31 = "a" + "1".repeat(30);
+    const hex32 = "a" + "1".repeat(31);
+    const values = [...digits, hex16, hex31, hex32];
+    const path = tempHar(har(
+      values.map((value, index) => entry(`https://ids.test/p${index}/${value}`)),
+    ));
+    const res = await analyzeNetworkCapture(path);
+    if ("error" in res) throw new Error(res.error);
+
+    expect(res.groups.map((g) => g.pathTemplate)).toEqual([
+      "/p0/{id}",
+      "/p1/{id}",
+      "/p2/{id}",
+      "/p3/{id}",
+      "/p4/{redacted}",
+      "/p5/{redacted}",
+      "/p6/{hex}",
+    ]);
+    expect(res.templatedGroups).toBe(7);
+    expect(JSON.stringify(res)).not.toContain(hex16);
+  });
+
+  it("caps method, content-type essence and query name lengths", async () => {
+    const queryName = "q".repeat(300);
+    const res = await analyzeNetworkCapture(tempHar(har([
+      {
+        request: {
+          method: "m".repeat(30),
+          url: `https://caps.test/items/7?${queryName}=query-secret-xyz`,
+        },
+        response: {
+          status: 200,
+          content: { mimeType: `Application/${"X".repeat(150)}; charset=utf-8` },
+        },
+      },
+    ])));
+    if ("error" in res) throw new Error(res.error);
+
+    expect(res.groups[0].method).toBe("M".repeat(16));
+    expect(res.groups[0].contentTypes).toEqual([`application/${"x".repeat(88)}`]);
+    expect(res.groups[0].contentTypes[0]).toHaveLength(100);
+    expect(res.groups[0].queryNames).toEqual(["q".repeat(200)]);
+    expect(JSON.stringify(res)).not.toContain("query-secret-xyz");
+  });
+
+  it("keys groups by the full template, not the 200-char display", async () => {
+    const prefix = "/api/" + "segment/".repeat(30);
+    const path = tempHar(har(
+      ["one", "two", "123"].map((tail) => entry(`https://long.test${prefix}${tail}`)),
+    ));
+    const res = await analyzeNetworkCapture(path);
+    if ("error" in res) throw new Error(res.error);
+
+    expect(res.groups).toHaveLength(3);
+    expect(new Set(res.groups.map((g) => g.pathTemplate)).size).toBe(1);
+    expect(res.groups[0].pathTemplate).toHaveLength(200);
+    expect(res.templatedGroups).toBe(1);
   });
 
   it("caps content types and query names at 20", async () => {

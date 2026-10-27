@@ -11,6 +11,9 @@ const DEFAULT_TOP = 50;
 const MAX_TOP = 200;
 const MAX_LIST = 20; // contentTypes / queryNames cap
 const MAX_TEMPLATE = 200;
+const MAX_METHOD = 16;
+const MAX_CONTENT_TYPE = 100;
+const MAX_QUERY_NAME = 200;
 
 export interface NetworkCaptureGroup {
   method: string;
@@ -41,15 +44,17 @@ const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX_RE = /^[0-9a-f]{32,}$/i;
-const SHORT_HEX_RE = /^[0-9a-f]{16,31}$/i;
+const HEX_CHARS_RE = /^[0-9a-f]+$/i;
+const HAS_HEX_LETTER_RE = /[a-f]/i;
+const NUMERIC_RE = /^\d+$/;
 
-// First matching rule wins, in the binding order (design §4.1).
+// First matching rule wins, in the binding order (design §4.1). Numeric ids
+// are handled before these rules so they bypass the hex and length checks.
 const TEMPLATE_RULES: [RegExp, string][] = [
   [/^\d{4}-\d{2}-\d{2}(?:[T ][\d:.+-]+Z?)?$/, "{date}"],
   [/^v\d+$/, "{version}"],
   [UUID_RE, "{uuid}"],
   [HEX_RE, "{hex}"],
-  [/^\d+$/, "{id}"],
 ];
 
 function templateSegment(raw: string): string {
@@ -60,15 +65,21 @@ function templateSegment(raw: string): string {
     // Malformed percent escape: check the raw segment instead.
   }
 
+  const numeric = NUMERIC_RE.test(decoded);
+  const letteredHex = HAS_HEX_LETTER_RE.test(decoded) && HEX_CHARS_RE.test(decoded);
   const uuid = UUID_RE.test(decoded);
-  const longHex = HEX_RE.test(decoded);
-  const shortHex = SHORT_HEX_RE.test(decoded);
+  const longHex = letteredHex && decoded.length >= 32;
+  const shortHex = letteredHex && decoded.length >= 16 && decoded.length < 32;
   const mixedToken =
-    !longHex &&
+    !numeric &&
+    !letteredHex &&
     decoded.length >= 20 &&
     /[a-z]/i.test(decoded) &&
     /\d/.test(decoded) &&
     !/[-_.]/.test(decoded);
+
+  // Numeric ids are checked before the hex rules and bypass the length cap.
+  if (numeric) return "{id}";
 
   // Explicit secret markers and short high-entropy tokens always redact.
   if (
@@ -89,8 +100,13 @@ function templateSegment(raw: string): string {
   return raw; // keep the original encoding (e.g. %2F stays one segment)
 }
 
-function pathTemplate(pathname: string): string {
-  return pathname.split("/").map(templateSegment).join("/").slice(0, MAX_TEMPLATE);
+function pathTemplate(pathname: string): { template: string; templated: boolean } {
+  const segments = pathname.split("/");
+  const resolved = segments.map(templateSegment);
+  return {
+    template: resolved.join("/"),
+    templated: resolved.some((value, index) => value !== segments[index]),
+  };
 }
 
 const sortedDistinct = (values: string[]): string[] =>
@@ -160,9 +176,9 @@ export async function analyzeNetworkCapture(
     }
 
     const method = typeof entry.request.method === "string"
-      ? entry.request.method.toUpperCase()
+      ? entry.request.method.toUpperCase().slice(0, MAX_METHOD)
       : "";
-    const template = pathTemplate(url.pathname);
+    const { template, templated } = pathTemplate(url.pathname);
     const key = JSON.stringify([method, url.origin, template]);
     let acc = groups.get(key);
     if (!acc) {
@@ -170,7 +186,7 @@ export async function analyzeNetworkCapture(
         method,
         origin: url.origin,
         template,
-        templated: template !== url.pathname,
+        templated,
         count: 0,
         statuses: new Set(),
         contentTypes: new Set(),
@@ -186,19 +202,26 @@ export async function analyzeNetworkCapture(
     }
     const content = response && isObject(response.content) ? response.content : undefined;
     if (content && typeof content.mimeType === "string") {
-      const essence = content.mimeType.split(";")[0].trim().toLowerCase();
+      const essence = content.mimeType
+        .split(";")[0]
+        .trim()
+        .toLowerCase()
+        .slice(0, MAX_CONTENT_TYPE);
       if (essence) acc.contentTypes.add(essence);
     }
-    for (const name of url.searchParams.keys()) acc.queryNames.add(name);
+    for (const name of url.searchParams.keys()) {
+      acc.queryNames.add(name.slice(0, MAX_QUERY_NAME));
+    }
   }
 
   const ordered = [...groups.values()]
     .map((acc) => ({
       templated: acc.templated,
+      full: acc.template,
       group: {
         method: acc.method,
         origin: acc.origin,
-        pathTemplate: acc.template,
+        pathTemplate: acc.template.slice(0, MAX_TEMPLATE),
         count: acc.count,
         statuses: [...acc.statuses].sort((a, b) => a - b),
         contentTypes: sortedDistinct([...acc.contentTypes]),
@@ -210,7 +233,7 @@ export async function analyzeNetworkCapture(
         b.group.count - a.group.count ||
         cmp(a.group.method, b.group.method) ||
         cmp(a.group.origin, b.group.origin) ||
-        cmp(a.group.pathTemplate, b.group.pathTemplate),
+        cmp(a.full, b.full),
     );
 
   const requestedTop = opts?.top;
