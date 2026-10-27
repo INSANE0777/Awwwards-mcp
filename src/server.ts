@@ -18,7 +18,7 @@ import type { ScrollCensus } from "./census.js";
 import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
-import type { VerifyBuildFn } from "./verify-build.js";
+import type { VerifyBuildFn, VerifyReport } from "./verify-build.js";
 import type { BuildProjectFn } from "./build-project.js";
 import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
 import type { ComponentNode, ComponentPack } from "./component.js";
@@ -39,7 +39,7 @@ import type {
 } from "./annual.js";
 import type { CollectionsListResult, CollectionResult } from "./collections.js";
 import type { DirectoryArgs, DirectoryResult } from "./directory.js";
-import type { AuditUrlResult } from "./audit-url.js";
+import type { AuditCompact, AuditUrlResult } from "./audit-url.js";
 import type { AccessibilityResult } from "./a11y.js";
 import type { IndexStatsArgs, IndexStatsResult } from "./index-stats.js";
 
@@ -249,6 +249,47 @@ export function compactComponentPack(p: ComponentPack): {
   };
 }
 
+/** AuditUrlResult → diet: severity counts + ranked actions instead of every finding body. */
+export function compactAuditResult(r: AuditUrlResult): AuditCompact {
+  const severity = (s: "HIGH" | "MEDIUM" | "INFO") =>
+    r.antiPatterns.findings.filter((f) => (f.severity ?? "INFO") === s).length;
+  return {
+    url: r.url,
+    perf: r.perf,
+    antiPatterns: {
+      count: r.antiPatterns.count,
+      worst: r.antiPatterns.worst,
+      high: severity("HIGH"),
+      medium: severity("MEDIUM"),
+      info: severity("INFO"),
+      ...(r.antiPatterns.error ? { error: r.antiPatterns.error } : {}),
+    },
+    coverage: r.coverage,
+    nextActions: r.nextActions,
+    note: r.note,
+  };
+}
+
+/** VerifyReport → diet: verdict + scores; band names collapse to counts, evidence dropped. */
+export function compactVerifyReport(r: VerifyReport): {
+  verdict: VerifyReport["verdict"];
+  overall: number;
+  bands: { score: number; matched: number; refOnly: number; buildOnly: number };
+  motion: { score: number };
+} {
+  return {
+    verdict: r.verdict,
+    overall: r.overall,
+    bands: {
+      score: r.bands.score,
+      matched: r.bands.matched.length,
+      refOnly: r.bands.refOnly.length,
+      buildOnly: r.bands.buildOnly.length,
+    },
+    motion: { score: r.motion.score },
+  };
+}
+
 /** SiteDetails → diet: palette/technologies/elements lists → counts; awards + numerics stay. */
 export function compactSiteDetails(d: SiteDetails): Record<string, unknown> {
   return {
@@ -393,6 +434,7 @@ export interface Handlers {
     url: string;
     viewport?: ViewportName;
     timeoutMs?: number;
+    compact?: boolean;
   }): Promise<ToolResponse>;
   analyze_accessibility(args: {
     url: string;
@@ -440,7 +482,7 @@ export interface Handlers {
     walkChunks?: boolean;
     edges?: boolean;
   }): Promise<ToolResponse>;
-  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean }): Promise<ToolResponse>;
+  verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; compact?: boolean }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
     selector?: string;
@@ -1492,6 +1534,7 @@ export function createHandlers(deps: {
     url: string;
     viewport?: ViewportName;
     timeoutMs?: number;
+    compact?: boolean;
   }): Promise<ToolResponse> {
     try {
       const audit =
@@ -1500,9 +1543,15 @@ export function createHandlers(deps: {
           import("./audit-url.js").then((m) =>
             m.auditUrl(a.url, { viewport: a.viewport, timeoutMs: a.timeoutMs }),
           ));
-      const result = await audit(args);
+      const result = await audit({
+        url: args.url,
+        viewport: args.viewport,
+        timeoutMs: args.timeoutMs,
+      });
       if ("error" in result) return { content: [text(result.error)], isError: true };
-      return { content: [text(JSON.stringify(result, null, 1))] };
+      // compact=true: severity counts + ranked actions instead of every finding.
+      const payload = args.compact ? compactAuditResult(result) : result;
+      return { content: [text(JSON.stringify(payload, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }
@@ -1725,6 +1774,7 @@ export function createHandlers(deps: {
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     domDiff?: boolean;
+    compact?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: playwright is only touched when the tool actually runs.
@@ -1745,7 +1795,9 @@ export function createHandlers(deps: {
         domDiff: args.domDiff,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
-      return { content: [text(JSON.stringify(result, null, 1))] };
+      // compact=true: verdict + scores only; evidence lines and band names drop.
+      const payload = args.compact ? compactVerifyReport(result) : result;
+      return { content: [text(JSON.stringify(payload, null, 1))] };
     } catch (err) {
       return errorResponse(err);
     }

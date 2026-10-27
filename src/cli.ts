@@ -319,7 +319,7 @@ server.tool(
 
 server.tool(
   "audit_url",
-  "Audit any live page as evidence, not a grade: runtime frame/long-task/layout-thrash measurement via an installed Chrome/Edge over raw CDP (no playwright), plus static animation anti-patterns scanned over the page HTML and up to 8 same-origin CSS/JS assets (bounded: 8 assets, 2MB each, 1 request/second shared limiter, default 10s timeouts). Asset refs resolve against the final post-redirect page URL; asset redirects leaving that origin are rejected. Findings are severity-sorted before the 50-item cap, so `worst` is always present. Degrades honestly - perf carries {error} when no browser is available and the static scan reports its own error; neither suppresses the other. Personal, non-commercial use; audit only URLs you are authorised to inspect.",
+  "Audit any live page as evidence, not a grade: runtime frame/long-task/layout-thrash measurement via an installed Chrome/Edge over raw CDP (no playwright), plus static animation anti-patterns scanned over the page HTML and up to 8 same-origin CSS/JS assets (bounded: 8 assets, 2MB each, 1 request/second shared limiter, default 10s timeouts). Asset refs resolve against the final post-redirect page URL; asset redirects leaving that origin are rejected. Findings are severity-sorted before the 50-item cap, so `worst` is always present. `nextActions` ranks the first three fixes. compact=true returns severity counts, coverage and nextActions only; omit it for the full finding list. Degrades honestly - perf carries {error} when no browser is available and the static scan reports its own error; neither suppresses the other. Personal, non-commercial use; audit only URLs you are authorised to inspect.",
   {
     url: z.string().url().describe("Absolute http(s) URL of the page to audit"),
     viewport: z
@@ -333,6 +333,10 @@ server.tool(
       .max(30000)
       .default(10000)
       .describe("Per static request timeout in ms (page HTML + each asset)"),
+    compact: z
+      .boolean()
+      .optional()
+      .describe("compact=true returns severity counts, coverage and nextActions only; omit for full findings"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.audit_url(args)),
@@ -484,7 +488,7 @@ server.tool(
 
 server.tool(
   "verify_build",
-  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
+  "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. compact=true returns the verdict, overall score, band counts and motion score only; omit it for evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
   {
     buildUrl: z.string().url().describe("URL of the build to verify"),
     referenceUrl: z.string().url().describe("URL of the reference site to match"),
@@ -494,6 +498,10 @@ server.tool(
     viewport: viewportSchema,
     domDiff: z.boolean().default(false)
       .describe("body-subtree structural diff between reference and build"),
+    compact: z
+      .boolean()
+      .optional()
+      .describe("compact=true returns the verdict and scores only; omit for evidence lines"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.verify_build(args)),

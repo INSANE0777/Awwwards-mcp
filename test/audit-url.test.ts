@@ -4,6 +4,8 @@ import {
   MAX_AUDIT_ASSETS,
   auditUrl,
   collectAuditAssets,
+  rankAuditActions,
+  type AuditUrlResult,
 } from "../src/audit-url.js";
 import type { AntiPatternFinding } from "../src/audit-rules.js";
 import type { MeasureRuntimeOpts, PerfMeasurement } from "../src/perf-live.js";
@@ -57,9 +59,30 @@ function finding(ruleId: string, severity?: "HIGH" | "MEDIUM" | "INFO"): AntiPat
     severity,
     message: ruleId,
     why: "test",
-    improvements: [],
+    improvements: "test fix",
     source: "css",
     line: 1,
+  };
+}
+
+function rule(
+  ruleId: string,
+  severity: "HIGH" | "MEDIUM" | "INFO" | undefined,
+  source: "css" | "html" | "js",
+  line: number,
+  improvements = "",
+): AntiPatternFinding {
+  return { ruleId, severity, source, line, message: `m-${ruleId}`, why: "test", improvements };
+}
+
+function makeAuditResult(findings: AntiPatternFinding[]): AuditUrlResult {
+  return {
+    url: PAGE,
+    perf: PERF,
+    antiPatterns: { count: findings.length, worst: findings[0]?.ruleId ?? null, findings },
+    coverage: { assetsScanned: 0, failed: 0 },
+    nextActions: [],
+    note: "Evidence only",
   };
 }
 
@@ -123,6 +146,9 @@ describe("auditUrl", () => {
     expect(result.antiPatterns.findings.some((f) => f.source === "html")).toBe(false);
     expect(result.note).toContain("Evidence only");
     expect(result.note).toContain("1 asset(s) were skipped");
+    expect(result.nextActions.length).toBeGreaterThan(0);
+    expect(result.nextActions.length).toBeLessThanOrEqual(3);
+    expect(result.nextActions[0]).toContain("blur-heavy at css:");
 
     // Only same-origin candidates are fetched (the cross-origin CDN is never hit).
     expect(calls).toEqual([
@@ -298,5 +324,35 @@ describe("auditUrl", () => {
     }) as unknown as typeof fetch;
     await auditUrl(PAGE, { fetchFn, perfFn: perfOk, limiter: fastLimiter });
     expect(seen).toEqual([AUDIT_UA]);
+  });
+});
+
+describe("rankAuditActions", () => {
+  it("orders by severity then source and line", () => {
+    const result = makeAuditResult([
+      rule("b", "MEDIUM", "css", 2, "fix b"),
+      rule("a", "HIGH", "html", 9, "fix a"),
+      rule("c", "HIGH", "html", 3),
+    ]);
+    expect(rankAuditActions(result)).toEqual([
+      "c at html:3 — m-c",
+      "a at html:9 — fix a",
+      "b at css:2 — fix b",
+    ]);
+  });
+
+  it("treats a missing severity as INFO", () => {
+    const result = makeAuditResult([
+      rule("tier", undefined, "js", 5),
+      rule("info", "INFO", "css", 1, "fix info"),
+    ]);
+    expect(rankAuditActions(result)).toEqual([
+      "info at css:1 — fix info",
+      "tier at js:5 — m-tier",
+    ]);
+  });
+
+  it("returns an empty list when there are no findings", () => {
+    expect(rankAuditActions(makeAuditResult([]))).toEqual([]);
   });
 });

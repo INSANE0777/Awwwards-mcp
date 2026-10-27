@@ -50,6 +50,24 @@ export interface AuditUrlResult {
   perf: PerfMeasurement | { error: string };
   antiPatterns: AuditAntiPatterns;
   coverage: { assetsScanned: number; failed: number };
+  nextActions: string[];
+  note: string;
+}
+
+/** Token-diet audit: finding bodies collapse to severity counts + ranked actions. */
+export interface AuditCompact {
+  url: string;
+  perf: PerfMeasurement | { error: string };
+  antiPatterns: {
+    count: number;
+    worst: string | null;
+    high: number;
+    medium: number;
+    info: number;
+    error?: string;
+  };
+  coverage: { assetsScanned: number; failed: number };
+  nextActions: string[];
   note: string;
 }
 
@@ -207,6 +225,27 @@ function sortBySeverity(findings: AntiPatternFinding[]): AntiPatternFinding[] {
   );
 }
 
+/**
+ * The first three findings worth fixing: severity desc (missing = INFO), then
+ * source, then line. Findings carry no selector, so none is claimed here.
+ */
+export function rankAuditActions(result: AuditUrlResult): string[] {
+  return [...result.antiPatterns.findings]
+    .sort((a, b) => {
+      const bySeverity =
+        SEVERITY_WEIGHTS[b.severity ?? "INFO"] - SEVERITY_WEIGHTS[a.severity ?? "INFO"];
+      if (bySeverity !== 0) return bySeverity;
+      const bySource = a.source.localeCompare(b.source);
+      if (bySource !== 0) return bySource;
+      return (a.line ?? 0) - (b.line ?? 0);
+    })
+    .slice(0, 3)
+    .map((f) => {
+      const where = f.line === undefined ? f.source : `${f.source}:${f.line}`;
+      return `${f.ruleId} at ${where} — ${f.improvements.trim() || f.message}`;
+    });
+}
+
 interface StaticScan {
   findings: AntiPatternFinding[];
   coverage: { assetsScanned: number; failed: number };
@@ -319,7 +358,7 @@ export async function auditUrl(
   if (error) notes.push(`Static scan: ${error}`);
   if (coverage.failed > 0) notes.push(`${coverage.failed} asset(s) were skipped.`);
 
-  return {
+  const result: AuditUrlResult = {
     url: pageUrl.href,
     perf,
     antiPatterns: {
@@ -329,6 +368,8 @@ export async function auditUrl(
       ...(error ? { error } : {}),
     },
     coverage,
+    nextActions: [],
     note: notes.join(" "),
   };
+  return { ...result, nextActions: rankAuditActions(result) };
 }

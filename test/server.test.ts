@@ -2468,3 +2468,125 @@ describe("list_categories technology drift note (review M2)", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 });
+
+describe("audit_url and verify_build compact payloads", () => {
+  const findingOf = (
+    ruleId: string,
+    severity: "HIGH" | "MEDIUM" | "INFO" | undefined,
+    source: "css" | "html" | "js",
+    line: number,
+    improvements: string,
+  ) => ({
+    ruleId,
+    severity,
+    source,
+    line,
+    message: ruleId,
+    why: "test",
+    improvements,
+  });
+
+  const auditReport = () => ({
+    url: "https://example.com/",
+    perf: { error: "No Chrome or Edge found." },
+    antiPatterns: {
+      count: 4,
+      worst: "blur-heavy",
+      findings: [
+        findingOf("blur-heavy", "HIGH", "css", 3, "Keep blurs under 10px."),
+        findingOf("scroll-nonpassive", "HIGH", "js", 2, "Pass { passive: true }."),
+        findingOf("fixed-position", "MEDIUM", "css", 8, "Avoid fixed overlays."),
+        findingOf("animated-property", undefined, "css", 12, "Animate transform."),
+      ],
+    },
+    coverage: { assetsScanned: 2, failed: 1 },
+    nextActions: [
+      "blur-heavy at css:3 — Keep blurs under 10px.",
+      "scroll-nonpassive at js:2 — Pass { passive: true }.",
+      "fixed-position at css:8 — Avoid fixed overlays.",
+    ],
+    note: "Evidence only — not a performance grade.",
+  });
+
+  const auditHandler = () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    return createHandlers({ client, cache, auditUrlFn: async () => auditReport() });
+  };
+
+  it("audit_url compact returns counts plus nextActions and no finding bodies", async () => {
+    const res = await auditHandler().audit_url({ url: "https://example.com/", compact: true });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(Object.keys(parsed).sort()).toEqual([
+      "antiPatterns",
+      "coverage",
+      "nextActions",
+      "note",
+      "perf",
+      "url",
+    ]);
+    expect(parsed.antiPatterns).toMatchObject({
+      count: 4,
+      worst: "blur-heavy",
+      high: 2,
+      medium: 1,
+      info: 1,
+    });
+    expect(parsed.antiPatterns.high).toBeTypeOf("number");
+    expect(parsed.antiPatterns.medium).toBeTypeOf("number");
+    expect(parsed.antiPatterns.info).toBeTypeOf("number");
+    expect(parsed.antiPatterns.findings).toBeUndefined();
+    expect(parsed.nextActions).toEqual(auditReport().nextActions);
+    expect(parsed.coverage).toEqual({ assetsScanned: 2, failed: 1 });
+  });
+
+  it("audit_url full payload keeps findings and gains nextActions", async () => {
+    const res = await auditHandler().audit_url({ url: "https://example.com/" });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.antiPatterns.findings).toHaveLength(4);
+    expect(parsed.antiPatterns.high).toBeUndefined();
+    expect(parsed.nextActions).toEqual(auditReport().nextActions);
+    expect(parsed.note).toBe("Evidence only — not a performance grade.");
+  });
+
+  const verifyReport = () => ({
+    buildUrl: "https://b.test/",
+    referenceUrl: "https://r.test/",
+    bands: { score: 82, matched: ["hero", "main"], refOnly: ["footer"], buildOnly: [] },
+    motion: { score: 64, refFingerprint: "ref-fp", buildFingerprint: "build-fp" },
+    overall: 75,
+    verdict: "warn",
+    evidence: ["Bands: 82/100", "Motion: 64/100", "Overall: 75/100 → WARN"],
+  });
+
+  const verifyHandler = () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    return createHandlers({ client, cache, verifyBuildFn: async () => verifyReport() });
+  };
+
+  it("verify_build compact returns verdict and scores without evidence", async () => {
+    const res = await verifyHandler().verify_build({
+      buildUrl: "https://b.test/",
+      referenceUrl: "https://r.test/",
+      compact: true,
+    });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed).toEqual({
+      verdict: "warn",
+      overall: 75,
+      bands: { score: 82, matched: 2, refOnly: 1, buildOnly: 0 },
+      motion: { score: 64 },
+    });
+    expect("evidence" in parsed).toBe(false);
+    expect("domDiff" in parsed).toBe(false);
+  });
+
+  it("verify_build full payload is unchanged", async () => {
+    const res = await verifyHandler().verify_build({
+      buildUrl: "https://b.test/",
+      referenceUrl: "https://r.test/",
+    });
+    expect(JSON.parse((res.content[0] as any).text)).toEqual(verifyReport());
+  });
+});
