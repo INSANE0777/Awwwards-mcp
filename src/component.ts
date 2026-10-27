@@ -523,7 +523,7 @@ export async function captureComponent(
       try {
         await page.evaluate(function () {
           try {
-            globalThis.scrollTo(0, 0);
+            (globalThis as any).scrollTo(0, 0);
           } catch {}
         });
       } catch {}

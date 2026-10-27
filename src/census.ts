@@ -497,7 +497,7 @@ export const SCRUB_PROBE_STEP = function (selectors: string[]): {
 // import from pose3d).
 export const SCRUB_SCROLL_TO = function (y: number): void {
   try {
-    globalThis.scrollTo(0, Math.max(0, Math.round(y)));
+    (globalThis as any).scrollTo(0, Math.max(0, Math.round(y)));
   } catch {}
 };
 

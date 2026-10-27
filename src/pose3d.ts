@@ -129,7 +129,7 @@ export const POSE_SNIPPET = function (arg: { canvasSelector: string }): {
 // no outer references — y arrives as the evaluate argument.
 const SCROLL_TO = function (y: number): void {
   try {
-    globalThis.scrollTo(0, Math.max(0, Math.round(y)));
+    (globalThis as any).scrollTo(0, Math.max(0, Math.round(y)));
   } catch {}
 };
 

@@ -606,13 +606,14 @@ export async function installSnippetShims(page: any): Promise<void> {
 // to top). Shared by captureLiveSite and analyzePageStructure — this is the
 // ONE implementation; capture.ts imports it.
 export async function preScroll(page: any): Promise<void> {
-  await page.evaluate(async () => {
+  await page.evaluate(async function () {
+    const g = globalThis as any;
     const step = 450;
-    for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
-      window.scrollTo(0, y);
+    for (let y = 0; y < g.document.documentElement.scrollHeight; y += step) {
+      g.window.scrollTo(0, y);
       await new Promise((r) => setTimeout(r, 40));
     }
-    window.scrollTo(0, 0);
+    g.window.scrollTo(0, 0);
     await new Promise((r) => setTimeout(r, 150));
   });
 }

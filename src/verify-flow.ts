@@ -10,8 +10,10 @@ import type { WaitStrategy } from "./structure.js";
 import { resolveViewport } from "./viewport.js";
 
 export const MAX_STEPS = 6;
-export const MAX_SKELETON_ELEMENTS = 400;
+export const MAX_SKELETON_ELEMENTS = 800;
 export const MAX_TEXT_CHARS = 50_000;
+/** Post-action settle so scroll/click effects land before the next capture. */
+export const SETTLE_MS = 150;
 
 // Empty/over-long selectors and out-of-range steps are rejected here, at the
 // MCP trust boundary; verifyFlow itself assumes validated args.
@@ -95,12 +97,22 @@ export const collapseWhitespace = (value: string): string => value.replace(/\s+/
 
 const sha1 = (value: string): string => createHash("sha1").update(value).digest("hex");
 
+// Generated class hashes are trailing `_a1b2c3` / `-A1B2C3` / `__6a8f2c`
+// suffixes on a class token. Anchor to that separator and require a digit so
+// word-like classes (facade, decade) and bare hex words survive; lowercasing
+// makes the comparison case-insensitive.
+const GENERATED_SUFFIX = /(?:_{1,2}|-)(?=[a-f0-9]*\d)[a-f0-9]{6,}$/;
+
+const normalizeSkeletonLine = (line: string): string =>
+  collapseWhitespace(line)
+    .toLowerCase()
+    .split(" ")
+    .map((token) => token.replace(GENERATED_SUFFIX, ""))
+    .join(" ");
+
 /** Normalize generated-class hash tokens, collapse line whitespace, hash. */
 export function skeletonHash(lines: readonly string[]): string {
-  const normalized = lines
-    .map((line) => collapseWhitespace(line.replace(/[a-f0-9]{6,}/g, "")))
-    .join("\n");
-  return sha1(normalized);
+  return sha1(lines.map(normalizeSkeletonLine).join("\n"));
 }
 
 /** Collapse innerText whitespace, cap at 50k chars, hash. */
@@ -123,32 +135,43 @@ export function stateFromRaw(raw: FlowRawState): FlowState {
     skeletonHash: skeletonHash(skeleton.slice(0, MAX_SKELETON_ELEMENTS)),
     textHash: textHash(text),
     elementCount,
-    skeletonTruncated: elementCount > MAX_SKELETON_ELEMENTS,
+    skeletonTruncated:
+      elementCount > MAX_SKELETON_ELEMENTS || skeleton.length > MAX_SKELETON_ELEMENTS,
     textTruncated: text.length > MAX_TEXT_CHARS,
     complete: true,
   };
 }
 
-/** Default state reader: one evaluate, bounded to the skeleton's first 400 nodes. */
+// Runs IN THE PAGE via page.evaluate(READ_STATE_SNIPPET, MAX_SKELETON_ELEMENTS).
+// Plain function expression (no arrow — page.evaluate re-serializes the source)
+// with zero outer references; browser globals go through globalThis because the
+// Node tsconfig has no DOM lib. Body-scoped: head metadata must not count as
+// visible structure, and the node cap arrives as an argument from stateFromRaw.
+const READ_STATE_SNIPPET = function (limit: number): FlowRawState {
+  const g = globalThis as any;
+  const doc = g.document;
+  const body = doc ? doc.body : null;
+  const nodes = body ? body.querySelectorAll("*") : [];
+  const skeleton: string[] = [];
+  const count = Math.min(nodes.length, limit);
+  for (let i = 0; i < count; i++) {
+    const element = nodes[i];
+    const id = element.id ? "#" + element.id : "";
+    const cls = element.classList.length > 0 ? "." + element.classList[0] : "";
+    skeleton.push(element.tagName.toLowerCase() + id + cls);
+  }
+  return {
+    path: g.location.pathname + g.location.search,
+    scrollY: g.window.scrollY,
+    skeleton,
+    elementCount: nodes.length,
+    text: body ? body.innerText : "",
+  };
+};
+
+/** Default state reader: one evaluate, bounded to the body's first MAX_SKELETON_ELEMENTS nodes. */
 export async function readPageState(page: any): Promise<FlowState> {
-  const raw = (await page.evaluate(() => {
-    const nodes = document.querySelectorAll("*");
-    const skeleton: string[] = [];
-    const limit = Math.min(nodes.length, 400);
-    for (let i = 0; i < limit; i++) {
-      const element = nodes[i];
-      const id = element.id ? `#${element.id}` : "";
-      const cls = element.classList.length > 0 ? `.${element.classList[0]}` : "";
-      skeleton.push(`${element.tagName.toLowerCase()}${id}${cls}`);
-    }
-    return {
-      path: location.pathname + location.search,
-      scrollY: window.scrollY,
-      skeleton,
-      elementCount: nodes.length,
-      text: document.body ? document.body.innerText : "",
-    };
-  })) as FlowRawState;
+  const raw = (await page.evaluate(READ_STATE_SNIPPET, MAX_SKELETON_ELEMENTS)) as FlowRawState;
   return stateFromRaw(raw);
 }
 
@@ -256,7 +279,10 @@ export async function verifyFlow(
   const click = deps.clickFn ?? ((page: any, selector: string) => page.click(selector));
   const scroll =
     deps.scrollFn ??
-    ((page: any, y: number) => page.evaluate((pos: number) => window.scrollTo(0, pos), y));
+    ((page: any, y: number) =>
+      page.evaluate(function (pos: number) {
+        (globalThis as any).window.scrollTo(0, pos);
+      }, y));
   const wait = deps.waitFn ?? ((page: any, ms: number) => page.waitForTimeout(ms));
 
   const opts: FlowOpenOptions = {
@@ -274,9 +300,15 @@ export async function verifyFlow(
 
   const runAction = async (page: any, step: FlowAction): Promise<string | null> => {
     try {
-      if (step.action === "scroll") await scroll(page, step.y);
-      else if (step.action === "click") await click(page, step.selector);
-      else await wait(page, step.ms);
+      if (step.action === "scroll") {
+        await scroll(page, step.y);
+        await wait(page, SETTLE_MS);
+      } else if (step.action === "click") {
+        await click(page, step.selector);
+        await wait(page, SETTLE_MS);
+      } else {
+        await wait(page, step.ms);
+      }
       return null;
     } catch (err) {
       return message(err);
@@ -299,9 +331,17 @@ export async function verifyFlow(
   }
 
   try {
-    // Step 0 is each side's baseline; deltas are measured from it.
+    // Step 0 is each side's baseline; deltas are measured from it. A baseline
+    // capture failure is not silently absorbed into an empty baseline.
+    const baselineErrors: string[] = [];
     const buildBaseline = await capture(buildOpened.page);
+    if (buildBaseline.error) {
+      baselineErrors.push(`build baseline capture failed: ${buildBaseline.error}`);
+    }
     const referenceBaseline = await capture(referenceOpened.page);
+    if (referenceBaseline.error) {
+      baselineErrors.push(`reference baseline capture failed: ${referenceBaseline.error}`);
+    }
 
     const steps: FlowStep[] = [];
     for (const [offset, step] of args.steps.entries()) {
@@ -330,9 +370,12 @@ export async function verifyFlow(
         step.reference.skeletonTruncated ||
         step.reference.textTruncated,
     );
-    const limitations = truncated
-      ? ["some states were truncated (skeleton >400 elements or text >50k chars); equality cannot be proven"]
-      : [];
+    const limitations = [...baselineErrors];
+    if (truncated) {
+      limitations.push(
+        `some states were truncated (skeleton >${MAX_SKELETON_ELEMENTS} elements or text >${MAX_TEXT_CHARS} chars); equality cannot be proven`,
+      );
+    }
 
     return {
       buildUrl: args.buildUrl,
