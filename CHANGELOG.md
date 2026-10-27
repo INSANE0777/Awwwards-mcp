@@ -3,6 +3,16 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased - v1.14.0
+
+Coverage honesty, output economy and responsive evidence.
+
+- `get_site_details { slugs }` batch enrichment (1-10, ordered, cached/fetched/error/skipped, stops on block, compact details, no images).
+- `get_index_stats` reports per-metric `sample` and `insufficient`; below 30 parsed rows it suppresses colour/motion lists and score averages instead of publishing misleading numbers. This is a deliberate behaviour change for small caches.
+- `audit_url` gains `compact: true` (reduced perf + pre-cap severity counts + nextActions + coverage) and always-present ranked `nextActions`; `verify_build` gains `compact: true` (verdict, scores, band counts).
+- `analyze_page_structure compare:"mobile"` returns element-level `responsive` evidence: page overflow, overflow offenders, small text, small tap targets, document rects and selectors, per-kind caps. No screenshots, no hidden-band or wide-fixed checks.
+- README routing table, compact guidance, and skill notes.
+
 ## v1.13.0 - 2026-10-25
 
 Discovery, sources, and inspection: 35 tools, with award data from Awwwards' official API,
