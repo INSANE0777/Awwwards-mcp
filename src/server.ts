@@ -19,6 +19,7 @@ import { choreographyFromCensus } from "./choreography.js";
 import type { HoverCensusFn } from "./hover-census.js";
 import type { BundleReport } from "./bundle-forensics.js";
 import type { NetworkCaptureResult } from "./network-capture.js";
+import type { FlowReport, VerifyFlowArgs } from "./verify-flow.js";
 import type { VerifyBuildFn, VerifyReport } from "./verify-build.js";
 import type { BuildProjectFn } from "./build-project.js";
 import { compactScrollCensus, compactHoverCensus } from "./verify-build.js";
@@ -160,6 +161,11 @@ export type NetworkCaptureFn = (
   path: string,
   opts?: { top?: number },
 ) => Promise<NetworkCaptureResult | { error: string }>;
+
+// verify_flow: two fresh headless launches, step-aligned state comparison.
+export type VerifyFlowFn = (
+  args: VerifyFlowArgs,
+) => Promise<FlowReport | { error: string }>;
 
 // build_gsap_stub: pure idle-CPU build from captured evidence — no fetches.
 export type { GsapStubFn };
@@ -498,6 +504,7 @@ export interface Handlers {
     bundleIntel?: boolean;
   }): Promise<ToolResponse>;
   analyze_network_capture(args: { path: string; top?: number }): Promise<ToolResponse>;
+  verify_flow(args: VerifyFlowArgs): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; compact?: boolean }): Promise<ToolResponse>;
   capture_component(args: {
     url: string;
@@ -554,6 +561,7 @@ export function createHandlers(deps: {
   hoverCensusFn?: HoverCensusFn;
   bundleFn?: BundleFn;
   networkCaptureFn?: NetworkCaptureFn;
+  verifyFlowFn?: VerifyFlowFn;
   verifyBuildFn?: VerifyBuildFn;
   captureComponentFn?: CaptureComponentFn;
   pose3dFn?: Pose3dFn;
@@ -1805,6 +1813,20 @@ export function createHandlers(deps: {
     }
   }
 
+  async function verify_flow(args: VerifyFlowArgs): Promise<ToolResponse> {
+    try {
+      // Lazy default: playwright is only touched when the tool actually runs.
+      const run = deps.verifyFlowFn ??
+        ((flowArgs: VerifyFlowArgs) =>
+          import("./verify-flow.js").then((m) => m.verifyFlow(flowArgs)));
+      const result = await run(args);
+      if ("error" in result) return { content: [text(result.error)], isError: true };
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    } catch (err) {
+      return errorResponse(err);
+    }
+  }
+
   async function verify_build(args: {
     buildUrl: string;
     referenceUrl: string;
@@ -2228,6 +2250,7 @@ export function createHandlers(deps: {
     analyze_hover_census,
     analyze_bundle,
     analyze_network_capture,
+    verify_flow,
     verify_build,
     capture_component,
     capture_pose_3d,

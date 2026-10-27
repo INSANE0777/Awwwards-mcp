@@ -12,6 +12,7 @@ import { AwwwardsClient, SHARED_RATE_LIMITER } from "./awwwards.js";
 import { Cache } from "./cache.js";
 import { createHandlers, type ToolResponse } from "./server.js";
 import { detailArgsSchema } from "./detail-schema.js";
+import { verifyFlowArgsSchema } from "./verify-flow.js";
 import { captureLiveSite } from "./capture.js";
 import { runIndexer, shouldAutoIndex } from "./indexer.js";
 import { checkForUpdate } from "./version-check.js";
@@ -483,6 +484,17 @@ server.tool(
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   (args) => asMcpResult(handlers.analyze_network_capture(args)),
+);
+
+server.registerTool(
+  "verify_flow",
+  {
+    description:
+      "Step-aligned comparison of interaction flows: runs the same 1–6 scroll/click/wait steps on a build and a reference page (two fresh headless launches, desktop or mobile), then compares path, scroll delta, skeleton hash, text hash and element count after each step. A step is same only when both sides are complete and untruncated; truncated or failed states are unknown. No screenshots: hashes are evidence, not visual truth. A click can still trigger client-side mutations. Runs on URLs you are authorized to inspect.",
+    inputSchema: verifyFlowArgsSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  (args) => asMcpResult(handlers.verify_flow(args)),
 );
 
 server.tool(
