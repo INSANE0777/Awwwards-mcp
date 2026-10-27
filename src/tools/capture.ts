@@ -31,7 +31,7 @@ export function registerCaptureLiveSite(ctx: ToolContext): void {
         ),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.capture_live_site(args)),
+    (args: any) => asMcpResult(ctx.handlers.capture_live_site(args)),
   );
 }
 
@@ -54,7 +54,7 @@ export function registerAnalyzePageStructure(ctx: ToolContext): void {
         .describe("Attach to a browser YOU started (requires AWWWARDS_MCP_ATTACH=1): loopback CDP endpoint (http://127.0.0.1:9222, http://[::1]:9222, or ws://127.0.0.1:9222/devtools/browser/<id>; an http endpoint is resolved via /json/version and its ws URL re-validated before connecting). Selects an already-open page whose URL matches exactly — never navigates, scrolls, clicks or creates tabs — and disconnects without closing it. Not available with compare or a non-desktop viewport"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.analyze_page_structure(args)),
+    (args: any) => asMcpResult(ctx.handlers.analyze_page_structure(args)),
   );
 }
 
@@ -74,7 +74,7 @@ export function registerAnalyzeScrollMap(ctx: ToolContext): void {
         .describe("token-diet summary: keyframes/props/durations and scrubCurves replaced by counts; all numerics and triggers stay"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.analyze_scroll_map(args)),
+    (args: any) => asMcpResult(ctx.handlers.analyze_scroll_map(args)),
   );
 }
 
@@ -94,7 +94,7 @@ export function registerAnalyzeHoverCensus(ctx: ToolContext): void {
         .describe("token-diet summary: sample style bodies become a selector list + count"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.analyze_hover_census(args)),
+    (args: any) => asMcpResult(ctx.handlers.analyze_hover_census(args)),
   );
 }
 
@@ -116,7 +116,7 @@ export function registerCaptureComponent(ctx: ToolContext): void {
         .describe("token-diet summary: node styles/text/svg/anims and the typography/paletteSummary blocks are dropped; the {tag, classes, rect} tree, fonts and colors stay"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.capture_component(args)),
+    (args: any) => asMcpResult(ctx.handlers.capture_component(args)),
   );
 }
 
@@ -131,7 +131,7 @@ export function registerCapturePose3d(ctx: ToolContext): void {
       viewport: viewportSchema,
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.capture_pose_3d(args)),
+    (args: any) => asMcpResult(ctx.handlers.capture_pose_3d(args)),
   );
 }
 
@@ -152,6 +152,6 @@ export function registerRecordSiteMotion(ctx: ToolContext): void {
       viewport: viewportSchema,
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.record_site_motion(args)),
+    (args: any) => asMcpResult(ctx.handlers.record_site_motion(args)),
   );
 }

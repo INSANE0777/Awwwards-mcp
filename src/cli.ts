@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -48,8 +49,18 @@ const server = new McpServer({ name: "awwwards-mcp", version: pkgJson.version })
 // non-core tools, AWWWARDS_MCP_MAX_RESPONSE_BYTES caps text+image payloads, and
 // AWWWARDS_MCP_DEBUG_MEMORY=1 logs one JSON line per call on stderr. The
 // legacy AWARDS_MCP_* names are accepted as a one-release fallback.
-const tool = ((...args: any[]) =>
-  registerGuarded(server, "tool", args)) as unknown as McpServer["tool"];
+const tool = ((name: string, description: string, inputSchema: any, annotations: any, handler: any) =>
+  registerGuarded(server, "registerTool", [
+    name,
+    {
+      description,
+      // v2 registerTool wants a z.object, while the tool modules still pass
+      // raw field shapes (the v1 style). Accept both.
+      inputSchema: inputSchema instanceof z.ZodType ? inputSchema : z.object(inputSchema),
+      annotations,
+    },
+    handler,
+  ])) as unknown as (...args: any[]) => void;
 const registerTool = ((...args: any[]) =>
   registerGuarded(server, "registerTool", args)) as unknown as McpServer["registerTool"];
 registerAllTools({ handlers, tool, registerTool });
@@ -74,4 +85,5 @@ checkForUpdate(pkgJson.version);
 // never blocks serving.
 checkEnvironment();
 
-await server.connect(new StdioServerTransport());
+serveStdio(() => server);
+

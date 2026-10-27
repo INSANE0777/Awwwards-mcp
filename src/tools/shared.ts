@@ -1,5 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { McpServer, CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Handlers, ToolResponse } from "../server.js";
 
@@ -25,6 +24,6 @@ export const viewportSchema = z
 
 export interface ToolContext {
   handlers: Handlers;
-  tool: McpServer["tool"];
-  registerTool: McpServer["registerTool"];
+  tool: (...args: any[]) => void;
+  registerTool: (...args: any[]) => void;
 }

@@ -14,7 +14,7 @@ export function registerBuildProject(ctx: ToolContext): void {
     // First local-write tool in the suite, on purpose: it reads a local html and
     // scaffolds a project directory — no awwwards.com traffic, nothing remote.
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.build_project(args)),
+    (args: any) => asMcpResult(ctx.handlers.build_project(args)),
   );
 }
 
@@ -28,7 +28,7 @@ export function registerBuildPoseStub(ctx: ToolContext): void {
         .describe("Optional ScrollCensus from analyze_scroll_map — adds suggestion notes + comment hints"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.build_pose_stub(args)),
+    (args: any) => asMcpResult(ctx.handlers.build_pose_stub(args)),
   );
 }
 
@@ -38,7 +38,7 @@ export function registerBuildGsapStub(ctx: ToolContext): void {
     "Generate a runnable GSAP+ScrollTrigger timeline stub from captured motion evidence (scroll census anims + optional pose grid camera anchors) — pure build from provided JSON, no page fetches",
     { scrollCensus: z.any().describe("ScrollCensus JSON from analyze_scroll_map"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.build_gsap_stub(args)),
+    (args: any) => asMcpResult(ctx.handlers.build_gsap_stub(args)),
   );
 }
 
@@ -56,7 +56,7 @@ export function registerBuildMotionManifest(ctx: ToolContext): void {
         .describe("Optional section overrides in build order; selector supplies the #id/.class tokens instead of the band label"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.build_motion_manifest(args)),
+    (args: any) => asMcpResult(ctx.handlers.build_motion_manifest(args)),
   );
 }
 
@@ -69,7 +69,7 @@ export function registerAnalyzeStack(ctx: ToolContext): void {
       timeoutMs: z.number().int().min(1000).max(30000).optional().describe("Fetch timeout in ms (default 15000)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.analyze_stack(args)),
+    (args: any) => asMcpResult(ctx.handlers.analyze_stack(args)),
   );
 }
 
@@ -82,7 +82,7 @@ export function registerGetMotionDna(ctx: ToolContext): void {
       recapture: z.boolean().default(false).describe("Force a fresh live capture even if a recent record exists"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.get_motion_dna(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_motion_dna(args)),
   );
 }
 
@@ -97,6 +97,6 @@ export function registerSearchMotion(ctx: ToolContext): void {
       limit: z.number().int().min(1).max(50).default(20),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.search_motion(args)),
+    (args: any) => asMcpResult(ctx.handlers.search_motion(args)),
   );
 }

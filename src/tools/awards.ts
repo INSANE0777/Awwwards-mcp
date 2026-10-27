@@ -36,7 +36,7 @@ export function registerSearchSites(ctx: ToolContext): void {
       page: z.number().int().min(1).default(1),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.search_sites(args)),
+    (args: any) => asMcpResult(ctx.handlers.search_sites(args)),
   );
 }
 
@@ -49,7 +49,7 @@ export function registerGetSiteDetails(ctx: ToolContext): void {
       inputSchema: detailArgsSchema,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    (args) => asMcpResult(ctx.handlers.get_site_details(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_site_details(args)),
   );
 }
 
@@ -63,7 +63,7 @@ export function registerCompareSites(ctx: ToolContext): void {
         .describe("Two or three distinct site slugs from search_sites"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.compare_sites(args)),
+    (args: any) => asMcpResult(ctx.handlers.compare_sites(args)),
   );
 }
 
@@ -82,7 +82,7 @@ export function registerCreateDesignBrief(ctx: ToolContext): void {
       maxBands: z.number().int().min(5).max(60).default(12),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.create_design_brief(args)),
+    (args: any) => asMcpResult(ctx.handlers.create_design_brief(args)),
   );
 }
 
@@ -117,7 +117,7 @@ export function registerGetIndexStats(ctx: ToolContext): void {
         .describe("Max rows per frequency list (technologies, colours, motion libs)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.get_index_stats(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_index_stats(args)),
   );
 }
 
@@ -132,7 +132,7 @@ export function registerGetSiteElements(ctx: ToolContext): void {
         .describe("Site slug from search_sites, e.g. 'l-i-s-a'"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.get_site_elements(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_site_elements(args)),
   );
 }
 
@@ -151,7 +151,7 @@ export function registerSearchElements(ctx: ToolContext): void {
       limit: z.number().int().min(1).max(20).default(8),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.search_elements(args)),
+    (args: any) => asMcpResult(ctx.handlers.search_elements(args)),
   );
 }
 
@@ -163,7 +163,7 @@ export function registerGetElement(ctx: ToolContext): void {
       id: z.string().describe("Element slug from search_elements"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.get_element(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_element(args)),
   );
 }
 
@@ -204,7 +204,7 @@ export function registerGetAnnualNominees(ctx: ToolContext): void {
         .describe("Hydrate uncached nominees (1 req/s); false returns cached entries plus id stubs"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.get_annual_nominees(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_annual_nominees(args)),
   );
 }
 
@@ -222,7 +222,7 @@ export function registerGetAnnualNominee(ctx: ToolContext): void {
       slug: z.string().min(1).optional().describe("Nominee slug, paired with category"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.get_annual_nominee(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_annual_nominee(args)),
   );
 }
 
@@ -248,7 +248,7 @@ export function registerGetCollections(ctx: ToolContext): void {
         ),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.get_collections(args)),
+    (args: any) => asMcpResult(ctx.handlers.get_collections(args)),
   );
 }
 
@@ -280,7 +280,7 @@ export function registerSearchDirectory(ctx: ToolContext): void {
       page: z.number().int().min(1).max(100).default(1).describe("Directory page"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.search_directory(args)),
+    (args: any) => asMcpResult(ctx.handlers.search_directory(args)),
   );
 }
 
@@ -294,7 +294,7 @@ export function registerNewWinners(ctx: ToolContext): void {
     },
     // Writes the poll baseline, so results change the next call — not idempotent.
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.new_winners(args)),
+    (args: any) => asMcpResult(ctx.handlers.new_winners(args)),
   );
 }
 
@@ -313,6 +313,6 @@ export function registerWatchSite(ctx: ToolContext): void {
     },
     // add/remove mutate the watchlist, so the tool as a whole is not read-only.
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.watch_site(args)),
+    (args: any) => asMcpResult(ctx.handlers.watch_site(args)),
   );
 }

@@ -25,7 +25,7 @@ export function registerAuditUrl(ctx: ToolContext): void {
         .describe("compact=true returns the url, reduced perf, pre-cap antiPatterns counts, coverage, nextActions and note; omit for full findings and full perf"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.audit_url(args)),
+    (args: any) => asMcpResult(ctx.handlers.audit_url(args)),
   );
 }
 
@@ -45,7 +45,7 @@ export function registerAnalyzeAccessibility(ctx: ToolContext): void {
         .describe("Text-node sample cap (1-200)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.analyze_accessibility(args)),
+    (args: any) => asMcpResult(ctx.handlers.analyze_accessibility(args)),
   );
 }
 
@@ -65,7 +65,7 @@ export function registerAnalyzeBundle(ctx: ToolContext): void {
         .describe("opt-in: quoted routes, vendor signatures, source-map presence (never fetched) and module graph; default output keys unchanged"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.analyze_bundle(args))
+    (args: any) => asMcpResult(ctx.handlers.analyze_bundle(args))
   );
 }
 
@@ -79,7 +79,7 @@ export function registerAnalyzeNetworkCapture(ctx: ToolContext): void {
         .describe("Max groups after sorting (default 50, max 200)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    (args) => asMcpResult(ctx.handlers.analyze_network_capture(args)),
+    (args: any) => asMcpResult(ctx.handlers.analyze_network_capture(args)),
   );
 }
 
@@ -92,7 +92,7 @@ export function registerVerifyFlow(ctx: ToolContext): void {
       inputSchema: verifyFlowArgsSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    (args) => asMcpResult(ctx.handlers.verify_flow(args)),
+    (args: any) => asMcpResult(ctx.handlers.verify_flow(args)),
   );
 }
 
@@ -115,6 +115,6 @@ export function registerVerifyBuild(ctx: ToolContext): void {
         .describe("compact=true returns the verdict, overall and band scores, band counts and motion score; omit for evidence lines"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    (args) => asMcpResult(ctx.handlers.verify_build(args)),
+    (args: any) => asMcpResult(ctx.handlers.verify_build(args)),
   );
 }

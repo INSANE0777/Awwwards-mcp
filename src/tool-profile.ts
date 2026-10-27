@@ -1,7 +1,7 @@
 // Tool registration guard: profile filtering, per-call debug memory lines and
 // a response-byte ceiling. Kept out of cli.ts so tests can exercise it
 // without starting the stdio server.
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 
 // The 12 tool core an agent needs for the capture -> analyze -> build -> verify
 // loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 37.
@@ -56,7 +56,10 @@ function payloadBytes(result: unknown): number {
 const note = (): string =>
   "Response exceeded AWWWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.";
 
-type ServerLike = Pick<McpServer, "tool" | "registerTool">;
+type ServerLike = {
+  registerTool: (...args: any[]) => unknown;
+  tool?: (...args: any[]) => unknown;
+};
 
 // Registers through server.tool or server.registerTool. In core profile a
 // non-core name is silently skipped. The final function argument (the handler)
