@@ -152,7 +152,7 @@ export type StackFn = (
 // analyze_bundle: fetches a page + its script chunks (bounded), greps keywords.
 export type BundleFn = (
   url: string,
-  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean },
+  opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean; bundleIntel?: boolean },
 ) => Promise<BundleReport | { error: string }>;
 
 // analyze_network_capture: offline HAR 1.2 parsing — reads a local file only.
@@ -495,6 +495,7 @@ export interface Handlers {
     maxChunks?: number;
     walkChunks?: boolean;
     edges?: boolean;
+    bundleIntel?: boolean;
   }): Promise<ToolResponse>;
   analyze_network_capture(args: { path: string; top?: number }): Promise<ToolResponse>;
   verify_build(args: { buildUrl: string; referenceUrl: string; waitStrategy?: WaitStrategy; viewport?: ViewportName; domDiff?: boolean; compact?: boolean }): Promise<ToolResponse>;
@@ -1756,18 +1757,20 @@ export function createHandlers(deps: {
     maxChunks?: number;
     walkChunks?: boolean;
     edges?: boolean;
+    bundleIntel?: boolean;
   }): Promise<ToolResponse> {
     try {
       // Lazy default: bundle-forensics is only touched when the tool actually runs.
       const capture =
         deps.bundleFn ??
-        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean }) =>
+        ((url: string, opts?: { keywords?: string[]; maxChunks?: number; walkChunks?: boolean; edges?: boolean; bundleIntel?: boolean }) =>
           import("./bundle-forensics.js").then((m) =>
             m.captureBundleForensics(url, {
               keywords: opts?.keywords,
               maxChunks: opts?.maxChunks,
               walkChunks: opts?.walkChunks,
               edges: opts?.edges,
+              bundleIntel: opts?.bundleIntel,
             }),
           ));
       const result = await capture(args.url, {
@@ -1775,6 +1778,7 @@ export function createHandlers(deps: {
         maxChunks: args.maxChunks,
         walkChunks: args.walkChunks,
         edges: args.edges,
+        bundleIntel: args.bundleIntel,
       });
       if ("error" in result) return { content: [text(result.error)], isError: true };
       return { content: [text(JSON.stringify(result, null, 1))] };

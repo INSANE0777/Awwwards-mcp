@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { RateLimiter } from "./awwwards.js";
+import { coverageFrom, type EvidenceCoverage } from "./coverage.js";
 
 const BUNDLE_UA = "awwwards-mcp bundle-forensics/1.0";
 
@@ -135,6 +136,143 @@ export function extractEdges(chunks: EdgeScanChunk[]): ImportGraph {
   return { edges, unresolved };
 }
 
+// ---- opt-in bundle intelligence (`bundleIntel`) ---------------------------
+// Presence-only evidence from saved chunk TEXT: quoted route paths, vendor
+// signatures, source-map markers and the import graph. No source content, no
+// raw source-map values, no fetches. Regex hits are labelled evidence, not
+// truth.
+export interface BundleRoute {
+  method: string | null;
+  route: string;
+  foundVia: "string" | "fetch" | "axios";
+  chunk: number;
+}
+
+export interface BundleVendor {
+  name: string;
+  chunk: number;
+}
+
+export interface BundleSourceMap {
+  chunk: number;
+  inline: boolean;
+  path?: string;
+}
+
+export interface BundleModuleGraph {
+  nodes: number;
+  edges: number;
+  truncated: boolean;
+  externalSpecifiers: string[];
+}
+
+export interface BundleIntel {
+  routes: BundleRoute[];
+  vendors: BundleVendor[];
+  sourceMaps: BundleSourceMap[];
+  moduleGraph: BundleModuleGraph;
+}
+
+const MAX_ROUTES = 30;
+const MAX_VENDORS = 20;
+const MAX_EXTERNAL_SPECIFIERS = 20;
+// 200-char method window each side of the quoted route (design §4.2).
+const METHOD_WINDOW = 200;
+
+const VENDOR_SIGNATURES: Array<{ name: string; signatures: string[] }> = [
+  { name: "react", signatures: ["react.production", "__REACT_DEVTOOLS"] },
+  { name: "next", signatures: ["__NEXT_DATA__", "_next/static"] },
+  { name: "gsap", signatures: ["gsap.version", "GreenSock"] },
+  { name: "three", signatures: ["THREE.REVISION"] },
+  { name: "lenis", signatures: ["Lenis"] },
+  { name: "swiper", signatures: ["Swiper"] },
+  { name: "framer-motion", signatures: ["framer-motion", "motionValue"] },
+  { name: "tailwind", signatures: ["tailwindcss"] },
+];
+
+const ROUTE_RE = /(["'])(\/[^"'\s]{1,300})\1/g;
+const FETCH_METHOD_RE = /\bfetch\s*\([\s\S]{0,200}?\bmethod\s*:\s*["']([A-Za-z]+)["']/;
+const AXIOS_METHOD_RE = /\baxios\s*\.\s*(get|post|put|patch|delete|head|options)\b/i;
+const SOURCE_MAP_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=([^\s*]+)/g;
+
+const methodAt = (text: string, at: number, length: number): Pick<BundleRoute, "method" | "foundVia"> => {
+  const window = text.slice(Math.max(0, at - METHOD_WINDOW), at + length + METHOD_WINDOW);
+  const fetched = FETCH_METHOD_RE.exec(window);
+  if (fetched) return { method: fetched[1].toUpperCase(), foundVia: "fetch" };
+  const axios = AXIOS_METHOD_RE.exec(window);
+  if (axios) return { method: axios[1].toUpperCase(), foundVia: "axios" };
+  return { method: null, foundVia: "string" };
+};
+
+export function extractBundleIntel(
+  chunks: { index: number; text: string }[],
+  graph?: ImportGraph,
+): BundleIntel {
+  const routes: BundleRoute[] = [];
+  const vendors: BundleVendor[] = [];
+  const sourceMaps: BundleSourceMap[] = [];
+  const routeSeen = new Set<string>();
+  const vendorSeen = new Set<string>();
+  const sourceMapSeen = new Set<string>();
+
+  for (const chunk of chunks) {
+    for (const m of chunk.text.matchAll(ROUTE_RE)) {
+      const route = m[2].replace(/[?#].*$/, "");
+      if (route.split("/").filter(Boolean).length < 2) continue;
+      const how = methodAt(chunk.text, m.index, m[0].length);
+      const key = `${chunk.index}|${how.method}|${route}`;
+      if (routeSeen.has(key)) continue;
+      routeSeen.add(key);
+      routes.push({ method: how.method, route, foundVia: how.foundVia, chunk: chunk.index });
+    }
+
+    for (const vendor of VENDOR_SIGNATURES) {
+      if (!vendor.signatures.some((sig) => chunk.text.includes(sig))) continue;
+      // Same vendor in a different chunk is separate evidence; cap 20.
+      const key = `${chunk.index}|${vendor.name}`;
+      if (vendorSeen.has(key)) continue;
+      vendorSeen.add(key);
+      vendors.push({ name: vendor.name, chunk: chunk.index });
+    }
+
+    for (const m of chunk.text.matchAll(SOURCE_MAP_RE)) {
+      const value = m[1];
+      const inline = value.startsWith("data:");
+      const path = inline ? undefined : value.replace(/[?#].*$/, "").slice(0, 200);
+      const key = `${chunk.index}|${inline}|${path ?? ""}`;
+      if (sourceMapSeen.has(key)) continue;
+      sourceMapSeen.add(key);
+      sourceMaps.push(inline ? { chunk: chunk.index, inline } : { chunk: chunk.index, inline, path });
+    }
+  }
+
+  routes.sort((a, b) => a.chunk - b.chunk || (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+  vendors.sort((a, b) => a.chunk - b.chunk);
+
+  const scanned = graph ?? extractEdges(chunks.map((c) => ({ index: c.index, url: "", text: c.text })));
+  const externalSpecifiers = [
+    ...new Set(
+      scanned.edges
+        .map((e) => e.to)
+        .filter((to) => !to.startsWith(".") && !to.startsWith("/") && !/^\d+$/.test(to)),
+    ),
+  ]
+    .sort()
+    .slice(0, MAX_EXTERNAL_SPECIFIERS);
+
+  return {
+    routes: routes.slice(0, MAX_ROUTES),
+    vendors: vendors.slice(0, MAX_VENDORS),
+    sourceMaps,
+    moduleGraph: {
+      nodes: chunks.length,
+      edges: scanned.edges.length,
+      truncated: scanned.edges.length >= MAX_EDGES_TOTAL,
+      externalSpecifiers,
+    },
+  };
+}
+
 export interface BundleReport {
   url: string;
   host: string;
@@ -151,6 +289,12 @@ export interface BundleReport {
   edges?: ImportEdge[];
   edgeCount?: number;
   unresolved?: number;
+  // Opt-in `bundleIntel` pass only — absent keys otherwise.
+  routes?: BundleRoute[];
+  vendors?: BundleVendor[];
+  sourceMaps?: BundleSourceMap[];
+  moduleGraph?: BundleModuleGraph;
+  evidenceCoverage?: EvidenceCoverage;
 }
 
 export interface BundleForensicsOpts {
@@ -170,6 +314,9 @@ export interface BundleForensicsOpts {
   // Opt-in static import graph (default false → identical report shape, zero
   // extra fetches): the pure extractEdges scan over the saved chunk texts.
   edges?: boolean;
+  // Opt-in bundle intelligence (default false → identical report shape, zero
+  // extra fetches): routes, vendors, source-map presence and module graph.
+  bundleIntel?: boolean;
 }
 
 export async function captureBundleForensics(
@@ -369,6 +516,9 @@ export async function captureBundleForensics(
       if (saved === "over") break;
     }
 
+    // Candidate targets from the page HTML that did not become saved chunks.
+    const baseSaved = chunks.length;
+
     // Opt-in deep chunk walk (walkChunks): quoted same-origin .js refs inside
     // fetched chunk sources point at lazy-loaded chunks the page HTML never
     // advertised. Discovered chunks join `chunks` (keyword-search + unpack-
@@ -422,8 +572,17 @@ export async function captureBundleForensics(
     // Opt-in static import graph: pure scan over the saved RAW chunk texts —
     // deliberately before the unpack pass below, whose pretty rewrite
     // replaces c.path, so the graph always describes the captured bundle.
-    const graph = opts.edges
-      ? extractEdges(chunks.map((c) => ({ index: c.index, url: c.url, text: readFileSync(c.path, "utf8") })))
+    // `bundleIntel` reuses the SAME extractEdges pass.
+    const wantsGraph = opts.edges === true || opts.bundleIntel === true;
+    const savedTexts = wantsGraph
+      ? chunks.map((c) => ({ index: c.index, url: c.url, text: readFileSync(c.path, "utf8") }))
+      : [];
+    const graph = wantsGraph ? extractEdges(savedTexts) : undefined;
+    const intel = opts.bundleIntel
+      ? extractBundleIntel(
+          savedTexts.map(({ index, text }) => ({ index, text })),
+          graph,
+        )
       : undefined;
 
     // Optional unpack pass: hard-capped (first 10 QUALIFYING chunks, 2MB each
@@ -506,8 +665,21 @@ export async function captureBundleForensics(
       unpacked,
       unpackedDir: unpacked ? unpackedDir : undefined,
       hint: unpacked ? undefined : unpackLoaded ? UNPACK_NOOP_HINT : UNPACK_HINT,
-      ...(graph
+      ...(opts.edges && graph
         ? { edges: graph.edges, edgeCount: graph.edges.length, unresolved: graph.unresolved }
+        : {}),
+      ...(intel
+        ? {
+            routes: intel.routes,
+            vendors: intel.vendors,
+            sourceMaps: intel.sourceMaps,
+            moduleGraph: intel.moduleGraph,
+            evidenceCoverage: coverageFrom({
+              collected: chunks.length,
+              excluded: Math.max(0, targets.length - baseSaved),
+              limitations: warnings,
+            }),
+          }
         : {}),
     };
   } catch (err) {

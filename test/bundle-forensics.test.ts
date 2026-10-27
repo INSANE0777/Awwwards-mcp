@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureBundleForensics, extractEdges } from "../src/bundle-forensics.js";
+import { captureBundleForensics, extractBundleIntel, extractEdges } from "../src/bundle-forensics.js";
 import { createHandlers } from "../src/server.js";
 import { AwwwardsClient } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
@@ -13,6 +13,28 @@ const pageOrigin = "https://site.test";
 // forward-slash absolute URLs the module produces via new URL().
 const A_JS = `${pageOrigin}/a.js`;
 const B_JS = "https://cdn.x.com/b.js";
+
+const BUNDLE_DIR = join(__dirname, "fixtures", "bundle");
+const BUNDLE_PAGE = "https://bundle.test/entry.html";
+const BUNDLE_A = "https://bundle.test/chunk-a.js";
+const BUNDLE_B = "https://bundle.test/chunk-b.js";
+const bundleFixture = (name: string) => readFileSync(join(BUNDLE_DIR, name), "utf8");
+// Real fixture chunks + a counting fetch, so "never fetches source maps" is
+// provable: the call list must stay page + the two HTML-advertised chunks.
+const bundleFetch = () => {
+  const calls: string[] = [];
+  const map: Record<string, string> = {
+    [BUNDLE_PAGE]: bundleFixture("entry.html"),
+    [BUNDLE_A]: bundleFixture("chunk-a.js"),
+    [BUNDLE_B]: bundleFixture("chunk-b.js"),
+  };
+  const fetchFn = async (url: string) => {
+    calls.push(url);
+    const body = map[url];
+    return body === undefined ? new Response("not found", { status: 404 }) : new Response(body, { status: 200 });
+  };
+  return { fetchFn, calls };
+};
 
 // Offline fetch: map keyed by URL, missing keys get a plain 404.
 const fakeFetchMap = (map: Record<string, string>) => async (url: string) => {
@@ -676,6 +698,190 @@ describe("captureBundleForensics edges (D1: opt-in static import graph)", () => 
   });
 });
 
+describe("bundle intelligence (opt-in bundleIntel)", () => {
+  it("default output is key-identical to the current fixture report", async () => {
+    const { fetchFn } = bundleFetch();
+    const rep = await captureBundleForensics(BUNDLE_PAGE, { fetchFn, unpackLoader: async () => null });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(Object.keys(rep).sort()).toEqual([
+      "chunkCount",
+      "chunks",
+      "hint",
+      "host",
+      "matches",
+      "outDir",
+      "totalBytes",
+      "unpacked",
+      "unpackedDir",
+      "url",
+      "warnings",
+    ]);
+    for (const key of ["routes", "vendors", "sourceMaps", "moduleGraph", "evidenceCoverage"]) {
+      expect(key in rep).toBe(false);
+    }
+  });
+
+  it("reports exact route, vendor, source-map, module-graph and coverage fields", async () => {
+    const { fetchFn } = bundleFetch();
+    const rep = await captureBundleForensics(BUNDLE_PAGE, {
+      fetchFn,
+      bundleIntel: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    // Quoted absolute paths only, 2+ segments, query/hash stripped, deduped,
+    // fetch > axios > string; the duplicate /api/users collapses.
+    expect(rep.routes).toEqual([
+      { method: "POST", route: "/api/users", foundVia: "fetch", chunk: 0 },
+      { method: null, route: "/blog/post-1", foundVia: "string", chunk: 0 },
+      { method: "GET", route: "/api/posts", foundVia: "axios", chunk: 1 },
+    ]);
+    expect(rep.vendors).toEqual([
+      { name: "react", chunk: 0 },
+      { name: "gsap", chunk: 1 },
+      { name: "three", chunk: 1 },
+      { name: "framer-motion", chunk: 1 },
+    ]);
+    expect(rep.sourceMaps).toEqual([
+      { chunk: 0, inline: true },
+      { chunk: 1, inline: false, path: "https://cdn.example.com/maps/chunk-b.js.map" },
+    ]);
+    expect(rep.moduleGraph).toEqual({
+      nodes: 2,
+      edges: 3,
+      truncated: false,
+      externalSpecifiers: ["gsap", "lodash"],
+    });
+    expect(rep.evidenceCoverage).toEqual({
+      status: "complete",
+      collected: 2,
+      excluded: 0,
+      limitations: [],
+    });
+    // Enabled intel adds exactly these five keys — never the `edges` trio.
+    expect(Object.keys(rep).sort()).toEqual([
+      "chunkCount",
+      "chunks",
+      "evidenceCoverage",
+      "hint",
+      "host",
+      "matches",
+      "moduleGraph",
+      "outDir",
+      "routes",
+      "sourceMaps",
+      "totalBytes",
+      "unpacked",
+      "unpackedDir",
+      "url",
+      "vendors",
+      "warnings",
+    ]);
+  });
+
+  it("never fetches a source map: fetch calls identical with and without intel", async () => {
+    const plain = bundleFetch();
+    const plainRep = await captureBundleForensics(BUNDLE_PAGE, { fetchFn: plain.fetchFn, unpackLoader: async () => null });
+    if (!("error" in plainRep)) cleanup.push(plainRep.outDir);
+    const intel = bundleFetch();
+    const intelRep = await captureBundleForensics(BUNDLE_PAGE, {
+      fetchFn: intel.fetchFn,
+      bundleIntel: true,
+      unpackLoader: async () => null,
+    });
+    if (!("error" in intelRep)) cleanup.push(intelRep.outDir);
+    expect("error" in intelRep).toBe(false);
+    expect(intel.calls).toEqual(plain.calls);
+    expect(intel.calls).toEqual([BUNDLE_PAGE, BUNDLE_A, BUNDLE_B]);
+    expect(intel.calls.some((u) => u.endsWith(".map"))).toBe(false);
+  });
+
+  it("edges: true output is unchanged by the intel code path", async () => {
+    const { fetchFn } = bundleFetch();
+    const rep = await captureBundleForensics(BUNDLE_PAGE, { fetchFn, edges: true, unpackLoader: async () => null });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.edges).toEqual([
+      { from: 1, to: "./chunk-a.js", kind: "esm-import", raw: 'import { boot } from "./chunk-a.js"' },
+      { from: 1, to: "gsap", kind: "esm-import", raw: 'import gsap from "gsap"' },
+      { from: 1, to: "lodash", kind: "esm-import", raw: 'import lodash from "lodash"' },
+    ]);
+    expect(rep.edgeCount).toBe(3);
+    expect(rep.unresolved).toBe(2); // ./chunk-a.js lands on a captured chunk; gsap/lodash do not
+    expect("routes" in rep).toBe(false);
+    expect("evidenceCoverage" in rep).toBe(false);
+  });
+
+  it("caps routes at 30 globally, dedupes by chunk|method|route and sorts chunk then route", () => {
+    const routes = Array.from({ length: 35 }, (_, i) => `var r${i}="/api/r${String(i).padStart(2, "0")}";`);
+    // Same route twice in one chunk with the same method → one evidence row.
+    const intel = extractBundleIntel([{ index: 0, text: routes.join("") + `var again="/api/r00";` }]);
+    expect(intel.routes).toHaveLength(30);
+    expect(intel.routes[0]).toEqual({ method: null, route: "/api/r00", foundVia: "string", chunk: 0 });
+    expect(intel.routes.at(-1)?.route).toBe("/api/r29");
+    expect(intel.routes.map((r) => r.route)).toEqual(
+      Array.from({ length: 30 }, (_, i) => `/api/r${String(i).padStart(2, "0")}`),
+    );
+  });
+
+  it("caps vendors at 20, one row per vendor per chunk", () => {
+    const chunks = Array.from({ length: 25 }, (_, i) => ({ index: i, text: "react.production" }));
+    const intel = extractBundleIntel(chunks);
+    expect(intel.vendors).toHaveLength(20);
+    expect(intel.vendors[0]).toEqual({ name: "react", chunk: 0 });
+    expect(intel.vendors.at(-1)).toEqual({ name: "react", chunk: 19 });
+  });
+
+  it("source maps: inline keeps no value, remote strips query/hash and caps at 200", () => {
+    const longPath = `https://cdn.test/${"a".repeat(250)}.map?x=1#y`;
+    const intel = extractBundleIntel([
+      { index: 0, text: `//# sourceMappingURL=${longPath}` },
+      { index: 1, text: `/*# sourceMappingURL=data:application/json;base64,AAAA */` },
+    ]);
+    expect(intel.sourceMaps[0]).toEqual({ chunk: 0, inline: false, path: longPath.replace(/[?#].*$/, "").slice(0, 200) });
+    expect(intel.sourceMaps[0]?.path).toHaveLength(200);
+    // Inline marker carries presence only — the data URL is never returned.
+    expect(intel.sourceMaps[1]).toEqual({ chunk: 1, inline: true });
+    expect(JSON.stringify(intel.sourceMaps)).not.toContain("data:");
+  });
+
+  it("module graph filters numeric/relative/absolute specifiers, caps externals at 20, flags the 400-edge cap", () => {
+    const first = [
+      `import a from "./rel.js";`,
+      `import b from "/abs.js";`,
+      `import c from "123";`,
+      ...Array.from({ length: 3 }, (_, i) => `import x${i} from "pkg-${i}";`),
+    ].join("");
+    const second = Array.from({ length: 25 }, (_, i) => `import y${i} from "pkg-${i}";`).join("");
+    const intel = extractBundleIntel([
+      { index: 0, text: first },
+      { index: 1, text: second },
+    ]);
+    expect(intel.moduleGraph.nodes).toBe(2);
+    expect(intel.moduleGraph.edges).toBe(26);
+    expect(intel.moduleGraph.truncated).toBe(false);
+    expect(intel.moduleGraph.externalSpecifiers).toHaveLength(20);
+    expect(intel.moduleGraph.externalSpecifiers).toEqual(
+      Array.from({ length: 20 }, (_, i) => `pkg-${i}`).sort(),
+    );
+
+    const capped = extractBundleIntel(
+      Array.from({ length: 21 }, (_, c) => ({
+        index: c,
+        text: Array.from({ length: 20 }, (_, i) => `import z${i} from "p${c}-${i}";`).join(""),
+      })),
+    );
+    expect(capped.moduleGraph.edges).toBe(400);
+    expect(capped.moduleGraph.truncated).toBe(true);
+    expect(capped.moduleGraph.externalSpecifiers).toHaveLength(20);
+  });
+});
+
 describe("analyze_bundle handler", () => {
   it("DI happy path: fake bundleFn report → JSON text with matches + outDir, args passed through", async () => {
     const seen: Array<{ url: string; opts?: { keywords?: string[]; maxChunks?: number } }> = [];
@@ -745,5 +951,40 @@ describe("analyze_bundle handler", () => {
     });
     await h.analyze_bundle({ url: PAGE, edges: true, maxChunks: 2 });
     expect(seenOpts).toEqual({ maxChunks: 2, edges: true });
+  });
+
+  it("passes bundleIntel through and serializes the intel fields", async () => {
+    let seenOpts: { bundleIntel?: boolean } | undefined;
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(cacheDir()),
+      bundleFn: async (_url, opts) => {
+        seenOpts = opts;
+        return {
+          url: PAGE,
+          host: "site.test",
+          outDir: join("tmp", "chunks-intel"),
+          chunkCount: 1,
+          totalBytes: 10,
+          chunks: [{ index: 0, url: A_JS, bytes: 10, sha1: "a".repeat(40), path: join("tmp", "0-a.js") }],
+          matches: [],
+          warnings: [],
+          unpacked: false,
+          routes: [{ method: "POST", route: "/api/users", foundVia: "fetch", chunk: 0 }],
+          vendors: [{ name: "react", chunk: 0 }],
+          sourceMaps: [{ chunk: 0, inline: true }],
+          moduleGraph: { nodes: 1, edges: 0, truncated: false, externalSpecifiers: [] },
+          evidenceCoverage: { status: "complete", collected: 1, excluded: 0, limitations: [] },
+        };
+      },
+    });
+    const res = await h.analyze_bundle({ url: PAGE, bundleIntel: true });
+    expect(res.isError).toBeUndefined();
+    expect(seenOpts).toEqual({ bundleIntel: true });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.routes).toEqual([{ method: "POST", route: "/api/users", foundVia: "fetch", chunk: 0 }]);
+    expect(parsed.vendors).toEqual([{ name: "react", chunk: 0 }]);
+    expect(parsed.sourceMaps).toEqual([{ chunk: 0, inline: true }]);
+    expect(parsed.evidenceCoverage.status).toBe("complete");
   });
 });

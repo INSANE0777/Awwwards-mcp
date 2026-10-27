@@ -1901,6 +1901,43 @@ describe("analyze_stack handler", () => {
   });
 });
 
+describe("analyze_bundle handler", () => {
+  it("passes bundleIntel through and serializes intel fields", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    let seenOpts: { bundleIntel?: boolean } | undefined;
+    const h = createHandlers({
+      client,
+      cache,
+      bundleFn: async (_url, opts) => {
+        seenOpts = opts;
+        return {
+          url: "https://example.com",
+          host: "example.com",
+          outDir: join("tmp", "chunks-intel"),
+          chunkCount: 1,
+          totalBytes: 1,
+          chunks: [{ index: 0, url: "https://example.com/a.js", bytes: 1, sha1: "a".repeat(40), path: join("tmp", "0-a.js") }],
+          matches: [],
+          warnings: [],
+          unpacked: false,
+          routes: [{ method: "GET", route: "/api/x", foundVia: "axios", chunk: 0 }],
+          vendors: [],
+          sourceMaps: [],
+          moduleGraph: { nodes: 1, edges: 0, truncated: false, externalSpecifiers: [] },
+          evidenceCoverage: { status: "complete", collected: 1, excluded: 0, limitations: [] },
+        };
+      },
+    });
+    const res = await h.analyze_bundle({ url: "https://example.com", bundleIntel: true });
+    expect(res.isError).toBeUndefined();
+    expect(seenOpts).toEqual({ bundleIntel: true });
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.routes[0].route).toBe("/api/x");
+    expect(parsed.evidenceCoverage.status).toBe("complete");
+  });
+});
+
 describe("build_gsap_stub handler", () => {
   it("passes args through to the gsap-stub fn and returns JSON", async () => {
     const { client } = fakeClient();

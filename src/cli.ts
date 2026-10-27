@@ -457,7 +457,7 @@ server.tool(
 
 server.tool(
   "analyze_bundle",
-  "Bundle forensics for a live page: fetch it once, download its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks, 10MB, 1 request/second), save them locally, optionally de-obfuscate with webcrack if installed, and grep keywords across the code. Returns chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Runs on URLs you are authorized to analyze — does not fetch awwwards.com.",
+  "Bundle forensics for a live page: fetch it once, download its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks, 10MB, 1 request/second), save them locally, optionally de-obfuscate with webcrack if installed, and grep keywords across the code. Returns chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Opt-in bundleIntel adds route, vendor, source-map presence and module-graph evidence; source maps are detected but never fetched, and default output keys are unchanged. Runs on URLs you are authorized to analyze — does not fetch awwwards.com.",
   {
     url: z.string().url(),
     keywords: z.array(z.string().min(1)).max(20).optional().describe("grep these strings across chunks (e.g. class names, effect names)"),
@@ -466,6 +466,8 @@ server.tool(
       .describe("after the first pass, follow quoted same-origin .js refs inside fetched chunks and fetch up to 20 newly discovered ones (same budgets; adds seconds)"),
     edges: z.boolean().default(false)
       .describe("static import graph over captured chunks"),
+    bundleIntel: z.boolean().default(false)
+      .describe("opt-in: quoted routes, vendor signatures, source-map presence (never fetched) and module graph; default output keys unchanged"),
   },
   { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   (args) => asMcpResult(handlers.analyze_bundle(args))
