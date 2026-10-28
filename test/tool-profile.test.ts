@@ -58,10 +58,10 @@ describe("tool profile", () => {
     ).toBe(true);
   });
 
-  it("full profile (default) registers all 37 tools, unchanged", () => {
+  it("full profile (default) registers all 38 tools, unchanged", () => {
     const names = cliToolNames();
-    expect(names).toHaveLength(37);
-    expect(new Set(names).size).toBe(37);
+    expect(names).toHaveLength(38);
+    expect(new Set(names).size).toBe(38);
 
     const { server, regs } = fakeServer();
     for (const name of names) {

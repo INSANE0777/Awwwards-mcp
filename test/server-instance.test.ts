@@ -7,7 +7,7 @@ const toolNames = (server: unknown): string[] =>
   Object.keys((server as { _registeredTools?: Record<string, unknown> })._registeredTools ?? {});
 
 describe("server factory", () => {
-  it("returns a distinct server with 37 registrations per call", () => {
+  it("returns a distinct server with 38 registrations per call", () => {
     const savedProfile = process.env.AWWWARDS_MCP_PROFILE;
     const savedLegacy = process.env.AWARDS_MCP_PROFILE;
     delete process.env.AWWWARDS_MCP_PROFILE;
@@ -18,8 +18,8 @@ describe("server factory", () => {
       const second = createServer({ handlers, version: "0.0.0-test" });
 
       expect(second).not.toBe(first);
-      expect(toolNames(first)).toHaveLength(37);
-      expect(toolNames(second)).toHaveLength(37);
+      expect(toolNames(first)).toHaveLength(38);
+      expect(toolNames(second)).toHaveLength(38);
       expect(toolNames(second)).toEqual(toolNames(first));
     } finally {
       if (savedProfile === undefined) delete process.env.AWWWARDS_MCP_PROFILE;

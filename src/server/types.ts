@@ -22,6 +22,7 @@ import type { NetworkCaptureResult } from "../network-capture.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "../structure.js";
 import type { PoseGrid } from "../pose3d.js";
 import type { StackFingerprint } from "../stack.js";
+import type { TokenCategory } from "../tokens.js";
 import type { MotionDna, SiteDetails, SiteSummary } from "../types.js";
 import type { AuditCompact, AuditUrlResult } from "../audit-url.js";
 import type { FlowReport, VerifyFlowArgs } from "../verify-flow.js";
@@ -485,6 +486,13 @@ export interface Handlers {
     viewport?: ViewportName;
     maxNodes?: number;
     compact?: boolean;
+  }): Promise<ToolResponse>;
+  export_design_tokens(args: {
+    url: string;
+    selector?: string;
+    viewport?: ViewportName;
+    maxNodes?: number;
+    include?: TokenCategory[];
   }): Promise<ToolResponse>;
   capture_pose_3d(args: {
     url: string;

@@ -24,6 +24,7 @@ import {
   registerAnalyzeScrollMap,
   registerAnalyzeHoverCensus,
   registerCaptureComponent,
+  registerExportDesignTokens,
   registerCapturePose3d,
   registerRecordSiteMotion,
 } from "./capture.js";
@@ -76,6 +77,7 @@ export function registerAllTools(ctx: ToolContext): void {
   registerBuildProject(ctx);
   registerVerifyBuild(ctx);
   registerCaptureComponent(ctx);
+  registerExportDesignTokens(ctx);
   registerCapturePose3d(ctx);
   registerBuildPoseStub(ctx);
   registerAnalyzeStack(ctx);

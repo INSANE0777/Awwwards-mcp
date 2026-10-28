@@ -15,6 +15,7 @@ import {
   analyze_hover_census,
   capture_pose_3d,
   capture_component,
+  export_design_tokens,
 } from "./handlers/capture.js";
 import {
   audit_url,
@@ -83,6 +84,7 @@ export function createHandlers(deps: CreateHandlersDeps): Handlers {
     build_project: (args) => build_project(ctx, args),
     verify_build: (args) => verify_build(ctx, args),
     capture_component: (args) => capture_component(ctx, args),
+    export_design_tokens: (args) => export_design_tokens(ctx, args),
     capture_pose_3d: (args) => capture_pose_3d(ctx, args),
     build_pose_stub: (args) => build_pose_stub(ctx, args),
     analyze_stack: (args) => analyze_stack(ctx, args),

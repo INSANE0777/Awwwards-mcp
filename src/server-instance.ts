@@ -12,7 +12,7 @@ export interface ServerOptions {
   version: string;
 }
 
-/** A fresh McpServer with all 37 tools registered. */
+/** A fresh McpServer with all 38 tools registered. */
 export function createServer({ handlers, version }: ServerOptions): McpServer {
   const server = new McpServer({ name: "awwwards-mcp", version });
 

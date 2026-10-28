@@ -3,6 +3,8 @@ import type { CaptureOpts } from "../../capture.js";
 import { summarizePalette, summarizeTypography } from "../../component.js";
 import { diffBands } from "../../structure.js";
 import type { WaitOpts, WaitStrategy } from "../../structure.js";
+import { exportDesignTokens } from "../../tokens.js";
+import type { TokenCategory } from "../../tokens.js";
 import { compactHoverCensus } from "../../verify-build.js";
 import type { ViewportName } from "../../viewport.js";
 import type { HandlerContext } from "../context.js";
@@ -215,6 +217,36 @@ export async function capture_component(ctx: HandlerContext, args: {
           paletteSummary: summarizePalette(result),
         };
     return { content: [text(JSON.stringify(payload, null, 1))] };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function export_design_tokens(ctx: HandlerContext, args: {
+  url: string;
+  selector?: string;
+  viewport?: ViewportName;
+  maxNodes?: number;
+  include?: TokenCategory[];
+}): Promise<ToolResponse> {
+  try {
+    // Lazy default: playwright is only touched when the tool actually runs.
+    const capture =
+      ctx.deps.captureComponentFn ??
+      ((url: string, opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number }) =>
+        import("../../component.js").then((m) => m.captureComponent(url, opts)));
+    // Materialized because captureComponent defaults to header/400, not body/800.
+    const selector = args.selector ?? "body";
+    const viewport = args.viewport ?? "desktop";
+    const maxNodes = args.maxNodes ?? 800;
+    const pack = await capture(args.url, { selector, viewport, maxNodes });
+    if ("error" in pack) return { content: [text(pack.error)], isError: true };
+    const tokens = exportDesignTokens(pack, { maxNodes, include: args.include });
+    return {
+      content: [
+        text(JSON.stringify({ url: pack.url, selector: pack.selector, viewport, ...tokens }, null, 1)),
+      ],
+    };
   } catch (err) {
     return errorResponse(err);
   }

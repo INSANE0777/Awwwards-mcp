@@ -120,6 +120,30 @@ export function registerCaptureComponent(ctx: ToolContext): void {
   );
 }
 
+export function registerExportDesignTokens(ctx: ToolContext): void {
+  ctx.tool(
+    "export_design_tokens",
+    "Extract a page's design tokens (colors, typography, spacing, radii, shadows, borders) from computed styles and return ordinal CSS custom properties plus a Tailwind theme map. Token names are ordinals (--color-1, --space-1, ...), never semantic guesses. Runs on any URL — does not fetch awwwards.com.",
+    {
+      url: z.string().url().describe("Absolute page URL to extract tokens from"),
+      selector: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("CSS selector of the root element to scan (default 'body')"),
+      viewport: viewportSchema,
+      maxNodes: z.number().int().min(50).max(2000).optional()
+        .describe("Max DOM nodes to scan (default 800, clamp 50-2000)"),
+      include: z
+        .array(z.enum(["colors", "typography", "spacing", "radii", "shadows", "borders"]))
+        .optional()
+        .describe("Token categories to emit (default all)"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    (args: any) => asMcpResult(ctx.handlers.export_design_tokens(args)),
+  );
+}
+
 export function registerCapturePose3d(ctx: ToolContext): void {
   ctx.tool(
     "capture_pose_3d",
