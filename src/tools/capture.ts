@@ -29,6 +29,12 @@ export function registerCaptureLiveSite(ctx: ToolContext): void {
         .describe(
           "wait up to 10s after the pre-scroll for a full-screen fixed preloader (≥90% viewport, z-index ≥100) to clear; false captures immediately",
         ),
+      scrollCapture: z
+        .enum(["auto", "anchors", "viewport"])
+        .default("auto")
+        .describe(
+          'Inner-scroller pages (body pinned, one div scrolls): "auto"/"anchors" saves 6 ordered viewport screenshots down the scroller and returns JSON anchors; "viewport" saves one viewport screenshot. Document-scrolling pages always keep the single full-page capture',
+        ),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.capture_live_site(args)),

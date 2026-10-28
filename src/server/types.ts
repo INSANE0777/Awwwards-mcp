@@ -445,6 +445,7 @@ export interface Handlers {
     inline?: boolean;
     maxInlineBytes?: number;
     waitForOverlay?: boolean;
+    scrollCapture?: "auto" | "anchors" | "viewport";
   }): Promise<ToolResponse>;
   analyze_page_structure(args: {
     url: string;

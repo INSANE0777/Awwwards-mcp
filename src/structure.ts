@@ -665,6 +665,13 @@ export interface WaitOpts {
   cdpEndpoint?: string;
 }
 
+/** What preScroll measured after its walk. `scrollRoot` is the detected inner scroller label, null for the document. */
+export interface PreScrollInfo {
+  scrollRoot: string | null;
+  scrollHeight: number;
+  clientHeight: number;
+}
+
 // tsx (esbuild keepNames) injects __name()/__defProp helpers at module scope;
 // page.evaluate serializes only the snippet function body, so those helper
 // references would be undefined in the page (tsc dist never injects them).
@@ -698,9 +705,10 @@ export const PRE_SCROLL_DEADLINE_MS = 8_000;
 // ONE implementation; capture.ts imports it. Scrolls the detected inner
 // scroll container when the page has one (body-pinned sites), else window.
 // Both walks stop at MAX_PRESCROLL_STEPS/8s even when scrollHeight keeps
-// growing, and always reset to the top.
-export async function preScroll(page: any): Promise<void> {
-  await page.evaluate(async function () {
+// growing, and always reset to the top. Returns the detected inner scroller
+// label + final metrics so capture can re-query it; existing callers ignore it.
+export async function preScroll(page: any): Promise<PreScrollInfo> {
+  return page.evaluate(async function () {
     const g = globalThis as any;
     const doc = g.document;
     const step = 450;
@@ -732,6 +740,13 @@ export async function preScroll(page: any): Promise<void> {
         }
       }
     } catch {}
+    // Same tag#id.class[0] label SCAN_SNIPPET emits (inlined: this evaluate
+    // can run before the tsx __name shim, so it may declare no named helpers).
+    const scrollRoot = scroller
+      ? String(scroller.tagName || "").toLowerCase() +
+        (scroller.id ? "#" + String(scroller.id) : "") +
+        (scroller.classList && scroller.classList.length ? "." + String(scroller.classList[0]) : "")
+      : null;
     if (scroller) {
       let y = 0;
       let steps = 0;
@@ -743,7 +758,11 @@ export async function preScroll(page: any): Promise<void> {
       }
       scroller.scrollTop = 0;
       await new Promise((r) => setTimeout(r, 150));
-      return;
+      return {
+        scrollRoot: scrollRoot,
+        scrollHeight: Math.round(scroller.scrollHeight || 0),
+        clientHeight: Math.round(scroller.clientHeight || 0),
+      };
     }
     let y = 0;
     let steps = 0;
@@ -755,6 +774,11 @@ export async function preScroll(page: any): Promise<void> {
     }
     g.window.scrollTo(0, 0);
     await new Promise((r) => setTimeout(r, 150));
+    return {
+      scrollRoot: null,
+      scrollHeight: Math.round(doc.documentElement.scrollHeight || 0),
+      clientHeight: Math.round(doc.documentElement.clientHeight || 0),
+    };
   });
 }
 

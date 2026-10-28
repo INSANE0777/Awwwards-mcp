@@ -17,6 +17,8 @@ export const CAPTURE_INSTALL_HINT =
 // cannot blow up the agent's context window.
 export const DEFAULT_MAX_INLINE_BYTES = 2_500_000;
 
+export type ScrollCaptureMode = "auto" | "anchors" | "viewport";
+
 export interface CaptureOpts extends WaitOpts {
   /** false omits the base64 preview and keeps only the saved file (default true). */
   inline?: boolean;
@@ -24,6 +26,12 @@ export interface CaptureOpts extends WaitOpts {
   maxInlineBytes?: number;
   /** false skips waiting for a full-screen preloader overlay to clear (default true). */
   waitForOverlay?: boolean;
+  /**
+   * Inner-scroller handling: "auto"/"anchors" (default) takes 6 anchored
+   * viewport screenshots down the page; "viewport" takes one viewport shot.
+   * Document-root pages always keep the full-page capture.
+   */
+  scrollCapture?: ScrollCaptureMode;
 }
 
 export interface OverlayCandidate {
@@ -110,7 +118,57 @@ export async function waitForOverlays(page: any, timeoutMs = 10_000): Promise<vo
   }
 }
 
-export type CaptureResult = { file: string; base64?: string; inlineOmitted?: boolean } | { error: string };
+export type CaptureResult =
+  | { file: string; base64?: string; inlineOmitted?: boolean }
+  | {
+      mode: "viewport";
+      scrollRoot: string;
+      file: string;
+      base64?: string;
+      inlineOmitted?: boolean;
+      viewport: { width: number; height: number };
+    }
+  | {
+      mode: "anchors";
+      scrollRoot: string;
+      anchors: Array<{ scrollTop: number; file: string }>;
+      viewport: { width: number; height: number };
+    }
+  | { error: string };
+
+// Runs IN THE PAGE: how many elements the preScroll label still matches. An
+// invalid selector reports count 0 plus the parser message, so capture can say
+// why it refused instead of guessing. No nested helpers (tsx __name shim).
+const COUNT_SCROLL_ROOT = function (label: string): { count: number; invalid?: string } {
+  const doc = (globalThis as any).document;
+  try {
+    return { count: doc.querySelectorAll(label).length };
+  } catch (err) {
+    return { count: 0, invalid: String((err as any)?.message ?? err) };
+  }
+};
+
+// Runs IN THE PAGE: sets the re-queried inner scroller's scrollTop.
+const SET_SCROLL_TOP = function (arg: { label: string; top: number }): void {
+  const doc = (globalThis as any).document;
+  const el = doc.querySelectorAll(arg.label)[0];
+  if (el) el.scrollTop = arg.top;
+};
+
+// Shared inline-preview decision: an omitted preview still leaves the saved
+// file. Computed from the raw PNG length so a large capture never pays for
+// the base64 conversion.
+function previewOf(
+  buf: Buffer,
+  opts?: CaptureOpts,
+): { base64?: string; inlineOmitted?: boolean } {
+  if (opts?.inline === false) return { inlineOmitted: true };
+  const base64Length = Math.ceil(buf.length / 3) * 4;
+  if (base64Length > (opts?.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES)) {
+    return { inlineOmitted: true };
+  }
+  return { base64: buf.toString("base64") };
+}
 
 export async function captureLiveSite(
   url: string,
@@ -145,24 +203,63 @@ export async function captureLiveSite(
     // settle window; networkidle already means the network went quiet.
     if (waitStrategy === "load") await page.waitForTimeout(3000);
     if (opts?.waitForOverlay !== false) await waitForOverlays(page, 15_000);
-    await preScroll(page);
+    const scroll = await preScroll(page);
     // Viewport goes into the name: the same URL captured at desktop and mobile
     // must keep both files (issue #23). Return the buffer playwright already
     // gave us — re-reading the file races a concurrent capture of the same URL.
     const vp = opts?.viewport ?? "desktop";
-    const file = join(
-      imagesDir,
-      "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + "-" + vp + ".png",
-    );
-    const buf = (await page.screenshot({ path: file, fullPage: true })) as Buffer;
-    // Check inline:false and the size budget from the raw PNG first: base64 is
-    // exact at 4*ceil(n/3), so a large capture never pays for the conversion.
-    if (opts?.inline === false) return { file, inlineOmitted: true };
-    const base64Length = Math.ceil(buf.length / 3) * 4;
-    if (base64Length > (opts?.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES)) {
-      return { file, inlineOmitted: true };
+    const stem =
+      "capture-" + createHash("sha1").update(url).digest("hex").slice(0, 12) + "-" + vp;
+    const viewportSize = { width, height };
+    // The label came from the pre-scroll walk; re-query it and require exactly
+    // one element before scrolling anything. A vanished/duplicated scroller is
+    // reported, never guessed around.
+    const scrollRoot = typeof scroll?.scrollRoot === "string" ? scroll.scrollRoot : null;
+    if (scrollRoot) {
+      const probe = (await page.evaluate(COUNT_SCROLL_ROOT, scrollRoot)) as {
+        count?: number;
+        invalid?: string;
+      };
+      if (probe?.count !== 1) {
+        const reason = probe?.invalid ? ` (${probe.invalid})` : "";
+        return {
+          error:
+            `Inner scroller ${scrollRoot} re-query matched ${probe?.count ?? 0} elements ` +
+            `(expected exactly 1)${reason}; refusing to guess which one to scroll.`,
+        };
+      }
+      if (opts?.scrollCapture === "viewport") {
+        // Explicitly one viewport-sized shot, not a full-page claim.
+        const file = join(imagesDir, stem + ".png");
+        const buf = (await page.screenshot({ path: file, fullPage: false })) as Buffer;
+        return { mode: "viewport", scrollRoot, file, ...previewOf(buf, opts), viewport: viewportSize };
+      }
+      // auto/anchors: six ordered viewport shots down the inner scroller. The
+      // reset lives in finally so a mid-loop screenshot failure still leaves
+      // the page at the top.
+      const maxScroll = Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0));
+      const anchors: Array<{ scrollTop: number; file: string }> = [];
+      try {
+        for (let i = 0; i < 6; i++) {
+          const scrollTop = Math.round((i * maxScroll) / 5);
+          await page.evaluate(SET_SCROLL_TOP, { label: scrollRoot, top: scrollTop });
+          await page.waitForTimeout(250);
+          const file = join(imagesDir, `${stem}-a${i}.png`);
+          await page.screenshot({ path: file, fullPage: false });
+          anchors.push({ scrollTop, file });
+        }
+      } finally {
+        try {
+          await page.evaluate(SET_SCROLL_TOP, { label: scrollRoot, top: 0 });
+        } catch {
+          /* keep the primary error */
+        }
+      }
+      return { mode: "anchors", scrollRoot, anchors, viewport: viewportSize };
     }
-    return { file, base64: buf.toString("base64") };
+    const file = join(imagesDir, stem + ".png");
+    const buf = (await page.screenshot({ path: file, fullPage: true })) as Buffer;
+    return { file, ...previewOf(buf, opts) };
   } finally {
     try {
       await browser.close();

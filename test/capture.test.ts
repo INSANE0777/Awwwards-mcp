@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES, isBlockingOverlay, waitForOverlays } from "../src/capture.js";
@@ -402,5 +403,165 @@ describe("captureLiveSite", () => {
     expect(desktop.file.endsWith("-desktop.png")).toBe(true);
     expect(mobile.file.endsWith("-mobile.png")).toBe(true);
     expect(existsSync(desktop.file) && existsSync(mobile.file)).toBe(true);
+  });
+});
+
+// Fake page for the inner-scroller contract. evaluate() dispatches on the same
+// shapes capture sends: no argument -> preScroll info, string -> re-query count,
+// object -> set scrollTop. Screenshots record their fullPage flag + path.
+const innerFake = (o: {
+  scrollRoot?: string | null;
+  matches?: number;
+  scrollHeight?: number;
+  clientHeight?: number;
+  shot?: (index: number) => void | Promise<void>;
+} = {}) => {
+  const scrollRoot = o.scrollRoot === undefined ? "div#page.page" : o.scrollRoot;
+  const tops: Array<{ label: string; top: number }> = [];
+  const shots: Array<{ path: string; fullPage?: boolean }> = [];
+  let shotIndex = 0;
+  const page = {
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    evaluate: async (_fn: unknown, arg?: unknown) => {
+      if (typeof arg === "string") return { count: o.matches ?? 1 };
+      if (arg && typeof arg === "object") {
+        tops.push(arg as { label: string; top: number });
+        return undefined;
+      }
+      return {
+        scrollRoot,
+        scrollHeight: o.scrollHeight ?? 2400,
+        clientHeight: o.clientHeight ?? 900,
+      };
+    },
+    screenshot: async (shot: { path: string; fullPage?: boolean }) => {
+      shots.push(shot);
+      await o.shot?.(shotIndex++);
+      const fs = await import("node:fs/promises");
+      await fs.writeFile(shot.path, Buffer.from("png-bytes"));
+      return Buffer.from("png-bytes");
+    },
+  };
+  return {
+    loader: async () => ({
+      chromium: {
+        launch: async () => ({ newPage: async () => page, close: async () => {} }),
+      },
+    }),
+    tops,
+    shots,
+  };
+};
+
+const hashOf = (url: string) => createHash("sha1").update(url).digest("hex").slice(0, 12);
+
+describe("captureLiveSite inner-scroll anchors", () => {
+  it("keeps the exact document-root payload (no mode key)", async () => {
+    const dir = tmpDir();
+    const url = "https://doc.test/page";
+    const fake = innerFake({ scrollRoot: null, scrollHeight: 3000 });
+    const res = await captureLiveSite(url, dir, fake.loader, { waitForOverlay: false });
+    expect(res).toStrictEqual({
+      file: join(dir, `capture-${hashOf(url)}-desktop.png`),
+      base64: Buffer.from("png-bytes").toString("base64"),
+    });
+    expect(fake.shots).toEqual([{ path: join(dir, `capture-${hashOf(url)}-desktop.png`), fullPage: true }]);
+    expect(fake.tops).toEqual([]); // never touches scrollTop on the document root
+  });
+
+  it('ignores the mode on the document root: "viewport" still returns the old full-page payload', async () => {
+    const dir = tmpDir();
+    const url = "https://doc.test/mode";
+    const fake = innerFake({ scrollRoot: null });
+    const res = await captureLiveSite(url, dir, fake.loader, {
+      waitForOverlay: false,
+      scrollCapture: "viewport",
+    });
+    expect(res).toStrictEqual({
+      file: join(dir, `capture-${hashOf(url)}-desktop.png`),
+      base64: Buffer.from("png-bytes").toString("base64"),
+    });
+  });
+
+  it("auto takes 6 ordered viewport shots, hashed filenames, no top-level file, restores scrollTop", async () => {
+    const dir = tmpDir();
+    const url = "https://inner.test/page";
+    const fake = innerFake();
+    const res = await captureLiveSite(url, dir, fake.loader, { waitForOverlay: false });
+    if (!("mode" in res) || res.mode !== "anchors") throw new Error("expected anchors result");
+    expect("file" in res).toBe(false);
+    expect(res.scrollRoot).toBe("div#page.page");
+    expect(res.viewport).toEqual({ width: 1440, height: 900 });
+    expect(res.anchors.map((a) => a.scrollTop)).toEqual([0, 300, 600, 900, 1200, 1500]);
+    expect(res.anchors.map((a) => basename(a.file))).toEqual(
+      [0, 1, 2, 3, 4, 5].map((i) => `capture-${hashOf(url)}-desktop-a${i}.png`),
+    );
+    for (const anchor of res.anchors) expect(existsSync(anchor.file)).toBe(true);
+    expect(fake.shots).toHaveLength(6);
+    expect(fake.shots.every((s) => s.fullPage === false)).toBe(true);
+    // Ordered scroll positions plus the finally reset.
+    expect(fake.tops).toEqual([
+      ...res.anchors.map((a) => ({ label: "div#page.page", top: a.scrollTop })),
+      { label: "div#page.page", top: 0 },
+    ]);
+  });
+
+  it('explicit "anchors" matches the auto behavior', async () => {
+    const fake = innerFake();
+    const res = await captureLiveSite("https://inner.test/explicit", tmpDir(), fake.loader, {
+      waitForOverlay: false,
+      scrollCapture: "anchors",
+    });
+    if (!("mode" in res) || res.mode !== "anchors") throw new Error("expected anchors result");
+    expect(res.anchors).toHaveLength(6);
+    expect(fake.shots).toHaveLength(6);
+  });
+
+  it('forced "viewport" takes one viewport shot and returns mode/scrollRoot/viewport', async () => {
+    const dir = tmpDir();
+    const url = "https://inner.test/viewport";
+    const fake = innerFake();
+    const res = await captureLiveSite(url, dir, fake.loader, {
+      waitForOverlay: false,
+      scrollCapture: "viewport",
+    });
+    if (!("mode" in res) || res.mode !== "viewport") throw new Error("expected viewport result");
+    expect(res.scrollRoot).toBe("div#page.page");
+    expect(res.viewport).toEqual({ width: 1440, height: 900 });
+    expect(res.file).toBe(join(dir, `capture-${hashOf(url)}-desktop.png`));
+    expect(res.base64).toBe(Buffer.from("png-bytes").toString("base64"));
+    expect(fake.shots).toEqual([{ path: res.file, fullPage: false }]);
+    expect(fake.tops).toEqual([]); // one shot at the restored top; no anchor walk
+  });
+
+  it("0 or >1 re-query matches return the label and count, without screenshots", async () => {
+    for (const matches of [0, 2]) {
+      const fake = innerFake({ matches });
+      const res = await captureLiveSite(
+        "https://inner.test/ambiguous",
+        tmpDir(),
+        fake.loader,
+        { waitForOverlay: false },
+      );
+      if (!("error" in res)) throw new Error("expected error result");
+      expect(res.error).toContain("div#page.page");
+      expect(res.error).toContain(`matched ${matches} elements`);
+      expect(fake.shots).toHaveLength(0);
+      expect(fake.tops).toEqual([]);
+    }
+  });
+
+  it("restores scrollTop=0 even when a screenshot throws mid-walk", async () => {
+    const fake = innerFake({
+      shot: (index) => {
+        if (index === 2) throw new Error("shot failed");
+      },
+    });
+    await expect(
+      captureLiveSite("https://inner.test/throw", tmpDir(), fake.loader, { waitForOverlay: false }),
+    ).rejects.toThrow("shot failed");
+    expect(fake.shots).toHaveLength(3); // failed on the third
+    expect(fake.tops[fake.tops.length - 1]).toEqual({ label: "div#page.page", top: 0 });
   });
 });

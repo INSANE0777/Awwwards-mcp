@@ -19,6 +19,7 @@ export async function capture_live_site(ctx: HandlerContext, args: {
   inline?: boolean;
   maxInlineBytes?: number;
   waitForOverlay?: boolean;
+  scrollCapture?: "auto" | "anchors" | "viewport";
 }): Promise<ToolResponse> {
   try {
     // Lazy default: playwright is only touched when the tool actually runs.
@@ -36,31 +37,54 @@ export async function capture_live_site(ctx: HandlerContext, args: {
       inline: args.inline,
       maxInlineBytes: args.maxInlineBytes,
       waitForOverlay: args.waitForOverlay,
+      scrollCapture: args.scrollCapture,
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
-    if (result.base64 === undefined) {
-      const budget = args.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES;
-      const budgetLabel =
-        budget >= 1_000_000
-          ? `${Number((budget / 1_000_000).toFixed(1))} MB`
-          : `${budget} bytes`;
-      const note =
-        args.inline === false
-          ? "(inline preview disabled; open the saved file)"
-          : `(inline preview omitted: the PNG exceeds the ${budgetLabel} inline budget; open the saved file or raise maxInlineBytes)`;
+    // Anchors are six files, so a single "saved to <file>" line would lie:
+    // the payload is text JSON only, with no image block.
+    if ("mode" in result && result.mode === "anchors") {
+      return { content: [text(JSON.stringify(result, null, 1))] };
+    }
+    const note = inlineNote(args, result.base64);
+    if ("mode" in result) {
+      // One viewport shot of an inner scroller: say so, never "full-page".
       return {
-        content: [text(`Full-page capture of ${args.url} saved to ${result.file} ${note}`)],
+        content: [
+          text(
+            `Viewport capture of ${args.url} (inner scroller ${result.scrollRoot}, not full-page) ` +
+              `saved to ${result.file}${note}`,
+          ),
+          ...(result.base64 === undefined
+            ? []
+            : [{ type: "image" as const, data: result.base64, mimeType: "image/png" }]),
+        ],
       };
     }
     return {
       content: [
-        text(`Full-page capture of ${args.url} saved to ${result.file}`),
-        { type: "image", data: result.base64, mimeType: "image/png" },
+        text(`Full-page capture of ${args.url} saved to ${result.file}${note}`),
+        ...(result.base64 === undefined
+          ? []
+          : [{ type: "image" as const, data: result.base64, mimeType: "image/png" }]),
       ],
     };
   } catch (err) {
     return errorResponse(err);
   }
+}
+
+// One-line suffix explaining why an inline preview was omitted. Empty when
+// the preview is present, so callers can always concatenate it.
+function inlineNote(
+  args: { inline?: boolean; maxInlineBytes?: number },
+  base64: string | undefined,
+): string {
+  if (base64 !== undefined) return "";
+  if (args.inline === false) return " (inline preview disabled; open the saved file)";
+  const budget = args.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES;
+  const budgetLabel =
+    budget >= 1_000_000 ? `${Number((budget / 1_000_000).toFixed(1))} MB` : `${budget} bytes`;
+  return ` (inline preview omitted: the PNG exceeds the ${budgetLabel} inline budget; open the saved file or raise maxInlineBytes)`;
 }
 
 export async function analyze_page_structure(ctx: HandlerContext, args: {

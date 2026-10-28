@@ -661,7 +661,7 @@ describe("inner scroll root", () => {
 // The pre-scroll walk must terminate even when a page grows its scrollHeight
 // on every scroll: 80 × 450px steps / 8s hard cap, then back to the top.
 describe("preScroll caps", () => {
-  const withFakes = async (doc: any, win: any, run: () => Promise<void>) => {
+  const withFakes = async (doc: any, win: any, run: () => Promise<unknown>) => {
     const g = globalThis as any;
     const saved = {
       document: g.document,
@@ -674,7 +674,7 @@ describe("preScroll caps", () => {
     g.getComputedStyle = () => ({ overflowY: "auto", display: "block", visibility: "visible" });
     g.setTimeout = (cb: any) => saved.setTimeout(cb, 0); // no real 40ms settle in tests
     try {
-      await run();
+      return await run();
     } finally {
       g.document = saved.document;
       g.window = saved.window;
@@ -748,6 +748,42 @@ describe("preScroll caps", () => {
     expect(tops).toHaveLength(MAX_PRESCROLL_STEPS + 1);
     expect(tops[MAX_PRESCROLL_STEPS]).toBe(0); // reset
     expect(Math.max(...tops)).toBe(450 * (MAX_PRESCROLL_STEPS - 1));
+  });
+
+  it("returns document metrics and a null scrollRoot for a document-scrolling page", async () => {
+    const doc = {
+      documentElement: { scrollHeight: 2000, clientHeight: 900 },
+      body: {},
+      querySelectorAll: () => [],
+    };
+    const win = { scrollTo: () => {} };
+    const info = await withFakes(doc, win, () =>
+      preScroll({ evaluate: async (fn: any) => fn() }),
+    );
+    expect(info).toEqual({ scrollRoot: null, scrollHeight: 2000, clientHeight: 900 });
+  });
+
+  it("returns the inner scroller label and its metrics", async () => {
+    const el = {
+      tagName: "DIV",
+      id: "page",
+      classList: ["page"],
+      clientHeight: 800,
+      scrollHeight: 4000,
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ width: 1440, height: 800 }),
+    };
+    const doc = {
+      documentElement: { scrollHeight: 800, clientHeight: 800 },
+      body: {},
+      querySelectorAll: (sel: string) => (sel === "*" ? [el] : []),
+    };
+    const win = { scrollTo: () => {} };
+    const info = await withFakes(doc, win, () =>
+      preScroll({ evaluate: async (fn: any) => fn() }),
+    );
+    expect(info).toEqual({ scrollRoot: "div#page.page", scrollHeight: 4000, clientHeight: 800 });
+    expect(el.scrollTop).toBe(0); // walk reset the scroller
   });
 
   it("source-locks the cap literals and applies them to both walks", () => {
