@@ -29,8 +29,7 @@ export interface RawImageScan {
 
 // Runs IN THE PAGE via page.evaluate: one pass over document.images. The row
 // cap is a literal because evaluate re-serializes this function and cannot
-// close over module scope. No nested named helpers: tsx injects __name for
-// those and the page has no shim for this tool.
+// close over module scope.
 export const IMAGE_SCAN_SNIPPET = function (): RawImageScan {
   const g = globalThis as any;
   const doc = g.document;

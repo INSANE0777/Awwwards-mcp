@@ -424,6 +424,8 @@ const innerFake = (o: {
   matches?: number;
   scrollHeight?: number;
   clientHeight?: number;
+  /** Land this many px above the requested target (0 = exact). */
+  landOffset?: number;
   /** Emulate a JS smooth scroller: SET only records the target, READ advances. */
   smooth?: boolean;
   shot?: (index: number) => void | Promise<void>;
@@ -445,7 +447,7 @@ const innerFake = (o: {
       if (fn === SET_SCROLL_TOP) {
         tops.push(arg as { label: string; top: number });
         if (o.smooth) smoothTarget = arg.top;
-        else scrollTop = arg.top;
+        else scrollTop = Math.max(0, arg.top - (o.landOffset ?? 0));
         return scrollTop;
       }
       if (fn === READ_SCROLL_TOP) {
@@ -541,6 +543,19 @@ describe("captureLiveSite inner-scroll anchors", () => {
     expect(fake.tops).toEqual(res.anchors.map((a) => ({ label: "div#page.page", top: a.scrollTop })));
     expect(fake.restores).toEqual([{ label: "div#page.page", inline: "" }]);
     expect(fake.atShot).toEqual([0, 300, 600, 900, 1200, 1500]);
+  });
+
+  it("reports the observed scrollTop when the scroller lands short of the target", async () => {
+    const fake = innerFake({ landOffset: 1 });
+    const res = await captureLiveSite("https://inner.test/short", tmpDir(), fake.loader, {
+      waitForOverlay: false,
+    });
+    if (!("mode" in res) || res.mode !== "anchors") throw new Error("expected anchors result");
+    // The walk still requests the computed targets...
+    expect(fake.tops.map((t) => t.top)).toEqual([0, 300, 600, 900, 1200, 1500]);
+    // ...but the result records where the page actually landed.
+    expect(res.anchors.map((a) => a.scrollTop)).toEqual([0, 299, 599, 899, 1199, 1499]);
+    expect(fake.atShot).toEqual([0, 299, 599, 899, 1199, 1499]);
   });
 
   it("polls a JS smooth scroller to each anchor before its screenshot", async () => {

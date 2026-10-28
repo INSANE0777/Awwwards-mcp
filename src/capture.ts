@@ -131,6 +131,7 @@ export type CaptureResult =
   | {
       mode: "anchors";
       scrollRoot: string;
+      /** Observed scrollTop at shot time (may fall short of the requested target). */
       anchors: Array<{ scrollTop: number; file: string }>;
       viewport: { width: number; height: number };
     }
@@ -299,11 +300,11 @@ export async function captureLiveSite(
           // Reach the anchor before the shot: the pin handles CSS smooth
           // scrolling, the poll handles JS-driven scrolling. The wait below is
           // only a paint/animation settle, not the arrival guarantee.
-          await scrollToAnchor(page, scrollRoot, scrollTop);
+          const observedTop = await scrollToAnchor(page, scrollRoot, scrollTop);
           await page.waitForTimeout(250);
           const file = join(imagesDir, `${stem}-a${i}.png`);
           await page.screenshot({ path: file, fullPage: false });
-          anchors.push({ scrollTop, file });
+          anchors.push({ scrollTop: observedTop, file });
         }
       } finally {
         try {
