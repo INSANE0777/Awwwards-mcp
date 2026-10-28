@@ -1,5 +1,5 @@
 // awwwards-verify — verdict-only CLI wrapper around verifyBuild (plan Task C4).
-// NOT an MCP tool (tool count stays 25): a bin that spawns a real browser via
+// NOT an MCP tool (it adds nothing to the tool surface): a bin that spawns a real browser via
 // verifyBuild's lazy-default deps. Output is ONE machine-parseable JSON line:
 // the VerifyReport on success, {error} on failure. Exit codes: 0 pass,
 // 1 warn, 2 fail, 3 error, 4 usage (malformed invocation only — an unreachable

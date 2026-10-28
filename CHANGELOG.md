@@ -3,6 +3,28 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased - v1.15.0
+
+Token export, image-delivery evidence, honest inner-scroll capture, and the MCP
+TypeScript SDK v2 migration with the internal refactor.
+
+### SDK v2 and internal refactor
+
+- Migrated to MCP TypeScript SDK v2 (`@modelcontextprotocol/server`): registrations go through `registerTool` with a `z.object` input schema, and `serveStdio` builds a fresh server per connection (the modern-probe → legacy fallback discards the first instance and builds a second).
+- Split the monolithic `src/cli.ts` / `src/server.ts` into `src/tools/*` registrations and `src/server/handlers/*` over one handler context. Tool names, annotations and payloads are unchanged.
+
+### New tools (2) - 37 → 39
+
+- `export_design_tokens` - deterministic design tokens from one `capture_component` style pack: colors, typography, spacing, radii, shadows and borders as ordinal CSS variables (`--color-1`, `--space-1`, …) plus a Tailwind theme map. `selector` defaults to `body`, `maxNodes` to 800 (50-2000); `include` filters categories. Values are deduped and frequency-ranked (count then code point, never `localeCompare`), cap hits or node truncation set `truncated` + `notes`, and the CSS contains no URLs. No semantic names. (playwright)
+- `analyze_images` - image-delivery evidence from one live page: totals by format, `loading` split (lazy/eager/missing), `srcset`/`sizes` coverage, intrinsic vs rendered dimensions (oversized/tiny/zero-rect), broken images and alt coverage, with ≤20 issue samples (origin+pathname only, query/hash stripped, data URI reduced to `data:<mime>`). The page loads its own assets — no tool-initiated fetches or downloads. `maxImages` default 200 (max 500); evidence, not a WCAG grade. (playwright)
+- Core profile keeps the same 12 build-loop tools; `full` exposes all 39.
+
+### Inner-scroll capture honesty
+
+- `capture_live_site` gains `scrollCapture: "auto" | "anchors" | "viewport"` (default `"auto"`). On inner-scroller pages (`preScroll` reports a `scrollRoot`) it re-queries exactly one match and returns `mode:"anchors"` — six ordered viewport screenshots at `round(i*(scrollHeight-clientHeight)/5)`, JSON `anchors[].scrollTop`/`file` paths, no top-level `file`, and scrollTop restored in `finally`. `scrollCapture:"viewport"` returns one explicit viewport shot with `mode`/`scrollRoot`; 0 or >1 re-query matches returns an `{error}` naming the label and count. Document-scroller payloads are unchanged.
+- `preScroll` now returns `{ scrollRoot, scrollHeight, clientHeight }`; handlers branch on the `CaptureResult` union, so anchors are reported as text JSON and never as a single full-page image.
+- README/README.dev tool tables and counts (37 → 39), module map and capture docs; recreate Phase 1/3 guidance, doctor capture troubleshooting and setup tool list updated.
+
 ## v1.14.0 - 2026-10-28
 
 Coverage honesty, output economy and responsive evidence.

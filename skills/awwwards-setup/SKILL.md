@@ -39,7 +39,7 @@ before the tools appear — say so and stop; preferences (step 1) can be
 collected now and persisted so the restarted session lands running.
 Optional env additions: `AWWWARDS_CACHE_DIR` (custom cache location),
 `AWWWARDS_AUTO_UPDATE=1` (background self-update on new releases),
-`AWWWARDS_MCP_PROFILE=core|full` (`core` exposes 12 build-loop tools instead of 37; default full),
+`AWWWARDS_MCP_PROFILE=core|full` (`core` keeps the same 12 build-loop tools; `full` exposes all 39; default full),
 `AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default 32 MB; oversized results become a truncation JSON),
 `AWWWARDS_MCP_DEBUG_MEMORY=1` (one stderr metrics line per tool call), and
 `AWWWARDS_MCP_ATTACH=1` (allow read-only CDP attach for logged-in pages).
@@ -66,10 +66,11 @@ defaults" is a valid answer:
    `"both"` for design work where the user says mobile matters. Store as
    `"defaultViewport": "desktop" | "mobile" | "both"`.
 
-3. **Live captures** — Do you want fresh full-page screenshots / structure
-   band maps / motion recordings (`capture_live_site`,
-   `analyze_page_structure`, `record_site_motion`)? They need the optional
-   playwright + chromium install (~120 MB):
+3. **Live captures** — Do you want fresh screenshots / structure band maps /
+   motion recordings / design-token exports / image audits (`capture_live_site`,
+   `analyze_page_structure`, `record_site_motion`, `export_design_tokens`,
+   `analyze_images`)? They need the optional playwright + chromium install
+   (~120 MB):
    `npm install -g playwright && npx playwright install chromium`
    If yes, run that install now (it is one-time, safe to re-run). If no,
    skip and note that the capture tools will error until installed. Store

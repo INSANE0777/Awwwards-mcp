@@ -50,13 +50,16 @@ Run this loop before building anything visual:
    your own build the same way — compare both against each other) If the user
    points at a specific live site (e.g. "recreate cerebrium.ai"), call
    `capture_live_site` on that URL before anything else and design from the
-   full-page PNG — every section, top to bottom. Cached Awwwards screenshots
+   full-page PNG — every section, top to bottom. If `analyze_page_structure`
+   reports `scrollRoot` (an inner scroller), the capture returns `mode:"anchors"`
+   instead — six ordered viewport PNGs down that container as JSON paths (no
+   inline image); read the six files. Cached Awwwards screenshots
    are hero-only crops (~880×660) and hide everything below the fold: the
    sections that make a site's structure distinctive (pricing, feature
    layouts, contrast breaks, footer) were never visible in them. For
    mobile-excellence references pass `viewport: "mobile"` — and capture BOTH
    viewports when the desktop and mobile designs diverge.
-6. **Get the design DNA as follow-up evidence.** Call `get_site_details` on the top pick when the brief reports missing or weak detail evidence, or when a specific source needs deeper inspection. If it reports a layout-drift error, fall back to judging the shortlisted screenshots, `get_site_elements` (which uses a different parser), or a `capture_live_site` of the site's URL for a first-hand full-page view. For a shortlist, `get_site_details { slugs }` gives bounded enrichment: up to 10 sites in one call, compact details, no images.
+6. **Get the design DNA as follow-up evidence.** Call `get_site_details` on the top pick when the brief reports missing or weak detail evidence, or when a specific source needs deeper inspection. If it reports a layout-drift error, fall back to judging the shortlisted screenshots, `get_site_elements` (which uses a different parser), or a `capture_live_site` of the site's URL for a first-hand capture. For a shortlist, `get_site_details { slugs }` gives bounded enrichment: up to 10 sites in one call, compact details, no images.
 7. **Study MOTION before building (element videos, not posters).** Call
    `get_site_elements` on shortlisted sites — it returns per-element video
    URLs (preloader, page transition, case study, about…). **Download those
@@ -79,7 +82,7 @@ Run this loop before building anything visual:
    horizontal scroll chapters, Lenis for smooth scroll) over hand-rolled
    scroll math.
 9. **Verify structure, then polish.** After building, capture your own build
-   full-page (`capture_live_site` on its `file://` or served URL) and run
+   with `capture_live_site` (on its `file://` or served URL) and run
    `analyze_page_structure` on BOTH the reference and the build. Compare band
    maps section by section (count, order, backgrounds, heights). Match the
    reference's viewport when comparing: for mobile-excellence references pass
@@ -138,7 +141,7 @@ finer winner cuts:
 | `get_site_details` | `slug` (from `search_sites`, e.g. `l-i-s-a`) | Title, live URL, awards, color palette, technologies, design elements, description, full-size screenshot URL; inline screenshot when available | Cached 7 days; a parse that comes back all-empty is an error, not a quiet empty result. |
 | `get_site_elements` | `slug` | Numbered element list (image or video, with video URLs) + up to 8 inline poster JPEGs | Videos are mp4 URLs (posters only are shown inline). Elements feed from the same fetch as `get_site_details`. |
 | `list_categories` | none | JSON: award filters (with labels), every color hex and filter/tag slug, technology slugs, plus usage guidance | Cached 30 days. Call this whenever filter vocabulary is uncertain — awards and technology slugs included. |
-| `capture_live_site` | `url` (absolute URL) | Full-page PNG saved to disk + inline image | Requires the optional playwright dependency (`npm install -g playwright && npx playwright install chromium`). |
+| `capture_live_site` | `url` (absolute URL), `viewport` (`"desktop"` default or `"mobile"`), `scrollCapture` (`"auto"` default, `"anchors"` or `"viewport"`) | Document scroller: full-page PNG saved to disk + inline image. Inner scroller (`scrollRoot`): six ordered viewport shots as JSON `anchors[].scrollTop`/`file`, no inline image; `scrollCapture:"viewport"` gives one explicit viewport shot | Requires the optional playwright dependency (`npm install -g playwright && npx playwright install chromium`). |
 | `analyze_page_structure` | `url` (absolute URL or `file://` path), `maxBands` (cap on returned bands, default 40) | JSON: `title`, `totalHeight`, and an ordered band map (`index`, `tag`, `label`, `background`, `offsetTop`, `height`, `textStart` (first ~60 chars of the band's text) per band) | Requires playwright. Run it on BOTH the reference and your build (step 8) and compare band maps — count, order, backgrounds, heights — never just total height. |
 | `record_site_motion` | `url` (absolute URL), `frames` (filmstrip tile count, 4–36, default 16 → a 4x4 grid) | Inline filmstrip JPEG of a motion-through pass (preloader dwell, slow scroll, hover/cursor interactions) + the saved .webm path as text | Requires playwright + ffmpeg-static. Runs a ~30 s scripted pass — heavier than a capture, use when motion matters (step on from static captures). |
 | `new_winners` | `award` (`sotd` default, or `developer`/`honorable`) | Today's freshly-crowned winners since the last poll, as site cards; first-ever call seeds a baseline and dumps the listing instead | UTC-day granular. Each first-seen winner's Elements section is auto-backfilled into the `source:"site"` element corpus — new winners are searchable by elements immediately without gallery indexing. Longitudinal monitoring: call periodically during a session to catch new SOTDs as they land. |
