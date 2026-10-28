@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RawImage } from "../src/images.js";
-import { summarizeImages } from "../src/images.js";
+import { IMAGE_SCAN_SNIPPET, summarizeImages } from "../src/images.js";
 
 const CDN = "https://cdn.example.dev/";
 
@@ -84,12 +84,60 @@ describe("summarizeImages source and format", () => {
     expect(JSON.stringify(report)).not.toContain("charset");
   });
 
+  it("strips URL userinfo from sample src", () => {
+    const report = summarizeImages(
+      [
+        img({ src: "https://user:p%40ss@cdn.example.dev/hero.png?cache=1#frag" }),
+        img({ src: "//user:pass@cdn.example.dev/rel.webp" }),
+      ],
+      200,
+    );
+
+    expect(report.samples.map((sample) => sample.src)).toEqual([
+      `${CDN}hero.png`,
+      "//cdn.example.dev/rel.webp",
+    ]);
+  });
+
   it("falls back to other when the pathname has no extension", () => {
     const report = summarizeImages(
       [img({ src: `${CDN}api/image?id=42`, srcset: "x 1x" })],
       200,
     );
     expect(report.byFormat).toEqual([{ format: "other", count: 1 }]);
+  });
+});
+
+describe("IMAGE_SCAN_SNIPPET sanitization", () => {
+  it("reduces data URIs in both src fields and caps srcset/sizes at 200 chars", () => {
+    const attrs: Record<string, string> = {
+      srcset: "data:image/png;base64," + "A".repeat(500) + " 1x",
+      sizes: "(min-width: 1px) " + "1".repeat(400),
+    };
+    const image = {
+      currentSrc: "data:image/webp;base64," + "B".repeat(1000),
+      src: "data:image/svg+xml;charset=utf-8,%3Csvg%3E",
+      complete: true,
+      naturalWidth: 100,
+      naturalHeight: 100,
+      getBoundingClientRect: () => ({ width: 50, height: 50 }),
+      getAttribute: (name: string) => attrs[name] ?? null,
+    };
+    const g = globalThis as any;
+    const saved = g.document;
+    g.document = { images: [image] };
+    try {
+      const scan = IMAGE_SCAN_SNIPPET();
+      expect(scan.rows[0]!.currentSrc).toBe("data:image/webp");
+      expect(scan.rows[0]!.src).toBe("data:image/svg+xml");
+      expect(scan.rows[0]!.srcset).toHaveLength(200);
+      expect(scan.rows[0]!.sizes).toHaveLength(200);
+      // Presence survives truncation, so the reducer still counts both.
+      const report = summarizeImages(scan.rows, 200);
+      expect(report.responsive).toEqual({ withSrcset: 1, withSizes: 1, missing: 0 });
+    } finally {
+      g.document = saved;
+    }
   });
 });
 

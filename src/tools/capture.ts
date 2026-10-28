@@ -4,7 +4,7 @@ import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } fro
 export function registerCaptureLiveSite(ctx: ToolContext): void {
   ctx.tool(
     "capture_live_site",
-    "Take a fresh full-page screenshot of a live website URL using a headless browser. Requires the optional playwright dependency.",
+    "Take a fresh full-page screenshot of a live website URL using a headless browser. Requires the optional playwright dependency. Caveat: inner-scroll pages (body pinned, one container scrolls) return mode:\"anchors\" — six ordered viewport screenshots as JSON paths, not one full-page image.",
     {
       url: z.string().url().describe("Absolute URL of the site to capture"),
       waitStrategy: waitStrategySchema,

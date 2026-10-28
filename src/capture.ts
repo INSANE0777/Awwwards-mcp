@@ -148,12 +148,62 @@ const COUNT_SCROLL_ROOT = function (label: string): { count: number; invalid?: s
   }
 };
 
-// Runs IN THE PAGE: sets the re-queried inner scroller's scrollTop.
-const SET_SCROLL_TOP = function (arg: { label: string; top: number }): void {
+// Runs IN THE PAGE: pins scroll-behavior:auto on the re-queried scroller so a
+// page-level `scroll-behavior:smooth` cannot animate the anchor jump. Returns
+// the inline value finally must put back ("" when the page set none).
+export const PIN_SCROLL_BEHAVIOR = function (arg: { label: string }): { inline: string } | null {
   const doc = (globalThis as any).document;
   const el = doc.querySelectorAll(arg.label)[0];
-  if (el) el.scrollTop = arg.top;
+  if (!el) return null;
+  const style = el.style;
+  const inline = style ? String(style.scrollBehavior || "") : "";
+  if (style) style.scrollBehavior = "auto";
+  return { inline: inline };
 };
+
+// Runs IN THE PAGE: sets the re-queried inner scroller's scrollTop and returns
+// where it actually landed (-1 when the element vanished).
+export const SET_SCROLL_TOP = function (arg: { label: string; top: number }): number {
+  const doc = (globalThis as any).document;
+  const el = doc.querySelectorAll(arg.label)[0];
+  if (!el) return -1;
+  el.scrollTop = arg.top;
+  return Number(el.scrollTop) || 0;
+};
+
+// Runs IN THE PAGE: current scrollTop (-1 when the element vanished).
+export const READ_SCROLL_TOP = function (arg: { label: string }): number {
+  const doc = (globalThis as any).document;
+  const el = doc.querySelectorAll(arg.label)[0];
+  return el ? Number(el.scrollTop) || 0 : -1;
+};
+
+// Runs IN THE PAGE: back to the top and the page's own inline scroll-behavior.
+export const RESTORE_SCROLL = function (arg: { label: string; inline: string }): void {
+  const doc = (globalThis as any).document;
+  const el = doc.querySelectorAll(arg.label)[0];
+  if (!el) return;
+  el.scrollTop = 0;
+  if (el.style) el.style.scrollBehavior = arg.inline;
+};
+
+// Polls after the jump: the inline pin defeats CSS smooth scrolling, but a
+// JS-driven scroller (Lenis, rAF lerps) ignores it, so the shot must wait for
+// the real position. A timeout returns the last observed position, never throws.
+export async function scrollToAnchor(
+  page: any,
+  label: string,
+  top: number,
+  timeoutMs = 1500,
+): Promise<number> {
+  let actual = Number(await page.evaluate(SET_SCROLL_TOP, { label, top })) || 0;
+  const deadline = Date.now() + timeoutMs;
+  while (actual >= 0 && Math.abs(actual - top) > 1 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+    actual = Number(await page.evaluate(READ_SCROLL_TOP, { label })) || 0;
+  }
+  return actual;
+}
 
 // Shared inline-preview decision: an omitted preview still leaves the saved
 // file. Computed from the raw PNG length so a large capture never pays for
@@ -235,14 +285,21 @@ export async function captureLiveSite(
         return { mode: "viewport", scrollRoot, file, ...previewOf(buf, opts), viewport: viewportSize };
       }
       // auto/anchors: six ordered viewport shots down the inner scroller. The
-      // reset lives in finally so a mid-loop screenshot failure still leaves
-      // the page at the top.
+      // inline scroll-behavior pin and the top reset live in finally so a
+      // mid-loop screenshot failure still leaves the page as it was found.
       const maxScroll = Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0));
       const anchors: Array<{ scrollTop: number; file: string }> = [];
+      const pinned = (await page.evaluate(PIN_SCROLL_BEHAVIOR, { label: scrollRoot })) as {
+        inline?: string;
+      } | null;
+      const inline = typeof pinned?.inline === "string" ? pinned.inline : "";
       try {
         for (let i = 0; i < 6; i++) {
           const scrollTop = Math.round((i * maxScroll) / 5);
-          await page.evaluate(SET_SCROLL_TOP, { label: scrollRoot, top: scrollTop });
+          // Reach the anchor before the shot: the pin handles CSS smooth
+          // scrolling, the poll handles JS-driven scrolling. The wait below is
+          // only a paint/animation settle, not the arrival guarantee.
+          await scrollToAnchor(page, scrollRoot, scrollTop);
           await page.waitForTimeout(250);
           const file = join(imagesDir, `${stem}-a${i}.png`);
           await page.screenshot({ path: file, fullPage: false });
@@ -250,7 +307,7 @@ export async function captureLiveSite(
         }
       } finally {
         try {
-          await page.evaluate(SET_SCROLL_TOP, { label: scrollRoot, top: 0 });
+          await page.evaluate(RESTORE_SCROLL, { label: scrollRoot, inline });
         } catch {
           /* keep the primary error */
         }

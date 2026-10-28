@@ -90,8 +90,10 @@ The user's build/research doesn't wait for the repair. Degrade gracefully:
   `npm run doctor -- --fix` restores chromium.
 - **Token/image tools down**: `export_design_tokens` reuses the
   `capture_component` pack (same playwright/chromium requirement), and
-  `analyze_images` needs the same browser. Without playwright both return
-  `{error}` with the install hint; cached `get_site_details` screenshots are the
+  `analyze_images` needs the same browser. Without playwright both return the
+  raw browser/module error (e.g. `Cannot find package 'playwright'`), not the
+  friendly install hint — `capture_live_site` / `analyze_page_structure` are the
+  tools that return the hint. Cached `get_site_details` screenshots are the
   fallback. `analyze_images` never downloads assets — zero images means the page
   has no `<img>` elements (canvas/CSS-background content) or the scan found none,
   not a broken audit.

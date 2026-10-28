@@ -38,20 +38,38 @@ export const IMAGE_SCAN_SNIPPET = function (): RawImageScan {
   const total = imgs.length;
   const cap = Math.min(total, 500);
   const rows: RawImage[] = [];
+
+  // Data URIs ship their whole payload over the evaluate bridge and are never
+  // shown beyond their mime, so reduce them in the page. Named helpers are safe:
+  // scanImages installs the tsx __name shim before this runs.
+  function imageSrc(value: any): string {
+    const s = String(value || "");
+    if (!/^data:/i.test(s)) return s;
+    const mime = /^data:([^;,]*)/i.exec(s)?.[1]?.trim().toLowerCase() ?? "";
+    return mime ? "data:" + mime : "data:";
+  }
+
+  // srcset/sizes are evidence of presence only; cap the strings so a data-URI
+  // candidate cannot bloat the scan payload (presence survives truncation).
+  function clipped(value: string | null, limit: number): string | null {
+    if (value === null) return null;
+    return value.length > limit ? value.slice(0, limit) : value;
+  }
+
   for (let i = 0; i < cap; i++) {
     const img = imgs[i];
     const rect = img.getBoundingClientRect();
     rows.push({
-      currentSrc: String(img.currentSrc || ""),
-      src: String(img.src || ""),
+      currentSrc: imageSrc(img.currentSrc),
+      src: imageSrc(img.src),
       complete: !!img.complete,
       naturalWidth: Number(img.naturalWidth) || 0,
       naturalHeight: Number(img.naturalHeight) || 0,
       displayWidth: Number(rect.width) || 0,
       displayHeight: Number(rect.height) || 0,
       loadingAttr: img.getAttribute("loading"),
-      srcset: img.getAttribute("srcset"),
-      sizes: img.getAttribute("sizes"),
+      srcset: clipped(img.getAttribute("srcset"), 200),
+      sizes: clipped(img.getAttribute("sizes"), 200),
       altAttr: img.getAttribute("alt"),
       role: img.getAttribute("role"),
       ariaHidden: img.getAttribute("aria-hidden"),
@@ -139,7 +157,19 @@ function pathnameOf(value: string): string {
   }
 }
 
-/** Origin+pathname with query/hash stripped; data URIs collapse to `data:<mime>`. */
+// Drop `username:password@` from an absolute URL. Relative paths (resolved
+// against a placeholder base) and URLs without credentials pass through.
+function stripUserInfo(value: string): string {
+  try {
+    const u = new URL(value, "http://local.invalid");
+    if (!u.username && !u.password) return value;
+    return value.startsWith("//") ? `//${u.host}${u.pathname}` : `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return value;
+  }
+}
+
+/** Origin+pathname with query/hash and credentials stripped; data URIs collapse to `data:<mime>`. */
 function sourceOf(row: RawImage): { src: string; format: string } {
   const raw = (row.currentSrc || row.src).trim();
   if (!raw) return { src: "", format: "other" };
@@ -149,7 +179,7 @@ function sourceOf(row: RawImage): { src: string; format: string } {
     return { src: mime ? `data:${mime}` : "data:", format: formatFromMime(mime) };
   }
 
-  const cleaned = raw.split(/[?#]/, 1)[0] ?? "";
+  const cleaned = stripUserInfo(raw.split(/[?#]/, 1)[0] ?? "");
   const ext = /\.([a-z0-9]+)$/i.exec(pathnameOf(cleaned))?.[1];
   return { src: cleaned, format: ext ? canonicalFormat(ext) : "other" };
 }

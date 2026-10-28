@@ -601,6 +601,71 @@ describe("inner scroll root", () => {
     expect(splitCollapsedBands(bands, [1500]).map((b) => b.offsetTop)).toEqual([0, 2496]);
   });
 
+  it("escapes special-character ids/classes in scrollRoot so re-query stays valid", () => {
+    const label = String.raw`div#page\:main\/x\.y.scroll\.inner`;
+    const scroller = {
+      tagName: "DIV",
+      id: "page:main/x.y",
+      classList: ["scroll.inner"],
+      scrollHeight: 4000,
+      clientHeight: 900,
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1440, height: 900 }),
+    };
+    const body = {
+      tagName: "BODY",
+      id: "",
+      classList: [] as string[],
+      children: [] as any[],
+      textContent: "",
+      getBoundingClientRect: () => ({ width: 1440, height: 900 }),
+    };
+    const fakeDoc = {
+      title: "Special",
+      documentElement: { scrollHeight: 900, clientHeight: 900 },
+      body,
+      querySelectorAll: (selector: string) => {
+        if (selector === "*") return [body, scroller];
+        // capture re-queries the exact label the scan returned.
+        if (selector === label) return [scroller];
+        return [];
+      },
+    };
+    const g = globalThis as any;
+    const saved = {
+      document: g.document,
+      CSS: g.CSS,
+      getComputedStyle: g.getComputedStyle,
+      scrollX: g.scrollX,
+      scrollY: g.scrollY,
+    };
+    g.document = fakeDoc;
+    g.scrollX = 0;
+    g.scrollY = 0;
+    g.getComputedStyle = () => ({
+      overflowY: "auto",
+      display: "block",
+      visibility: "visible",
+      backgroundColor: "rgb(255, 255, 255)",
+    });
+    try {
+      g.CSS = { escape: (s: string) => String(s).replace(/[^A-Za-z0-9_-]/g, "\\$&") };
+      expect(SCAN_SNIPPET({}).scrollRoot).toBe(label);
+      expect(fakeDoc.querySelectorAll(label)).toHaveLength(1);
+      // Old engine / fake page without CSS.escape: the fallback escapes the same
+      // punctuation, so the label stays a valid one-element selector.
+      g.CSS = undefined;
+      expect(SCAN_SNIPPET({}).scrollRoot).toBe(label);
+      expect(fakeDoc.querySelectorAll(label)).toHaveLength(1);
+    } finally {
+      g.document = saved.document;
+      g.CSS = saved.CSS;
+      g.getComputedStyle = saved.getComputedStyle;
+      g.scrollX = saved.scrollX;
+      g.scrollY = saved.scrollY;
+    }
+  });
+
   it("passes the scanned scrollRoot through to PageStructure", async () => {
     const fake = {
       launch: async () => ({
@@ -649,6 +714,7 @@ describe("inner scroll root", () => {
       expect(src).toContain("el === doc.body || el === doc.documentElement");
       expect(src).toContain("el.scrollHeight > el.clientHeight + 100");
       expect(src).toContain('String(s.overflowY) !== "auto" && String(s.overflowY) !== "scroll"');
+      expect(src).toContain("css.escape"); // id/class escaped for a valid selector
     }
     expect(scan).toContain("de.scrollHeight > de.clientHeight + 100"); // document scroll wins
     expect(scan).toContain("r.top - scrollerTop + scrollerScrollTop");
@@ -784,6 +850,42 @@ describe("preScroll caps", () => {
     );
     expect(info).toEqual({ scrollRoot: "div#page.page", scrollHeight: 4000, clientHeight: 800 });
     expect(el.scrollTop).toBe(0); // walk reset the scroller
+  });
+
+  it("escapes special-character scroller ids/classes (CSS.escape and fallback)", async () => {
+    const el = {
+      tagName: "DIV",
+      id: "page:main/x.y",
+      classList: ["scroll.inner"],
+      clientHeight: 900,
+      scrollHeight: 2000,
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ width: 1440, height: 900 }),
+    };
+    const doc = {
+      documentElement: { scrollHeight: 900, clientHeight: 900 },
+      body: {},
+      querySelectorAll: (sel: string) => (sel === "*" ? [el] : []),
+    };
+    const win = { scrollTo: () => {} };
+    const g = globalThis as any;
+    const saved = g.CSS;
+    const expected = String.raw`div#page\:main\/x\.y.scroll\.inner`;
+    try {
+      g.CSS = { escape: (s: string) => String(s).replace(/[^A-Za-z0-9_-]/g, "\\$&") };
+      const escaped = await withFakes(doc, win, () =>
+        preScroll({ evaluate: async (fn: any) => fn() }),
+      );
+      expect(escaped.scrollRoot).toBe(expected);
+      // No CSS.escape in an old engine/fake page: the fallback still escapes.
+      g.CSS = undefined;
+      const fallback = await withFakes(doc, win, () =>
+        preScroll({ evaluate: async (fn: any) => fn() }),
+      );
+      expect(fallback.scrollRoot).toBe(expected);
+    } finally {
+      g.CSS = saved;
+    }
   });
 
   it("source-locks the cap literals and applies them to both walks", () => {

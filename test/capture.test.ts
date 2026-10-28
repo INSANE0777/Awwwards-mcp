@@ -3,7 +3,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureLiveSite, DEFAULT_MAX_INLINE_BYTES, isBlockingOverlay, waitForOverlays } from "../src/capture.js";
+import {
+  captureLiveSite,
+  DEFAULT_MAX_INLINE_BYTES,
+  isBlockingOverlay,
+  PIN_SCROLL_BEHAVIOR,
+  READ_SCROLL_TOP,
+  RESTORE_SCROLL,
+  SET_SCROLL_TOP,
+  waitForOverlays,
+} from "../src/capture.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -406,29 +415,53 @@ describe("captureLiveSite", () => {
   });
 });
 
-// Fake page for the inner-scroller contract. evaluate() dispatches on the same
-// shapes capture sends: no argument -> preScroll info, string -> re-query count,
-// object -> set scrollTop. Screenshots record their fullPage flag + path.
+// Fake page for the inner-scroller contract. evaluate() dispatches on the
+// exported snippet identities (pin/set/read/restore), a string arg -> re-query
+// count, and the no-arg call -> preScroll info. Screenshots record their
+// fullPage flag, path and the scrollTop they were actually taken at.
 const innerFake = (o: {
   scrollRoot?: string | null;
   matches?: number;
   scrollHeight?: number;
   clientHeight?: number;
+  /** Emulate a JS smooth scroller: SET only records the target, READ advances. */
+  smooth?: boolean;
   shot?: (index: number) => void | Promise<void>;
 } = {}) => {
   const scrollRoot = o.scrollRoot === undefined ? "div#page.page" : o.scrollRoot;
   const tops: Array<{ label: string; top: number }> = [];
+  const restores: Array<{ label: string; inline: string }> = [];
   const shots: Array<{ path: string; fullPage?: boolean }> = [];
+  const atShot: number[] = [];
+  let scrollTop = 0;
+  let smoothTarget: number | null = null;
+  let reads = 0;
   let shotIndex = 0;
   const page = {
     goto: async () => {},
     waitForTimeout: async () => {},
-    evaluate: async (_fn: unknown, arg?: unknown) => {
-      if (typeof arg === "string") return { count: o.matches ?? 1 };
-      if (arg && typeof arg === "object") {
+    evaluate: async (fn: unknown, arg?: any) => {
+      if (fn === PIN_SCROLL_BEHAVIOR) return { inline: "" };
+      if (fn === SET_SCROLL_TOP) {
         tops.push(arg as { label: string; top: number });
+        if (o.smooth) smoothTarget = arg.top;
+        else scrollTop = arg.top;
+        return scrollTop;
+      }
+      if (fn === READ_SCROLL_TOP) {
+        reads++;
+        if (o.smooth && smoothTarget !== null && scrollTop < smoothTarget) {
+          scrollTop = Math.min(smoothTarget, scrollTop + 400);
+        }
+        return scrollTop;
+      }
+      if (fn === RESTORE_SCROLL) {
+        restores.push(arg as { label: string; inline: string });
+        scrollTop = 0;
+        smoothTarget = null;
         return undefined;
       }
+      if (typeof arg === "string") return { count: o.matches ?? 1 };
       return {
         scrollRoot,
         scrollHeight: o.scrollHeight ?? 2400,
@@ -437,6 +470,7 @@ const innerFake = (o: {
     },
     screenshot: async (shot: { path: string; fullPage?: boolean }) => {
       shots.push(shot);
+      atShot.push(scrollTop);
       await o.shot?.(shotIndex++);
       const fs = await import("node:fs/promises");
       await fs.writeFile(shot.path, Buffer.from("png-bytes"));
@@ -450,7 +484,10 @@ const innerFake = (o: {
       },
     }),
     tops,
+    restores,
     shots,
+    atShot,
+    reads: () => reads,
   };
 };
 
@@ -500,11 +537,36 @@ describe("captureLiveSite inner-scroll anchors", () => {
     for (const anchor of res.anchors) expect(existsSync(anchor.file)).toBe(true);
     expect(fake.shots).toHaveLength(6);
     expect(fake.shots.every((s) => s.fullPage === false)).toBe(true);
-    // Ordered scroll positions plus the finally reset.
-    expect(fake.tops).toEqual([
-      ...res.anchors.map((a) => ({ label: "div#page.page", top: a.scrollTop })),
-      { label: "div#page.page", top: 0 },
-    ]);
+    // Ordered scroll positions plus the finally restore.
+    expect(fake.tops).toEqual(res.anchors.map((a) => ({ label: "div#page.page", top: a.scrollTop })));
+    expect(fake.restores).toEqual([{ label: "div#page.page", inline: "" }]);
+    expect(fake.atShot).toEqual([0, 300, 600, 900, 1200, 1500]);
+  });
+
+  it("polls a JS smooth scroller to each anchor before its screenshot", async () => {
+    const fake = innerFake({ smooth: true });
+    const res = await captureLiveSite(
+      "https://inner.test/smooth",
+      tmpDir(),
+      fake.loader,
+      { waitForOverlay: false },
+    );
+    if (!("mode" in res) || res.mode !== "anchors") throw new Error("expected anchors result");
+    expect(res.anchors.map((a) => a.scrollTop)).toEqual([0, 300, 600, 900, 1200, 1500]);
+    // SET alone left the scroller at 0; only the READ poll moved it to target.
+    expect(fake.reads()).toBeGreaterThan(0);
+    expect(fake.atShot).toEqual([0, 300, 600, 900, 1200, 1500]);
+  });
+
+  it("passes the escaped scrollRoot label through re-query and the walk", async () => {
+    const label = String.raw`div#page\:main\/x\.y.scroll\.inner`;
+    const fake = innerFake({ scrollRoot: label });
+    const res = await captureLiveSite("https://inner.test/escaped", tmpDir(), fake.loader, {
+      waitForOverlay: false,
+    });
+    if (!("mode" in res) || res.mode !== "anchors") throw new Error("expected anchors result");
+    expect(res.scrollRoot).toBe(label);
+    expect(fake.tops.every((t) => t.label === label)).toBe(true);
   });
 
   it('explicit "anchors" matches the auto behavior', async () => {
@@ -552,7 +614,7 @@ describe("captureLiveSite inner-scroll anchors", () => {
     }
   });
 
-  it("restores scrollTop=0 even when a screenshot throws mid-walk", async () => {
+  it("restores scrollTop and inline behavior even when a screenshot throws mid-walk", async () => {
     const fake = innerFake({
       shot: (index) => {
         if (index === 2) throw new Error("shot failed");
@@ -562,6 +624,6 @@ describe("captureLiveSite inner-scroll anchors", () => {
       captureLiveSite("https://inner.test/throw", tmpDir(), fake.loader, { waitForOverlay: false }),
     ).rejects.toThrow("shot failed");
     expect(fake.shots).toHaveLength(3); // failed on the third
-    expect(fake.tops[fake.tops.length - 1]).toEqual({ label: "div#page.page", top: 0 });
+    expect(fake.restores).toEqual([{ label: "div#page.page", inline: "" }]);
   });
 });

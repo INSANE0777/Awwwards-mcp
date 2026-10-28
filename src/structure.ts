@@ -135,10 +135,18 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     return best;
   }
 
+  function cssEscape(value: any): string {
+    const css = g.CSS;
+    if (css && typeof css.escape === "function") return String(css.escape(String(value)));
+    // shortcut: fallback for old engines/fake pages without CSS.escape — it
+    // covers the punctuation this label uses, not every CSS ident edge case.
+    return String(value).replace(/[^A-Za-z0-9_\u00A0-\uFFFF-]/g, "\\$&");
+  }
+
   function scrollRootLabel(el: any): string {
     const tag = String(el.tagName || "").toLowerCase();
-    const id = el.id ? "#" + String(el.id) : "";
-    const cls = el.classList && el.classList.length ? "." + String(el.classList[0]) : "";
+    const id = el.id ? "#" + cssEscape(el.id) : "";
+    const cls = el.classList && el.classList.length ? "." + cssEscape(el.classList[0]) : "";
     return tag + id + cls;
   }
 
@@ -740,13 +748,27 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
         }
       }
     } catch {}
-    // Same tag#id.class[0] label SCAN_SNIPPET emits (inlined: this evaluate
-    // can run before the tsx __name shim, so it may declare no named helpers).
-    const scrollRoot = scroller
-      ? String(scroller.tagName || "").toLowerCase() +
-        (scroller.id ? "#" + String(scroller.id) : "") +
-        (scroller.classList && scroller.classList.length ? "." + String(scroller.classList[0]) : "")
-      : null;
+    // Same tag#id.class[0] label SCAN_SNIPPET emits, escaped the same way
+    // (inlined: this evaluate can run before the tsx __name shim, so it may
+    // declare no named helpers).
+    const css = g.CSS;
+    let scrollRoot: string | null = null;
+    if (scroller) {
+      const id = scroller.id
+        ? "#" +
+          (css && typeof css.escape === "function"
+            ? String(css.escape(String(scroller.id)))
+            : String(scroller.id).replace(/[^A-Za-z0-9_\u00A0-\uFFFF-]/g, "\\$&"))
+        : "";
+      const cls =
+        scroller.classList && scroller.classList.length
+          ? "." +
+            (css && typeof css.escape === "function"
+              ? String(css.escape(String(scroller.classList[0])))
+              : String(scroller.classList[0]).replace(/[^A-Za-z0-9_\u00A0-\uFFFF-]/g, "\\$&"))
+          : "";
+      scrollRoot = String(scroller.tagName || "").toLowerCase() + id + cls;
+    }
     if (scroller) {
       let y = 0;
       let steps = 0;
