@@ -455,7 +455,7 @@ function hexAlphaZero(s: string): boolean {
 }
 
 // `none`/`transparent`/non-colour strings and any alpha-0 colour are noise.
-function isJunkColor(value: string): boolean {
+export function isJunkColor(value: string): boolean {
   if (!isColorValue(value)) return true;
   const s = value.trim().toLowerCase();
   if (hexAlphaZero(s)) return true;
