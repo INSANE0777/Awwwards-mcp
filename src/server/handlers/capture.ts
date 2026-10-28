@@ -1,6 +1,7 @@
 import { DEFAULT_MAX_INLINE_BYTES } from "../../capture.js";
 import type { CaptureOpts } from "../../capture.js";
 import { summarizePalette, summarizeTypography } from "../../component.js";
+import { summarizeImages } from "../../images.js";
 import { diffBands } from "../../structure.js";
 import type { WaitOpts, WaitStrategy } from "../../structure.js";
 import { exportDesignTokens } from "../../tokens.js";
@@ -245,6 +246,45 @@ export async function export_design_tokens(ctx: HandlerContext, args: {
     return {
       content: [
         text(JSON.stringify({ url: pack.url, selector: pack.selector, viewport, ...tokens }, null, 1)),
+      ],
+    };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function analyze_images(ctx: HandlerContext, args: {
+  url: string;
+  viewport?: ViewportName;
+  maxImages?: number;
+}): Promise<ToolResponse> {
+  try {
+    // Lazy default: playwright is only touched when the tool actually runs.
+    const analyze =
+      ctx.deps.analyzeImagesFn ??
+      ((url: string, opts?: { viewport?: ViewportName; maxImages?: number }) =>
+        import("../../images.js").then((m) => m.scanImages(url, opts)));
+    const viewport = args.viewport ?? "desktop";
+    const maxImages = args.maxImages ?? 200;
+    const scan = await analyze(args.url, { viewport, maxImages });
+    if ("error" in scan) return { content: [text(scan.error)], isError: true };
+    const report = summarizeImages(scan.rows, maxImages);
+    return {
+      content: [
+        text(
+          JSON.stringify(
+            {
+              url: args.url,
+              viewport,
+              ...report,
+              // The scan caps rows at 500; total stays the true pre-cap count.
+              total: scan.total,
+              truncated: report.truncated || scan.total > report.scanned,
+            },
+            null,
+            1,
+          ),
+        ),
       ],
     };
   } catch (err) {

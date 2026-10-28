@@ -16,6 +16,7 @@ import {
   capture_pose_3d,
   capture_component,
   export_design_tokens,
+  analyze_images,
 } from "./handlers/capture.js";
 import {
   audit_url,
@@ -85,6 +86,7 @@ export function createHandlers(deps: CreateHandlersDeps): Handlers {
     verify_build: (args) => verify_build(ctx, args),
     capture_component: (args) => capture_component(ctx, args),
     export_design_tokens: (args) => export_design_tokens(ctx, args),
+    analyze_images: (args) => analyze_images(ctx, args),
     capture_pose_3d: (args) => capture_pose_3d(ctx, args),
     build_pose_stub: (args) => build_pose_stub(ctx, args),
     analyze_stack: (args) => analyze_stack(ctx, args),

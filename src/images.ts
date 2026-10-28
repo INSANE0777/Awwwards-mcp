@@ -1,3 +1,7 @@
+import { installSnippetShims, preScroll } from "./structure.js";
+import { resolveViewport } from "./viewport.js";
+import type { ViewportName } from "./viewport.js";
+
 export interface RawImage {
   currentSrc: string;
   src: string;
@@ -16,6 +20,47 @@ export interface RawImage {
   role: string | null;
   ariaHidden: string | null;
 }
+
+export interface RawImageScan {
+  /** document.images.length before the 500-row scan cap. */
+  total: number;
+  rows: RawImage[];
+}
+
+// Runs IN THE PAGE via page.evaluate: one pass over document.images. The row
+// cap is a literal because evaluate re-serializes this function and cannot
+// close over module scope. No nested named helpers: tsx injects __name for
+// those and the page has no shim for this tool.
+export const IMAGE_SCAN_SNIPPET = function (): RawImageScan {
+  const g = globalThis as any;
+  const doc = g.document;
+  const imgs = doc.images;
+  const total = imgs.length;
+  const cap = Math.min(total, 500);
+  const rows: RawImage[] = [];
+  for (let i = 0; i < cap; i++) {
+    const img = imgs[i];
+    const rect = img.getBoundingClientRect();
+    rows.push({
+      currentSrc: String(img.currentSrc || ""),
+      src: String(img.src || ""),
+      complete: !!img.complete,
+      naturalWidth: Number(img.naturalWidth) || 0,
+      naturalHeight: Number(img.naturalHeight) || 0,
+      displayWidth: Number(rect.width) || 0,
+      displayHeight: Number(rect.height) || 0,
+      loadingAttr: img.getAttribute("loading"),
+      srcset: img.getAttribute("srcset"),
+      sizes: img.getAttribute("sizes"),
+      altAttr: img.getAttribute("alt"),
+      role: img.getAttribute("role"),
+      ariaHidden: img.getAttribute("aria-hidden"),
+      widthAttr: img.getAttribute("width"),
+      heightAttr: img.getAttribute("height"),
+    });
+  }
+  return { total, rows };
+};
 
 export type ImageIssue =
   | "broken"
@@ -257,4 +302,49 @@ export function summarizeImages(rows: RawImage[], maxImages: number): ImageRepor
     truncated,
     notes,
   };
+}
+
+export interface ScanImagesOptions {
+  viewport?: ViewportName;
+  timeoutMs?: number;
+  loader?: () => Promise<any>;
+}
+
+// Browser lifecycle for analyze_images: lazy/injectable loader (same shape as
+// captureComponent), load + fixed settle, fonts, shared preScroll so the page's
+// own lazy loading fires, then one IMAGE_SCAN_SNIPPET evaluate. No asset
+// fetches are initiated here — the page loads its own images.
+export async function scanImages(
+  url: string,
+  opts?: ScanImagesOptions,
+): Promise<RawImageScan | { error: string }> {
+  let chrome: any;
+  try {
+    const loader = opts?.loader ?? (() => import("playwright" as string));
+    ({ chromium: chrome } = await loader());
+    const browser = await chrome.launch();
+    try {
+      // Viewport profile split as in captureComponent.
+      const { width, height, ...contextOpts } = resolveViewport(opts?.viewport ?? "desktop");
+      const page = await browser.newPage({ viewport: { width, height }, ...contextOpts });
+      await installSnippetShims(page);
+      await page.goto(url, { waitUntil: "load", timeout: opts?.timeoutMs ?? 45_000 });
+      // "load" can fire before late XHRs settle; fixed settle window.
+      await page.waitForTimeout(3000);
+      await page.evaluate(function () {
+        const g = globalThis as any;
+        return g.document && g.document.fonts ? g.document.fonts.ready : undefined;
+      });
+      await preScroll(page);
+      return (await page.evaluate(IMAGE_SCAN_SNIPPET)) as RawImageScan;
+    } finally {
+      try {
+        await browser.close();
+      } catch {
+        /* keep the primary error */
+      }
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

@@ -17,6 +17,7 @@ import type { DirectoryArgs, DirectoryResult } from "../directory.js";
 import type { DesignBriefInput } from "../design-brief.js";
 import type { GsapStubFn } from "../gsap-stub.js";
 import type { HoverCensusFn } from "../hover-census.js";
+import type { RawImageScan } from "../images.js";
 import type { IndexStatsArgs, IndexStatsResult } from "../index-stats.js";
 import type { NetworkCaptureResult } from "../network-capture.js";
 import type { PageStructure, WaitOpts, WaitStrategy } from "../structure.js";
@@ -164,6 +165,12 @@ export type CaptureComponentFn = (
   url: string,
   opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number },
 ) => Promise<ComponentPack | { error: string }>;
+
+// Raw document.images scan; the handler owns the pure summarizeImages reducer.
+export type AnalyzeImagesFn = (
+  url: string,
+  opts?: { viewport?: ViewportName; maxImages?: number; loader?: () => Promise<any> },
+) => Promise<RawImageScan | { error: string }>;
 
 // Official Annual Awards API peers. Lazy defaults keep annual.ts off the hot
 // path and let handler tests inject shapes without network or cache.
@@ -494,6 +501,11 @@ export interface Handlers {
     maxNodes?: number;
     include?: TokenCategory[];
   }): Promise<ToolResponse>;
+  analyze_images(args: {
+    url: string;
+    viewport?: ViewportName;
+    maxImages?: number;
+  }): Promise<ToolResponse>;
   capture_pose_3d(args: {
     url: string;
     steps?: number;
@@ -545,6 +557,7 @@ export interface CreateHandlersDeps {
   verifyFlowFn?: VerifyFlowFn;
   verifyBuildFn?: VerifyBuildFn;
   captureComponentFn?: CaptureComponentFn;
+  analyzeImagesFn?: AnalyzeImagesFn;
   pose3dFn?: Pose3dFn;
   poseStubFn?: PoseStubFn;
   stackFn?: StackFn;

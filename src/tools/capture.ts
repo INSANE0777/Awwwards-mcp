@@ -144,6 +144,26 @@ export function registerExportDesignTokens(ctx: ToolContext): void {
   );
 }
 
+export function registerAnalyzeImages(ctx: ToolContext): void {
+  ctx.tool(
+    "analyze_images",
+    "Image-delivery audit of a live page: totals by format, loading strategy, responsiveness and dimensions; flags broken, oversized, tiny and missing-alt images with issue samples. The page loads its own assets (no tool-initiated fetches) after load, a 3s settle, fonts and a pre-scroll that triggers lazy loading. Runs on any URL — does not fetch awwwards.com.",
+    {
+      url: z.string().url().describe("Absolute page URL to audit"),
+      viewport: viewportSchema,
+      maxImages: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(200)
+        .describe("Max images scanned in document order (default 200, max 500)"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    (args: any) => asMcpResult(ctx.handlers.analyze_images(args)),
+  );
+}
+
 export function registerCapturePose3d(ctx: ToolContext): void {
   ctx.tool(
     "capture_pose_3d",
