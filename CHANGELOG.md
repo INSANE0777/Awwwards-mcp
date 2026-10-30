@@ -3,7 +3,7 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## Unreleased - v1.15.0
+## v1.15.0 - 2026-10-30
 
 Token export, image-delivery evidence, honest inner-scroll capture, and the MCP
 TypeScript SDK v2 migration with the internal refactor.
