@@ -484,7 +484,7 @@ export function scaffoldMotionManifest(input: unknown): MotionManifestScaffold |
     const root = asRecord(input);
     const bandsRoot = asRecord(root?.bands);
     if (!bandsRoot || !Array.isArray(bandsRoot.bands)) {
-      return { error: "bands: expected the analyze_page_structure result object with bands[]" };
+      return { error: "bands: expected the structure inspector result object with bands[]" };
     }
     const explicit = root?.sections;
     if (explicit !== undefined && explicit !== null && !Array.isArray(explicit)) {

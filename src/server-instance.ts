@@ -4,8 +4,9 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Handlers } from "./server.js";
-import { registerGuarded } from "./tool-profile.js";
+import { envValue, registerGuarded } from "./tool-profile.js";
 import { registerAllTools } from "./tools/index.js";
+import { registerV2Tools, V2_SERVER_INSTRUCTIONS } from "./v2/register.js";
 
 export interface ServerOptions {
   handlers: Handlers;
@@ -27,11 +28,14 @@ Choose tools by domain:
 
 AWWWARDS_MCP_PROFILE=core exposes 12 core tools for the build loop and its discovery helpers; the default full profile exposes the complete set. Optional browser tools need Playwright; audit_url uses an installed Chrome/Edge over CDP instead, and record_site_motion also needs ffmpeg-static. Awwwards requests are rate-limited and cached.`;
 
-/** A fresh McpServer with all 39 tools registered. */
+/** A fresh McpServer with the profile-selected tool surface. */
 export function createServer({ handlers, version }: ServerOptions): McpServer {
+  // v2 is opt-in and replaces the 1.x list entirely: MCP has no aliases, and
+  // registering both surfaces would defeat the reduction. Default stays 1.x.
+  const v2 = envValue(process.env, "PROFILE") === "v2";
   const server = new McpServer(
     { name: "awwwards-mcp", version },
-    { instructions: SERVER_INSTRUCTIONS },
+    { instructions: v2 ? V2_SERVER_INSTRUCTIONS : SERVER_INSTRUCTIONS },
   );
 
   // Every registration goes through the guard: AWWWARDS_MCP_PROFILE=core skips
@@ -52,7 +56,8 @@ export function createServer({ handlers, version }: ServerOptions): McpServer {
     ])) as unknown as (...args: any[]) => void;
   const registerTool = ((...args: any[]) =>
     registerGuarded(server, "registerTool", args)) as unknown as McpServer["registerTool"];
-  registerAllTools({ handlers, tool, registerTool });
+  if (v2) registerV2Tools({ handlers, tool, registerTool });
+  else registerAllTools({ handlers, tool, registerTool });
 
   return server;
 }

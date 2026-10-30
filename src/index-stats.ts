@@ -101,7 +101,7 @@ function sampleState(sample: number): MetricSample {
     ? {
         sample,
         insufficient: true,
-        hint: `Insufficient sample (<${MIN_METRIC_SAMPLE}). Enrich with get_site_details { slugs } and retry.`,
+        hint: `Insufficient sample (<${MIN_METRIC_SAMPLE}). Enrich with site details for the batch { slugs } and retry.`,
       }
     : { sample, insufficient: false };
 }

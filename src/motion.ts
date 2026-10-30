@@ -25,7 +25,7 @@ import { resolveViewport, type ViewportName } from "./viewport.js";
 export const MOTION_FFMPEG_HINT =
   "Motion recording needs ffmpeg-static, which is an optional dependency.\n" +
   "Install it where this server runs (globally works for a global install):  npm install -g ffmpeg-static\n" +
-  "Then retry record_site_motion.";
+  "Then retry the motion recorder.";
 
 // Additive recording evidence (Node-side timestamps only — no page time):
 // windows around the waits/scrolls/hovers/clicks the pass already does, plus

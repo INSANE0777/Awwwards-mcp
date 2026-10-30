@@ -337,7 +337,7 @@ export async function auditUrl(
     return { error: `Invalid URL: ${url}` };
   }
   if (pageUrl.protocol !== "http:" && pageUrl.protocol !== "https:") {
-    return { error: "audit_url only accepts http(s) URLs" };
+    return { error: "The page audit only accepts http(s) URLs" };
   }
   const timeoutMs = clampTimeout(opts.timeoutMs);
   const fetchFn = opts.fetchFn ?? fetch;

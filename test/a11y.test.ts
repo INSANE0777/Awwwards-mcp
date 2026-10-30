@@ -279,7 +279,7 @@ describe("analyzeAccessibility", () => {
       return {};
     };
     expect(await analyzeAccessibility("file:///tmp/page.html", {}, loader)).toEqual({
-      error: "analyze_accessibility only accepts http(s) URLs",
+      error: "The accessibility census only accepts http(s) URLs",
     });
     expect(await analyzeAccessibility("not a url", {}, loader)).toEqual({
       error: "Invalid URL: not a url",

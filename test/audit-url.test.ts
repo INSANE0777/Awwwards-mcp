@@ -326,7 +326,7 @@ describe("auditUrl", () => {
   it("rejects unusable URLs without fetching anything", async () => {
     expect(await auditUrl("not a url")).toEqual({ error: "Invalid URL: not a url" });
     expect(await auditUrl("file:///tmp/x.html")).toEqual({
-      error: "audit_url only accepts http(s) URLs",
+      error: "The page audit only accepts http(s) URLs",
     });
   });
 
