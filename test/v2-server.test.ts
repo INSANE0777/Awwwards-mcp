@@ -55,7 +55,7 @@ describe("v2 server profile", () => {
     expect(V2_SERVER_INSTRUCTIONS).toContain("search_references");
     expect(V2_SERVER_INSTRUCTIONS).toContain("build_motion");
     expect(V2_SERVER_INSTRUCTIONS).toContain("verify_build");
-    expect(V2_SERVER_INSTRUCTIONS).toContain("AWWARDS_MCP_PROFILE=v2");
+    expect(V2_SERVER_INSTRUCTIONS).toContain("AWWWARDS_MCP_PROFILE=v2");
   });
 
   it("keeps the five retained tools identical to 1.x", () => {
@@ -94,5 +94,26 @@ describe("v2 server profile", () => {
     expect(toolNames(serverFor(undefined))).toHaveLength(39);
     expect(toolNames(serverFor("core"))).toHaveLength(12);
     expect(toolNames(serverFor("v2"))).toHaveLength(15);
+  });
+
+  it("honours the profile variable advertised in the instructions", () => {
+    const advertised = /([A-Z_]+)=v2/.exec(V2_SERVER_INSTRUCTIONS)?.[1];
+    expect(advertised).toBe("AWWWARDS_MCP_PROFILE");
+    const savedProfile = process.env.AWWWARDS_MCP_PROFILE;
+    const savedLegacy = process.env.AWARDS_MCP_PROFILE;
+    delete process.env.AWWWARDS_MCP_PROFILE;
+    delete process.env.AWARDS_MCP_PROFILE;
+    process.env[advertised!] = "v2";
+    try {
+      expect(toolNames(createServer({ handlers: {} as any, version: "0.0.0-test" }))).toHaveLength(
+        15,
+      );
+    } finally {
+      delete process.env[advertised!];
+      if (savedProfile === undefined) delete process.env.AWWWARDS_MCP_PROFILE;
+      else process.env.AWWWARDS_MCP_PROFILE = savedProfile;
+      if (savedLegacy === undefined) delete process.env.AWARDS_MCP_PROFILE;
+      else process.env.AWARDS_MCP_PROFILE = savedLegacy;
+    }
   });
 });
