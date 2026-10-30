@@ -167,6 +167,63 @@ describe("AwwwardsClient", () => {
     expect((fetchFn as any).mock.calls.length).toBe(1);
   });
 
+  it("cancels the body of a 500 response before both retries", async () => {
+    const cancelled = vi.fn();
+    const fetchFn = vi.fn(async () => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("error body"));
+        },
+        cancel: cancelled,
+      });
+      return new Response(body, { status: 500 });
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+    });
+    await expect(client.getHtml("/sites/error")).rejects.toThrow(
+      /HTTP 500 for https:\/\/www\.awwwards\.com\/sites\/error/,
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(cancelled).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels the body of a 403 response before throwing BlockedError", async () => {
+    const cancelled = vi.fn();
+    const fetchFn = vi.fn(async () => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("blocked body"));
+        },
+        cancel: cancelled,
+      });
+      return new Response(body, { status: 403 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    await expect(client.getHtml("/sites/blocked")).rejects.toBeInstanceOf(BlockedError);
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it("keeps BlockedError when a 403 body cancel outlasts the deadline", async () => {
+    const cancelled = vi.fn();
+    const fetchFn = vi.fn(async () => {
+      const body = new ReadableStream({
+        cancel: () => {
+          cancelled();
+          return new Promise<void>((resolve) => setTimeout(resolve, 45));
+        },
+      });
+      return new Response(body, { status: 403 });
+    });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch, timeoutMs: 20 });
+    await expect(client.getHtml("/sites/blocked")).rejects.toBeInstanceOf(BlockedError);
+    expect(fetchFn).toHaveBeenCalledOnce();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
   it("retries once on a network error then succeeds", async () => {
     const calls = vi.fn()
       .mockRejectedValueOnce(new Error("ECONNRESET"))
@@ -175,6 +232,149 @@ describe("AwwwardsClient", () => {
     const html = await client.getHtml("/websites/");
     expect(html).toContain("card-site");
     expect(calls.mock.calls.length).toBe(2);
+  });
+
+  it.each([
+    "/elements/",
+    "/elements",
+    "/elements/?page=2",
+    "/elements?page=2",
+    "/elements/footer/",
+    "/elements/%2e%2e%2fsites/",
+    "https://www.awwwards.com/elements/?page=2",
+    "/%65lements/",
+    "/%2565lements/",
+    "/%65lements/%FF",
+    "/%25252565lements/",
+    "/x/%2e%2e/elements/",
+    "/%65lements%5Cfooter",
+    "/elements%5c..%5csites/",
+    "/%65lements%5c..%5csites/",
+  ])("rejects robots-disallowed %s before any fetch", async (path) => {
+    const fetchFn = fakeFetch(listingHtml());
+    const client = new AwwwardsClient({ fetchFn });
+    await expect(client.getHtml(path)).rejects.toThrow(/robots-disallowed \/elements\/\*/);
+    expect((fetchFn as any).mock.calls.length).toBe(0);
+  });
+
+  it("fails closed on encoding deeper than eight rounds", async () => {
+    const path = "/%252525252525252565lements/";
+    const fetchFn = fakeFetch(listingHtml());
+    const client = new AwwwardsClient({ fetchFn });
+    await expect(client.getHtml(path)).rejects.toThrow(/over-encoded path/);
+    expect((fetchFn as any).mock.calls.length).toBe(0);
+  });
+
+  it("refuses a redirect into the element gallery before fetching the destination", async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { Location: "/elements/footer/" } }),
+    ) as unknown as typeof fetch;
+    const client = new AwwwardsClient({ fetchFn });
+    await expect(client.getHtml("/sites/redirect")).rejects.toThrow(
+      /robots-disallowed \/elements\/\*/,
+    );
+    expect((fetchFn as any).mock.calls.length).toBe(1);
+    expect((fetchFn as any).mock.calls[0][0]).toBe("https://www.awwwards.com/sites/redirect");
+  });
+
+  it.each([
+    "/%65lements/%FF",
+    "/%25252565lements/",
+    "/elements/%2e%2e%2fsites/",
+    "/elements%5c..%5csites/",
+    "/%65lements%5c..%5csites/",
+  ])(    "refuses a redirect to encoded or traversing gallery path %s",
+    async (location) => {
+      const fetchFn = vi.fn(async () =>
+        new Response(null, { status: 302, headers: { Location: location } }),
+      ) as unknown as typeof fetch;
+      const client = new AwwwardsClient({ fetchFn });
+      await expect(client.getHtml("/sites/redirect")).rejects.toThrow(
+        /robots-disallowed \/elements\/\*/,
+      );
+      expect((fetchFn as any).mock.calls.length).toBe(1);
+    },
+  );
+
+  it("cancels the redirect body it refuses to follow", async () => {
+    const cancelled = vi.fn();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("nonempty"));
+      },
+      cancel: cancelled,
+    });
+    const fetchFn = vi.fn(async () =>
+      new Response(body, { status: 302, headers: { Location: "/elements/footer/" } }),
+    ) as unknown as typeof fetch;
+    const client = new AwwwardsClient({ fetchFn });
+    await expect(client.getHtml("/sites/redirect")).rejects.toThrow(
+      /robots-disallowed \/elements\/\*/,
+    );
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a malformed redirect Location and cancels every body", async () => {
+    const cancelled = vi.fn();
+    const fetchFn = vi.fn(async () => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("nonempty"));
+        },
+        cancel: cancelled,
+      });
+      return new Response(body, { status: 302, headers: { Location: "http://[" } });
+    }) as unknown as typeof fetch;
+    const client = new AwwwardsClient({
+      fetchFn,
+      rateLimiter: new RateLimiter(0),
+    });
+    await expect(client.getHtml("/sites/redirect")).rejects.toThrow(
+      /Invalid redirect Location "http:\/\/\["/,
+    );
+    // One refused redirect per attempt; each response body must be released.
+    expect(cancelled).toHaveBeenCalledTimes(2);
+  });
+
+  it("acquires the rate limiter before every redirect hop", async () => {
+    const acquire = vi.fn(async () => {});
+    const limiter = { acquire } as unknown as RateLimiter;
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { Location: "/sites/a" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { Location: "/sites/b" } }),
+      )
+      .mockResolvedValueOnce(new Response(listingHtml(), { status: 200 }));
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: limiter,
+    });
+    await client.getHtml("/sites/start");
+    expect(acquire).toHaveBeenCalledTimes(3);
+  });
+
+  it("follows a normal redirect to the final page", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { Location: "/sites/final" } }),
+      )
+      .mockResolvedValueOnce(new Response(listingHtml(), { status: 200 }));
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const html = await client.getHtml("/sites/ok");
+    expect(html).toContain("card-site");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn.mock.calls[1][0]).toBe("https://www.awwwards.com/sites/final");
+  });
+
+  it("still fetches inspiration, site, and non-gallery elements-prefixed pages", async () => {
+    const fetchFn = fakeFetch(listingHtml());
+    const client = new AwwwardsClient({ fetchFn });
+    await client.getHtml("/inspiration/x/");
+    await client.getHtml("/sites/x");
+    await client.getHtml("/elements-other");
+    expect((fetchFn as any).mock.calls.length).toBe(3);
   });
 
   it("getAsset rejects with the composed HTTP label on non-ok CDN responses", async () => {
@@ -212,6 +412,102 @@ describe("AwwwardsClient request timeouts", () => {
     expect(signals).toHaveLength(2);
     expect(signals[0]).not.toBe(signals[1]);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it("waits for the rate limiter outside the network deadline", async () => {
+    const abortedAtCall: boolean[] = [];
+    const fetchFn = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      abortedAtCall.push((init!.signal as AbortSignal).aborted);
+      return new Response("ok");
+    });
+    const client = new AwwwardsClient({
+      rateLimiter: {
+        acquire: () => new Promise<void>((resolve) => setTimeout(resolve, 35)),
+      } as unknown as RateLimiter,
+      fetchFn: fetchFn as unknown as typeof fetch,
+      timeoutMs,
+    });
+    await expect(client.getHtml("/sites/ok")).resolves.toBe("ok");
+    expect(abortedAtCall).toEqual([false]);
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("a timed-out redirect hop starts no further fetch before the retry", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { Location: "/sites/hop2" } }),
+      )
+      .mockImplementation(stalled);
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch, timeoutMs });
+    const result = expect(client.getHtml("/sites/start")).rejects.toThrow(
+      /Timed out fetching page from https:\/\/www\.awwwards\.com\/sites\/start after 20ms/,
+    );
+    // Hop 2 starts after the 1s limiter wait and times out 20ms later.
+    await vi.advanceTimersByTimeAsync(1021);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    // Only the outer retry (after its own limiter wait) fetches again.
+    await vi.advanceTimersByTimeAsync(1000);
+    await result;
+  });
+
+  it("does not follow a redirect whose body cancel outlasts the hop deadline", async () => {
+    const fetchFn = vi.fn((url: string | URL | Request) => {
+      if (String(url).endsWith("/sites/dest")) {
+        return Promise.resolve(new Response("destination"));
+      }
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("nonempty"));
+        },
+        cancel: () => new Promise<void>((resolve) => setTimeout(resolve, 45)),
+      });
+      return Promise.resolve(
+        new Response(body, { status: 302, headers: { Location: "/sites/dest" } }),
+      );
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+      timeoutMs,
+    });
+    await expect(client.getHtml("/sites/start")).rejects.toThrow(
+      /Timed out fetching page from https:\/\/www\.awwwards\.com\/sites\/start after 20ms/,
+    );
+    // Both attempts fetch only the original URL; the destination is never reached.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(
+      fetchFn.mock.calls.filter(([url]) => String(url).endsWith("/sites/dest")),
+    ).toHaveLength(0);
+  });
+
+  it("still rejects at the deadline when a redirect body cancel never settles", async () => {
+    const fetchFn = vi.fn((url: string | URL | Request) => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("nonempty"));
+        },
+        cancel: () => new Promise<void>(() => {}),
+      });
+      if (String(url).endsWith("/sites/dest")) {
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(body, { status: 302, headers: { Location: "/sites/dest" } }),
+      );
+    });
+    const client = new AwwwardsClient({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      rateLimiter: new RateLimiter(0),
+      timeoutMs,
+    });
+    await expect(client.getHtml("/sites/start")).rejects.toThrow(
+      /Timed out fetching page from https:\/\/www\.awwwards\.com\/sites\/start after 20ms/,
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(
+      fetchFn.mock.calls.filter(([url]) => String(url).endsWith("/sites/dest")),
+    ).toHaveLength(0);
   });
 
   it("times out an HTML body read and retries once with a fresh signal", async () => {

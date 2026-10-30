@@ -6,12 +6,18 @@ import { Cache } from "./cache.js";
 import { runIndexer, IndexLockError } from "./indexer.js";
 
 // npm run index              — sites crawl (default)
-// npm run index -- --elements          — elements gallery, page 1 only
-// npm run index -- --elements [pages]  — elements gallery, N pages ("all" =
-//                                        follow pagination until exhausted)
-const elementsArg = process.argv.indexOf("--elements");
-const elements = elementsArg !== -1;
-const pagesArg = elements ? process.argv[elementsArg + 1] : undefined;
+// The --elements gallery crawl is retired: robots.txt disallows /elements/*.
+// new_winners backfills elements from each new winner's own site page.
+const elementsRequested = process.argv.some(
+  (arg) => arg === "--elements" || arg.startsWith("--elements="),
+);
+if (elementsRequested) {
+  console.error(
+    "awwwards-index: --elements is retired — robots.txt disallows /elements/*, so the element gallery crawl is disabled. " +
+      "new_winners now backfills elements from each new winner's own site page; cached gallery records stay searchable.",
+  );
+  process.exit(2);
+}
 
 const cacheRoot = process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
 let cache: Cache;
@@ -24,16 +30,6 @@ try {
 
 const client = new AwwwardsClient();
 try {
-  if (elements) {
-    const { runElementsIndexer } = await import("./elements-indexer.js");
-    const maxPages = pagesArg === undefined ? 1
-      : pagesArg === "all" ? Infinity
-      : Math.max(1, Number.parseInt(pagesArg, 10) || 1);
-    // Category facets only for non-bootstrap crawls: ~46 extra 1/s fetches.
-    const res = await runElementsIndexer({ client, cache, maxPages, withCategories: maxPages > 1 });
-    console.error(`awwwards-index: elements done — ${res.itemsIndexed} item pages indexed${res.skipped ? " (skipped: fresh)" : ""}`);
-    process.exit(0);
-  }
   const result = await runIndexer({ client, cache, log: (m) => console.error(m) });
   console.error(
     `awwwards-index: done — ${result.pagesDone} pages crawled, ${result.skipped} skipped, ` +

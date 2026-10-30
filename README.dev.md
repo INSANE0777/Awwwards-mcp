@@ -241,7 +241,7 @@ These are hard-won; check for them before "simplifying":
 - stdout is the MCP JSON-RPC channel — every log/notice goes to stderr.
 - New crawler code must keep the politeness contract: `/websites/…` paths
   only, 1 req/s, no query-string pagination (`/tag/`, `/search-websites`,
-  `/elements/*` etc. are robots-disallowed and never fetched).
+  `/elements/*` etc. are robots-disallowed and have not been fetched since v1.15.2).
 
 ## Contributing
 

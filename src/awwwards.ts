@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 export const BASE_URL = "https://www.awwwards.com";
 export const ASSETS_URL = "https://assets.awwwards.com";
 
@@ -97,6 +99,72 @@ export class BlockedError extends Error {
   }
 }
 
+class PolitenessError extends Error {}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+// Release a response body we will not read; some bodies throw on cancel.
+async function cancelBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {}
+}
+
+// Decodes %XX byte-wise and never throws, so malformed escapes cannot fail open.
+// Shortcut: decodes bytes as Latin-1, not UTF-8 — enough for path comparison.
+function decodePercentEscapes(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const hex = value.slice(i + 1, i + 3);
+    if (value[i] === "%" && /^[0-9a-f]{2}$/i.test(hex)) {
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 2;
+    } else out += value[i];
+  }
+  return out;
+}
+
+// Refuse robots-disallowed gallery paths by raw, decoded, unbackslashed and
+// normalized pathname, so percent-encoded, deep-encoded, traversing and
+// redirected variants cannot reach /elements/*. Eight rounds cover any realistic
+// encoding; anything still changing after that is refused.
+function assertAllowedPagePath(rawUrl: string, original: string): void {
+  const rawPathname = new URL(rawUrl, BASE_URL).pathname;
+  let decoded = rawPathname;
+  for (let i = 0; i < 8; i++) {
+    const next = decodePercentEscapes(decoded);
+    if (next === decoded) break;
+    decoded = next;
+    if (i === 7) {
+      throw new PolitenessError(
+        `Refusing over-encoded path: ${original}. ` +
+          "Gallery records are cache-only; new elements come from site pages.",
+      );
+    }
+  }
+  // The raw pathname stays a candidate: decoding or normalization must never
+  // turn a forbidden /elements prefix into an allowed path. Backslashes are
+  // flattened before normalization because posix.normalize treats "\..\" as
+  // one segment, which would let /elements%5c..%5csites/ normalize to /sites/.
+  const unbackslashed = decoded.replace(/\\/g, "/");
+  const candidates = [
+    rawPathname,
+    decoded,
+    unbackslashed,
+    posix.normalize(unbackslashed),
+  ];
+  for (const candidate of candidates) {
+    const lower = candidate.toLowerCase();
+    if (lower === "/elements" || lower.startsWith("/elements/")) {
+      throw new PolitenessError(
+        `Refusing robots-disallowed /elements/* path: ${original}. ` +
+          "Gallery records are cache-only; new elements come from site pages.",
+      );
+    }
+  }
+}
+
 export class RateLimiter {
   private last = 0;
   private chain: Promise<void> = Promise.resolve();
@@ -160,26 +228,87 @@ export class AwwwardsClient {
     }
   }
 
+  // Page fetch with manual redirects. The limiter wait sits outside the per-hop
+  // network/body deadline, and a timed-out hop never starts another fetch.
+  private async fetchPage(url: string, label: string): Promise<string> {
+    let currentUrl = url;
+    let redirects = 0;
+    for (;;) {
+      await this.rateLimiter.acquire();
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(
+            `Timed out fetching ${label} from ${currentUrl} after ${this.timeoutMs}ms ` +
+              "(including response body); check connectivity and try again later.",
+          ));
+          controller.abort();
+        }, this.timeoutMs);
+      });
+      try {
+        const res = await Promise.race([
+          this.fetchFn(currentUrl, {
+            headers: { "User-Agent": USER_AGENT },
+            redirect: "manual",
+            signal: controller.signal,
+          }),
+          timeout,
+        ]);
+        if (REDIRECT_STATUSES.has(res.status)) {
+          const location = res.headers.get("location");
+          if (!location) {
+            await Promise.race([cancelBody(res), timeout]);
+            throw new Error(
+              `HTTP ${res.status} redirect without a Location header fetching ${label} from ${currentUrl}`,
+            );
+          }
+          let next: string;
+          try {
+            next = new URL(location, currentUrl).toString();
+          } catch {
+            await Promise.race([cancelBody(res), timeout]);
+            throw new Error(
+              `Invalid redirect Location "${location}" fetching ${label} from ${currentUrl}`,
+            );
+          }
+          // Cleanup shares the hop deadline: a slow or hung cancel must reject
+          // here, never let the loop continue to the next hop.
+          await Promise.race([cancelBody(res), timeout]);
+          assertAllowedPagePath(next, currentUrl);
+          if (++redirects > MAX_REDIRECTS) {
+            throw new Error(`Too many redirects fetching ${label} from ${url}`);
+          }
+          currentUrl = next;
+          continue;
+        }
+        if (!res.ok) {
+          // Preserve the HTTP status: body cleanup is best-effort and must
+          // never turn a block into a retryable timeout.
+          void cancelBody(res);
+          if (res.status === 403 || res.status === 429) {
+            throw new BlockedError(currentUrl, res.status);
+          }
+          throw new Error(`HTTP ${res.status} for ${currentUrl}`);
+        }
+        return await Promise.race([res.text(), timeout]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+  }
+
   // Rate-limited page fetch with one retry on transient failures.
-  // Blocks (403/429) are never retried.
+  // Blocks (403/429) and robots refusals are never retried.
   async getHtml(path: string): Promise<string> {
     const url = path.startsWith("http") ? path : BASE_URL + path;
+    assertAllowedPagePath(url, path);
     let lastErr: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await this.rateLimiter.acquire();
-        return await this.fetchWithTimeout(
-          url,
-          "page",
-          { headers: { "User-Agent": USER_AGENT }, redirect: "follow" },
-          async (res) => {
-            if (res.status === 403 || res.status === 429) throw new BlockedError(url, res.status);
-            if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-            return res.text();
-          },
-        );
+        return await this.fetchPage(url, "page");
       } catch (err) {
-        if (err instanceof BlockedError) throw err;
+        if (err instanceof BlockedError || err instanceof PolitenessError) throw err;
         lastErr = err;
       }
     }
