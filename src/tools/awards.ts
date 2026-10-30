@@ -139,7 +139,7 @@ export function registerGetSiteElements(ctx: ToolContext): void {
 export function registerSearchElements(ctx: ToolContext): void {
   ctx.tool(
     "search_elements",
-    "Search Awwwards' curated element gallery — award-grade UI components (footers, menus, loaders, transitions, micro-interactions…). " +
+    "Search Awwwards UI components — award-grade footers, menus, loaders, transitions, micro-interactions… — across cached gallery records plus source:\"site\" records derived from new SOTD winners' own Elements sections. It does not crawl the /elements/* gallery (robots.txt disallows it). " +
       "Usage: pass query text; category and stack combine as AND when both are provided; each result carries its element slug, source and parent project identifiers.",
     {
       query: z.string().describe("Free text: what the component is or does").optional(),
