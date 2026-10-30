@@ -3,6 +3,20 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.15.1 - 2026-10-30
+
+Tool-definition clarity: descriptions, parameter semantics and published server
+instructions. No handler, type, default, annotation or profile changes.
+
+### Tool metadata
+
+- `search_sites` documents AND filters, `count` (6, max 12), one-based `page` over the local matched set (upstream query-string pagination is not crawled), live color requests, routing to directory/elements/collections/winners/details, and both fallback paths: a failed top-up keeps the cached page window; an outer failure serves stale page 1 with color unchecked.
+- `create_design_brief` documents the cited Markdown + versioned JSON output, cache-first detail/element/Motion DNA evidence, missing-detail fetches, the optional browser structure pass, all eight parameters, and that `audience` is carried into the summary rather than filtering evidence.
+- `verify_flow` documents top-level and per-action fields (`y` is an absolute window position), the 150 ms settle, `load` + 3 s vs `networkidle`, the Playwright dependency, and routing to `verify_build`/`build_project`.
+- `verify_build.waitStrategy`, `analyze_bundle.url`, `analyze_scroll_map`/`analyze_hover_census` `waitStrategy` (both default `networkidle`), `search_motion.limit`, `search_elements.limit` and `watch_site.action` are documented; `search_elements` no longer claims category and stack are mutually exclusive.
+- Published `SERVER_INSTRUCTIONS`: full-profile loop, routing groups, evidence-not-grade policy, core/full profile, CDP vs Playwright, and the ffmpeg requirement.
+- New `test/tool-descriptions.test.ts` pins the published schema text, defaults and optionality through `createServer`.
+
 ## v1.15.0 - 2026-10-30
 
 Token export, image-delivery evidence, honest inner-scroll capture, and the MCP
