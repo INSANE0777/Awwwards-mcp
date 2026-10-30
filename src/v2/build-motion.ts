@@ -13,13 +13,17 @@ export const buildMotionRequestSchema = z.discriminatedUnion("kind", [
       scrollCensus: z
         .any()
         .optional()
-        .describe("Optional ScrollCensus from analyze_motion (kind=scroll)"),
+        .describe("Optional full ScrollCensus from analyze_motion (kind=scroll, compact=false)"),
     })
     .strict(),
   z
     .object({
       kind: z.literal("gsap_stub"),
-      scrollCensus: z.any().describe("ScrollCensus JSON from analyze_motion (kind=scroll)"),
+      scrollCensus: z
+        .any()
+        .describe(
+          "Full ScrollCensus JSON from analyze_motion (kind=scroll): anims[] + gsapTriggers[] required; compact census output is rejected",
+        ),
       poseGrid: z.any().optional().describe("Optional PoseGrid JSON from capture_page (kind=pose)"),
     })
     .strict(),
@@ -29,7 +33,9 @@ export const buildMotionRequestSchema = z.discriminatedUnion("kind", [
       bands: z.any().describe("inspect_page (kind=structure) result (must carry bands[])"),
       scrollCensus: z
         .any()
-        .describe("analyze_motion (kind=scroll) result (anims[] + gsapTriggers[] required)"),
+        .describe(
+          "Full analyze_motion (kind=scroll, compact=false) result: anims[] + gsapTriggers[] required; compact census output is rejected",
+        ),
       sections: z
         .array(z.object({ label: z.string().min(1), selector: z.string().optional() }))
         .max(60)

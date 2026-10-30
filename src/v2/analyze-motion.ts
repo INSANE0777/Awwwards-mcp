@@ -38,7 +38,9 @@ export const analyzeMotionRequestSchema = z.discriminatedUnion("kind", [
       compact: z
         .boolean()
         .optional()
-        .describe("token-diet summary: keyframes/props/durations and scrubCurves replaced by counts"),
+        .describe(
+          "token-diet summary: keyframes/props/durations and scrubCurves replaced by counts; it cannot feed build_motion (anims[] is omitted) — use compact=false for that handoff",
+        ),
     })
     .strict(),
   z

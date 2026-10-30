@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { buildGsapStub } from "../../gsap-stub.js";
-import { scaffoldMotionManifest } from "../../motion-manifest.js";
+import { censusInputError, poseCensusError, scaffoldMotionManifest, unwrapScrollCensus } from "../../motion-manifest.js";
 import type { PoseGrid } from "../../pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "../../pose-stub.js";
 import type { ScrollCensus } from "../../census.js";
@@ -22,6 +22,39 @@ export async function build_pose_stub(ctx: HandlerContext, args: {
         isError: true,
       };
     }
+    // An empty grid renders a stub with no frames at all: no scroll-driven
+    // canvas evidence, so point at the census path instead.
+    const snapshots = args.poseGrid.snapshots;
+    if (
+      !Array.isArray(snapshots) ||
+      snapshots.length === 0 ||
+      !snapshots.every(
+        (s) =>
+          s &&
+          Array.isArray(s.frames) &&
+          s.frames.length > 0 &&
+          s.frames.every(
+            (f) => f && typeof f.dataUrlPng === "string" && f.dataUrlPng.length > 0,
+          ),
+      )
+    ) {
+      return {
+        content: [
+          text(
+            "poseGrid has no captured frames (the page had no canvas); build a GSAP stub from the scroll census instead.",
+          ),
+        ],
+        isError: true,
+      };
+    }
+    // The optional census feeds poseSuggestions, which indexes counts[] and
+    // anims[] directly. Validate and unwrap before the notes path.
+    let poseCensus: ScrollCensus | undefined;
+    if (args.scrollCensus !== undefined) {
+      const censusError = poseCensusError(args.scrollCensus);
+      if (censusError) return { content: [text(censusError)], isError: true };
+      poseCensus = unwrapScrollCensus(args.scrollCensus) as ScrollCensus;
+    }
     const build =
       ctx.deps.poseStubFn ??
       ((grid: PoseGrid, census?: ScrollCensus) => ({
@@ -41,7 +74,7 @@ export async function build_pose_stub(ctx: HandlerContext, args: {
             : []),
         ],
       }));
-    return { content: [text(JSON.stringify(build(args.poseGrid, args.scrollCensus), null, 1))] };
+    return { content: [text(JSON.stringify(build(args.poseGrid, poseCensus), null, 1))] };
   } catch (err) {
     return errorResponse(err);
   }
@@ -70,12 +103,17 @@ export async function build_gsap_stub(ctx: HandlerContext, args: {
   poseGrid?: unknown;
 }): Promise<ToolResponse> {
   try {
+    // Builders need the full census; a compact summary must be re-captured.
+    // Accept the verify_build dump shape by unwrapping before the builder.
+    const census = unwrapScrollCensus(args.scrollCensus);
+    const censusError = censusInputError(census);
+    if (censusError) return { content: [text(censusError)], isError: true };
     const build =
       ctx.deps.gsapStubFn ??
       ((a: { scrollCensus: unknown; poseGrid?: unknown }) => ({
         stubHtml: buildGsapStub(a.poseGrid, a.scrollCensus),
       }));
-    return { content: [text(JSON.stringify(build(args), null, 1))] };
+    return { content: [text(JSON.stringify(build({ ...args, scrollCensus: census }), null, 1))] };
   } catch (err) {
     return errorResponse(err);
   }

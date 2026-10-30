@@ -108,6 +108,7 @@ export async function runCapturePage(
         url: request.url,
         ...(request.selector !== undefined ? { selector: request.selector } : {}),
         ...(request.maxNodes !== undefined ? { maxNodes: request.maxNodes } : {}),
+        maxDepth: 12,
         viewport: request.viewport,
         ...(request.compact !== undefined ? { compact: request.compact } : {}),
       });
@@ -134,7 +135,7 @@ export async function runCapturePage(
 export function registerCapturePage(ctx: ToolContext): void {
   ctx.tool(
     "capture_page",
-    "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), or recording (motion filmstrip video of preloader, scroll and hover). Dependencies differ: all four need the optional Playwright dependency; recording also needs ffmpeg-static.",
+    "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), or recording (motion filmstrip video of preloader, scroll and hover). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all four need the optional Playwright dependency; recording also needs ffmpeg-static.",
     capturePageInputSchema,
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: { request: CapturePageRequest }) =>

@@ -49,6 +49,7 @@ function census(): ScrollCensus {
     ],
     svgStrokes: [],
     nativeScrollTimelines: 0,
+    gsapTriggers: [],
     reducedMotion: false,
   };
 }
@@ -130,6 +131,85 @@ describe("pose handlers", () => {
     });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("pose-grid-v1");
+  });
+
+  it("build_pose_stub rejects an empty snapshot list", async () => {
+    const h = createHandlers(deps({}));
+    const res = await h.build_pose_stub({
+      poseGrid: { ...grid(), snapshots: [] },
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("poseGrid has no captured frames");
+  });
+
+  it("build_pose_stub rejects snapshots whose frames are all empty", async () => {
+    const h = createHandlers(deps({}));
+    const empty = grid();
+    const res = await h.build_pose_stub({
+      poseGrid: { ...empty, snapshots: empty.snapshots.map((s) => ({ ...s, frames: [] })) },
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("build a GSAP stub from the scroll census instead");
+  });
+
+  it("build_pose_stub rejects undefined frames and blank frame URLs", async () => {
+    const h = createHandlers(deps({}));
+    const empty = grid();
+    for (const frames of [undefined, [{ label: "canvas", dataUrlPng: "" }]]) {
+      const res = await h.build_pose_stub({
+        poseGrid: {
+          ...empty,
+          snapshots: empty.snapshots.map((s) => ({ ...s, frames: frames as any })),
+        },
+      });
+      expect(res.isError).toBe(true);
+      expect((res.content[0] as any).text).toContain("poseGrid has no captured frames");
+    }
+  });
+
+  it("build_pose_stub rejects a mixed null snapshot", async () => {
+    const h = createHandlers(deps({}));
+    const valid = grid();
+    const res = await h.build_pose_stub({
+      poseGrid: {
+        ...valid,
+        snapshots: [valid.snapshots[0]!, null as any, ...valid.snapshots.slice(1)],
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("poseGrid has no captured frames");
+  });
+
+  it("build_pose_stub accepts a full census without gsapTriggers", async () => {
+    const h = createHandlers(deps({}));
+    const { gsapTriggers, ...partial } = census();
+    const res = await h.build_pose_stub({
+      poseGrid: grid(),
+      scrollCensus: partial as ScrollCensus,
+    });
+    expect(res.isError).toBeUndefined();
+    expect((res.content[0] as any).text).toContain("suggestions(st)=3");
+  });
+
+  it("build_pose_stub unwraps a full census nested under scrollCensus", async () => {
+    const h = createHandlers(deps({}));
+    const res = await h.build_pose_stub({
+      poseGrid: grid(),
+      scrollCensus: { scrollCensus: census() } as unknown as ScrollCensus,
+    });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.notes).toContain("suggestions(st)=3");
+  });
+
+  it("build_pose_stub rejects a compact census instead of crashing poseSuggestions", async () => {
+    const h = createHandlers(deps({}));
+    const res = await h.build_pose_stub({
+      poseGrid: grid(),
+      scrollCensus: { counts: {}, animCount: 0 } as unknown as ScrollCensus,
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("scrollCensus is a compact summary");
   });
 
   it("build_pose_stub returns stubHtml with deterministic notes", async () => {

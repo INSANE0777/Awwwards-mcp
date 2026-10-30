@@ -547,7 +547,7 @@ describe("runCapturePage", () => {
     const result = await runCapturePage(handlers as any, request);
 
     expect(handlers.capture_component).toHaveBeenCalledTimes(1);
-    expect(handlers.capture_component).toHaveBeenCalledWith({ url, viewport: "desktop" });
+    expect(handlers.capture_component).toHaveBeenCalledWith({ url, viewport: "desktop", maxDepth: 12 });
     expect(handlers.capture_live_site).not.toHaveBeenCalled();
     expect(handlers.capture_pose_3d).not.toHaveBeenCalled();
     expect(handlers.record_site_motion).not.toHaveBeenCalled();
@@ -629,6 +629,7 @@ describe("runCapturePage", () => {
       url,
       selector: "#hero",
       maxNodes: 800,
+      maxDepth: 12,
       viewport: "desktop",
       compact: true,
     });

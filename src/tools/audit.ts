@@ -99,7 +99,7 @@ export function registerVerifyFlow(ctx: ToolContext): void {
 export function registerVerifyBuild(ctx: ToolContext): void {
   ctx.tool(
     "verify_build",
-    "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
+    "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Band labels are #id.firstClass, so give your rebuild's sections stable ids/classes; anonymous rebuild labels (empty/body, or duplicates) fall back to tag+height matching. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build → verify → fix → re-verify. Reference can be an award site found via search_sites, compared read-only via compare_sites.",
     {
       buildUrl: z.string().url().describe("URL of the build to verify"),
       referenceUrl: z.string().url().describe("URL of the reference site to match"),
