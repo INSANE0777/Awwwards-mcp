@@ -557,7 +557,7 @@ export async function resolveNominee(
   const category = records.find((c) => c.nominees.includes(id));
   if (!category) {
     throw new Error(
-      `Unknown annual nominee id: ${id}. Use get_annual_nominees to find its id, ` +
+      `Unknown annual nominee id: ${id}. Use the annual nominees tool to find its id, ` +
         "or pass the full /api/annual/nominees/... path.",
     );
   }
@@ -643,6 +643,6 @@ export async function getNomineeBySlug(
   throw new Error(
     `No nominee with slug "${slug}" in ${categorySlug} among ${cachedIds.size} cached ` +
       `and ${attempted} uncached entries. ` +
-      "Find its id with get_annual_nominees (offset/limit), then call get_annual_nominee with that id.",
+      "Find its id with the annual nominees tool (offset/limit), then request that nominee by id.",
   );
 }

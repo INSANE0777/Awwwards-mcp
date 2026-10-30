@@ -140,7 +140,7 @@ describe("getIndexStats", () => {
       sample: 2,
       insufficient: true,
     });
-    expect(stats.colors.hint).toContain("get_site_details");
+    expect(stats.colors.hint).toContain("site details");
 
     expect(stats.scores).toMatchObject({
       n: 2,
@@ -158,7 +158,7 @@ describe("getIndexStats", () => {
     });
 
     for (const metric of [stats.colors, stats.scores, stats.motionLibs]) {
-      expect(metric.hint).toContain("get_site_details");
+      expect(metric.hint).toContain("site details");
       expect(metric.hint).toContain(`<${MIN_METRIC_SAMPLE}`);
     }
     expect(MIN_METRIC_SAMPLE).toBe(30);

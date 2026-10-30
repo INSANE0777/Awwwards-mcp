@@ -59,7 +59,7 @@ export const ENV_FIX_HINTS = {
   ffmpeg:
     "awwwards-mcp: motion recording needs ffmpeg-static - run:  npm install -g ffmpeg-static  (restart your agent afterward)\n",
   webcrack:
-    "awwwards-mcp: optional - analyze_bundle de-obfuscation/unpack mode needs webcrack - run:  npm install -g webcrack  (restart your agent afterward; bundle fetch/grep works without it)\n",
+    "awwwards-mcp: optional - bundle de-obfuscation/unpack mode needs webcrack - run:  npm install -g webcrack  (restart your agent afterward; bundle fetch/grep works without it)\n",
 } as const;
 
 function run(

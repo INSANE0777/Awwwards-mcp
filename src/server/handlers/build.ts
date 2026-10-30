@@ -17,7 +17,7 @@ export async function build_pose_stub(ctx: HandlerContext, args: {
     if (args.poseGrid?.id !== "pose-grid-v1") {
       return {
         content: [
-          text("poseGrid.id must be \"pose-grid-v1\" — re-capture with capture_pose_3d."),
+          text("poseGrid.id must be \"pose-grid-v1\" - re-capture with the pose-capture tool."),
         ],
         isError: true,
       };
