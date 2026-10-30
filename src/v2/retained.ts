@@ -35,7 +35,7 @@ export function registerCreateDesignBriefV2(ctx: ToolContext): void {
 export function registerBuildProjectV2(ctx: ToolContext): void {
   ctx.tool(
     "build_project",
-    "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. Pairs with verify_build: build -> convert -> verify.",
+    "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. The output is source, not a servable site: install and build it (npm install && npm run build) and serve the generated output (Vite/Astro dist, Next .next with next start), not the raw scaffold directory. Pairs with verify_build: build -> convert -> verify.",
     {
       htmlPath: z.string().describe("Local path to the single-file rebuild html to convert"),
       target: z.enum(["vite", "astro", "next"]).describe("Framework of the generated project"),
@@ -50,7 +50,7 @@ export function registerBuildProjectV2(ctx: ToolContext): void {
 export function registerVerifyBuildV2(ctx: ToolContext): void {
   ctx.tool(
     "verify_build",
-    "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build -> verify -> fix -> re-verify. Reference can be an award site found via search_references, compared read-only via get_reference.",
+    "Compare a built site against a reference (an Awwwards winner, a client's old site, any URL): band-structure match + motion fingerprint similarity, with a pass/warn/fail verdict and evidence lines. Band labels are #id.firstClass, so give your rebuild's sections stable ids/classes; anonymous rebuild labels (empty/body, or duplicates) fall back to tag+height matching. compact=true returns the verdict, overall and band scores, band counts (matched, refOnly, buildOnly) and motion score; omit it for evidence lines. Closes the design loop: build -> verify -> fix -> re-verify. Reference can be an award site found via search_references, compared read-only via get_reference.",
     {
       buildUrl: z.string().url().describe("URL of the build to verify"),
       referenceUrl: z.string().url().describe("URL of the reference site to match"),

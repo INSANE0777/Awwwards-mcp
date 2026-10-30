@@ -138,6 +138,103 @@ describe("compareBands", () => {
     expect(r.refOnly).toEqual([]);
     expect(r.buildOnly).toEqual([]);
   });
+
+  it("matches duplicate/generic labels by tag+height despite reversed order", () => {
+    // Both ref rows are labelled "body" (generic + duplicate), so the label
+    // carries no identity. The build rows are reversed and only heights pair
+    // them; a bg+tag row proves the closest height was consumed, not the first.
+    const r = compareBands(
+      [
+        { label: "body", bg: null, tag: "section", height: 900 },
+        { label: "body", bg: "#abcdef", tag: "section", height: 1600 },
+      ],
+      [
+        { label: "section", bg: "#abcdef", tag: "section", height: 1600 },
+        { label: "section", bg: null, tag: "section", height: 900 },
+      ]
+    );
+    expect(r.matched).toHaveLength(2);
+    expect(r.refOnly).toEqual([]);
+    expect(r.buildOnly).toEqual([]);
+  });
+
+  it("does not use the height fallback for non-duplicate, non-generic labels", () => {
+    const r = compareBands(
+      [{ label: "hero", bg: null, tag: "section", height: 900 }],
+      [{ label: "intro", bg: null, tag: "section", height: 900 }]
+    );
+    expect(r.matched).toEqual([]);
+    expect(r.refOnly).toEqual(["hero"]);
+    expect(r.buildOnly).toEqual(["intro"]);
+  });
+
+  it("does not match anonymous labels when both explicit backgrounds differ", () => {
+    const r = compareBands(
+      [{ label: "", bg: "#111111", tag: "div", height: 900 }],
+      [{ label: "", bg: "#222222", tag: "div", height: 900 }]
+    );
+    expect(r.matched).toEqual([]);
+    expect(r.refOnly).toEqual(["(unlabeled)"]);
+    expect(r.buildOnly).toEqual([""]);
+  });
+
+  it("picks the closest generic build height, not the first candidate", () => {
+    const r = compareBands(
+      [{ label: "", bg: null, tag: "div", height: 900 }],
+      [
+        { label: "", bg: null, tag: "div", height: 100 },
+        { label: "body", bg: null, tag: "div", height: 900 },
+      ]
+    );
+    expect(r.matched).toHaveLength(1);
+    expect(r.buildOnly).toEqual([""]); // the 100px candidate stayed unused
+  });
+
+  it("honours the 25% height boundary for generic labels", () => {
+    const within = compareBands(
+      [{ label: "", bg: null, tag: "div", height: 1000 }],
+      [{ label: "body", bg: null, tag: "div", height: 1250 }]
+    );
+    expect(within.matched).toHaveLength(1);
+    const outside = compareBands(
+      [{ label: "", bg: null, tag: "div", height: 1000 }],
+      [{ label: "body", bg: null, tag: "div", height: 1400 }]
+    );
+    expect(outside.matched).toEqual([]);
+  });
+
+  it("does not pair a generic ref band with a named, differently-coloured build band", () => {
+    const r = compareBands(
+      [{ label: "", bg: "#111111", tag: "div", height: 900 }],
+      [{ label: "#footer", bg: "#222222", tag: "div", height: 950 }]
+    );
+    expect(r.matched).toEqual([]);
+    expect(r.refOnly).toEqual(["(unlabeled)"]);
+    expect(r.buildOnly).toEqual(["#footer"]);
+  });
+
+  it("matches a named ref band to an anonymous rebuild band by tag+height", () => {
+    const r = compareBands(
+      [{ label: "#hero", bg: "#111111", tag: "section", height: 900 }],
+      [{ label: "", bg: "#111111", tag: "section", height: 920 }]
+    );
+    expect(r.matched).toHaveLength(1);
+    expect(r.refOnly).toEqual([]);
+    expect(r.buildOnly).toEqual([]);
+  });
+
+  it("does not let a generic band steal a named build band", () => {
+    const r = compareBands(
+      [
+        { label: "", bg: null, tag: "div", height: 900 },
+        { label: "#pricing", bg: null, tag: "div", height: 1000 },
+      ],
+      [{ label: "#pricing", bg: null, tag: "div", height: 1000 }]
+    );
+    expect(r.matched).toEqual(["#pricing"]);
+    expect(r.refOnly).toEqual(["(unlabeled)"]);
+    expect(r.buildOnly).toEqual([]);
+  });
 });
 
 describe("verdictFrom", () => {

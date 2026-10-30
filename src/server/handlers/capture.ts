@@ -218,18 +218,20 @@ export async function capture_component(ctx: HandlerContext, args: {
   selector?: string;
   viewport?: ViewportName;
   maxNodes?: number;
+  maxDepth?: number;
   compact?: boolean;
 }): Promise<ToolResponse> {
   try {
     // Lazy default: playwright is only touched when the tool actually runs.
     const capture =
       ctx.deps.captureComponentFn ??
-      ((url: string, opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number }) =>
+      ((url: string, opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number; maxDepth?: number }) =>
         import("../../component.js").then((m) => m.captureComponent(url, opts)));
     const result = await capture(args.url, {
       selector: args.selector,
       viewport: args.viewport ?? "desktop",
       maxNodes: args.maxNodes,
+      ...(args.maxDepth !== undefined ? { maxDepth: args.maxDepth } : {}),
     });
     if ("error" in result) return { content: [text(result.error)], isError: true };
     // C3: compact=true strips per-node styles/text/svg/anims; the tree's

@@ -78,7 +78,7 @@ export function registerAnalyzeScrollMap(ctx: ToolContext): void {
       scrubProbe: z.boolean().optional()
         .describe("drive the page through up to 8 scroll steps and sample each scrubbed trigger's progress curve (adds seconds)"),
       compact: z.boolean().optional()
-        .describe("token-diet summary: keyframes/props/durations and scrubCurves replaced by counts; all numerics and triggers stay"),
+        .describe("token-diet summary: keyframes/props/durations and scrubCurves replaced by counts; all numerics and triggers stay. It cannot feed build_gsap_stub/build_motion_manifest (anims[] is omitted) — use compact=false for that handoff"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.analyze_scroll_map(args)),
@@ -119,6 +119,8 @@ export function registerCaptureComponent(ctx: ToolContext): void {
         .describe("CSS selector of the component root (default 'header')"),
       maxNodes: z.number().int().min(50).max(2000).optional()
         .describe("Max DOM nodes to serialize (default 400, clamp 50-2000)"),
+      maxDepth: z.number().int().min(0).max(64).optional()
+        .describe("Max serialized tree depth (0 = unlimited; omit for unlimited). Values above 12 risk Code Mode's 32-level response cap; 12 keeps a capped pack safe. `depthCapped:true` means deeper nodes were omitted."),
       viewport: viewportSchema,
       compact: z.boolean().optional()
         .describe("token-diet summary: node styles/text/svg/anims and the typography/paletteSummary blocks are dropped; the {tag, classes, rect} tree, fonts and colors stay"),

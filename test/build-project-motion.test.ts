@@ -83,7 +83,11 @@ describe("motion census validation", () => {
   it("rejects missing required arrays and skips malformed rows with a warning", () => {
     expect(normalizeScrollCensus({ anims: [] })).toEqual({ error: "motion census: gsapTriggers[] is missing" });
     expect(normalizeScrollCensus({ gsapTriggers: [] })).toEqual({ error: "motion census: anims[] is missing" });
-    expect(normalizeScrollCensus([])).toEqual({ error: "motion census: expected a JSON object" });
+    expect(normalizeScrollCensus([])).toEqual({ error: "scrollCensus: expected a JSON object" });
+    expect(normalizeScrollCensus({ counts: {}, animCount: 0 })).toEqual({
+      error:
+        "scrollCensus is a compact summary (missing anims[]); rerun the scroll census with compact=false before building motion",
+    });
     const parsed = normalizeScrollCensus({ anims: [{ selector: "" }, { selector: ".ok", durationMs: 5 }], gsapTriggers: [] });
     expect("error" in parsed).toBe(false);
     if ("error" in parsed) return;

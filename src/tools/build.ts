@@ -4,7 +4,7 @@ import { asMcpResult, type ToolContext } from "./shared.js";
 export function registerBuildProject(ctx: ToolContext): void {
   ctx.tool(
     "build_project",
-    "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. Pairs with verify_build: build → convert → verify.",
+    "Convert a single-file exact rebuild (any local .html, e.g. the rebuild flow's full-page-exact.html) into a runnable Vite, Astro or Next.js project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (useEffect + gsap.context on Next), assets carried. Reads a local file and writes the project dir. The output is source, not a servable site: install and build it (npm install && npm run build) and serve the generated output (Vite/Astro dist, Next .next with next start), not the raw scaffold directory. Pairs with verify_build: build → convert → verify.",
     {
       htmlPath: z.string().describe("Local path to the single-file rebuild html to convert"),
       target: z.enum(["vite", "astro", "next"]).describe("Framework of the generated project"),
@@ -36,7 +36,7 @@ export function registerBuildGsapStub(ctx: ToolContext): void {
   ctx.tool(
     "build_gsap_stub",
     "Generate a runnable GSAP+ScrollTrigger timeline stub from captured motion evidence (scroll census anims + optional pose grid camera anchors) — pure build from provided JSON, no page fetches",
-    { scrollCensus: z.any().describe("ScrollCensus JSON from analyze_scroll_map"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
+    { scrollCensus: z.any().describe("Full ScrollCensus JSON from analyze_scroll_map (anims[] + gsapTriggers[] required; compact output is rejected)"), poseGrid: z.any().optional().describe("PoseGrid JSON from capture_pose_3d (adds scroll-driven camera module)") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: any) => asMcpResult(ctx.handlers.build_gsap_stub(args)),
   );

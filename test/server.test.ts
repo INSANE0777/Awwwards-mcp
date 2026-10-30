@@ -2097,9 +2097,9 @@ describe("build_gsap_stub handler", () => {
         return { stubHtml: "STUB" };
       },
     });
-    const res = await h.build_gsap_stub({ scrollCensus: { anims: [] }, poseGrid: { canvasW: 0 } });
+    const res = await h.build_gsap_stub({ scrollCensus: { anims: [], gsapTriggers: [] }, poseGrid: { canvasW: 0 } });
     expect(res.isError).toBeUndefined();
-    expect(seen).toEqual([{ scrollCensus: { anims: [] }, poseGrid: { canvasW: 0 } }]);
+    expect(seen).toEqual([{ scrollCensus: { anims: [], gsapTriggers: [] }, poseGrid: { canvasW: 0 } }]);
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.stubHtml).toBe("STUB");
   });
@@ -2108,11 +2108,51 @@ describe("build_gsap_stub handler", () => {
     const { client } = fakeClient();
     const cache = new Cache(tmpDir());
     const h = createHandlers({ client, cache });
-    const res = await h.build_gsap_stub({ scrollCensus: {} });
+    const res = await h.build_gsap_stub({ scrollCensus: { anims: [], gsapTriggers: [] } });
     expect(res.isError).toBeUndefined();
     const parsed = JSON.parse((res.content[0] as any).text);
     expect(parsed.stubHtml).toContain("gsap.registerPlugin(ScrollTrigger)");
     expect(parsed.stubHtml).toContain("no usable scroll-census anims");
+  });
+
+  it("rejects a compact census before calling the builder", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    let called = false;
+    const h = createHandlers({
+      client,
+      cache,
+      gsapStubFn: () => {
+        called = true;
+        return { stubHtml: "STUB" };
+      },
+    });
+    const res = await h.build_gsap_stub({
+      scrollCensus: { counts: { "gsap-scrolltrigger": 2 }, animCount: 2 },
+    });
+    expect(res.isError).toBe(true);
+    expect((res.content[0] as any).text).toContain("compact summary");
+    expect((res.content[0] as any).text).toContain("compact=false");
+    expect(called).toBe(false);
+  });
+
+  it("unwraps a census nested under scrollCensus before the builder", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const seen: Array<{ scrollCensus: unknown }> = [];
+    const h = createHandlers({
+      client,
+      cache,
+      gsapStubFn: (args) => {
+        seen.push(args);
+        return { stubHtml: "STUB" };
+      },
+    });
+    const res = await h.build_gsap_stub({
+      scrollCensus: { scrollCensus: { anims: [], gsapTriggers: [] } },
+    });
+    expect(res.isError).toBeUndefined();
+    expect(seen[0]?.scrollCensus).toEqual({ anims: [], gsapTriggers: [] });
   });
 });
 
@@ -2151,6 +2191,20 @@ describe("build_motion_manifest handler", () => {
     const res = await h.build_motion_manifest({ bands: {}, scrollCensus: {} });
     expect(res.isError).toBe(true);
     expect(JSON.parse((res.content[0] as any).text).error).toContain("bands:");
+  });
+
+  it("rejects a compact census with the rerun hint", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.build_motion_manifest({
+      bands,
+      scrollCensus: { counts: { "gsap-scrolltrigger": 2 }, animCount: 2 },
+    });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.error).toContain("scrollCensus is a compact summary");
+    expect(parsed.error).toContain("compact=false");
   });
 });
 
