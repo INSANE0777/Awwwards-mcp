@@ -18,17 +18,26 @@ export const SETTLE_MS = 150;
 // Empty/over-long selectors and out-of-range steps are rejected here, at the
 // MCP trust boundary; verifyFlow itself assumes validated args.
 const flowActionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("scroll"), y: z.number().int().min(0).max(100_000) }),
-  z.object({ action: z.literal("click"), selector: z.string().min(1).max(300) }),
-  z.object({ action: z.literal("wait"), ms: z.number().int().min(0).max(10_000) }),
+  z.object({
+    action: z.literal("scroll").describe("Scroll to an absolute window Y position"),
+    y: z.number().int().min(0).max(100_000).describe("Absolute window scroll position in pixels (0-100000), not a relative delta"),
+  }),
+  z.object({
+    action: z.literal("click").describe("Click the element matching a CSS selector"),
+    selector: z.string().min(1).max(300).describe("CSS selector to click on both pages"),
+  }),
+  z.object({
+    action: z.literal("wait").describe("Wait for a fixed number of milliseconds"),
+    ms: z.number().int().min(0).max(10_000).describe("Wait time in milliseconds (0-10000)"),
+  }),
 ]);
 
 export const verifyFlowArgsSchema = z.object({
-  buildUrl: z.string().url(),
-  referenceUrl: z.string().url(),
-  steps: z.array(flowActionSchema).min(1).max(MAX_STEPS),
-  viewport: z.enum(["desktop", "mobile"]).optional(),
-  waitStrategy: z.enum(["load", "networkidle"]).optional(),
+  buildUrl: z.string().url().describe("URL of the build to exercise (http(s), local dev server or deployed)"),
+  referenceUrl: z.string().url().describe("URL of the reference page to compare against"),
+  steps: z.array(flowActionSchema).min(1).max(MAX_STEPS).describe("1-6 actions run on both pages in order; each scroll/click is followed by a 150 ms settle"),
+  viewport: z.enum(["desktop", "mobile"]).optional().describe("desktop = 1440x900; mobile = 390x844 iPhone-class; both run in fresh headless launches"),
+  waitStrategy: z.enum(["load", "networkidle"]).optional().describe("'load' (default) waits for load plus a 3 s settle; 'networkidle' waits for network quiet"),
 });
 
 export type FlowAction = z.infer<typeof flowActionSchema>;

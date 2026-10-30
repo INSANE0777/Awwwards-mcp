@@ -94,7 +94,8 @@ export function registerSearchMotion(ctx: ToolContext): void {
       lib: z.string().describe("Library token, e.g. 'gsap', 'lenis', 'webgl'").optional(),
       scrubOnly: z.boolean().default(false).describe("Only sites with substantial scroll-scrubbed animation"),
       hasPins: z.boolean().default(false).describe("Only sites that pin sections"),
-      limit: z.number().int().min(1).max(50).default(20),
+      limit: z.number().int().min(1).max(50).default(20)
+        .describe("Max records to return (1-50, default 20)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     (args: any) => asMcpResult(ctx.handlers.search_motion(args)),

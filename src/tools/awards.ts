@@ -5,7 +5,7 @@ import { asMcpResult, viewportSchema, waitStrategySchema, type ToolContext } fro
 export function registerSearchSites(ctx: ToolContext): void {
   ctx.tool(
     "search_sites",
-    "Search award-winning websites on Awwwards — the site index with filters. Returns site cards with inline screenshots, live URLs, awards and tags.",
+    "Search award-winning websites on Awwwards — the site index with filters. Returns site cards with inline screenshots, live URLs, awards and tags. Filters combine as AND. count defaults to 6 (max 12); page is one-based over the matched local set, and deep upstream query-string pagination is not crawled. Color searches always fetch the live filter page (site rows carry no colors). Use search_directory for agencies/studios, search_elements for UI components, get_collections for moodboards, new_winners for today's delta, and get_site_details for one site's DNA. A failed top-up keeps the already-cached page window; if the required live fetch fails, stale cached rows are served (page 1; color unchecked).",
     {
       query: z.string().describe("Free text matched against site titles and tags").optional(),
       color: z
@@ -32,8 +32,8 @@ export function registerSearchSites(ctx: ToolContext): void {
         ),
       responseMode: z.enum(["full", "compact"]).default("full")
         .describe("full (default) returns all inline previews; compact returns concise cards and at most two page previews"),
-      count: z.number().int().min(1).max(12).default(6),
-      page: z.number().int().min(1).default(1),
+      count: z.number().int().min(1).max(12).default(6).describe("Results per page (1-12, default 6)"),
+      page: z.number().int().min(1).default(1).describe("One-based page over the matched local set; deep upstream query-string pagination is not crawled"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.search_sites(args)),
@@ -70,16 +70,16 @@ export function registerCompareSites(ctx: ToolContext): void {
 export function registerCreateDesignBrief(ctx: ToolContext): void {
   ctx.tool(
     "create_design_brief",
-    "Synthesize a cited design direction from 2–5 Awwwards references",
+    "Synthesize a cited design direction from 2–5 Awwwards site slugs plus a project goal. Uses cached detail (including its element list) and Motion DNA evidence first and fetches only missing details; includeStructure=true also runs a browser band analysis per reference. Returns one Markdown text block containing versioned JSON: shared signals vs one-site outliers, evidence gaps, an evidence-backed interaction plan, and reduced-motion/content/keyboard guardrails. Use search_sites to find slugs; use compare_sites for raw side-by-side DNA and analyze_page_structure for a band map — this tool synthesizes a brief; it does not score a build or run a motion census.",
     {
-      slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(5).refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "slugs must be distinct"),
-      goal: z.string().trim().min(1).max(2000),
-      audience: z.string().trim().min(1).max(1000).optional(),
-      constraints: z.array(z.string().trim().min(1).max(1000)).max(20).optional(),
-      includeStructure: z.boolean().default(false),
+      slugs: z.array(z.string().regex(/^[\w-]+$/)).min(2).max(5).refine((slugs) => new Set(slugs.map((slug) => slug.toLowerCase())).size === slugs.length, "slugs must be distinct").describe("Two to five distinct site slugs from search_sites (letters, digits, underscores or hyphens; no duplicates)"),
+      goal: z.string().trim().min(1).max(2000).describe("Project goal the brief must serve, e.g. 'a portfolio for a type foundry'; required and non-blank"),
+      audience: z.string().trim().min(1).max(1000).optional().describe("Optional target audience; carried into the brief's direction summary"),
+      constraints: z.array(z.string().trim().min(1).max(1000)).max(20).optional().describe("Optional list of project constraints (max 20), e.g. 'no WebGL', 'must work without JS'"),
+      includeStructure: z.boolean().default(false).describe("Also run analyze_page_structure for each reference (needs Playwright; one browser launch per site)"),
       viewport: viewportSchema,
       waitStrategy: waitStrategySchema,
-      maxBands: z.number().int().min(5).max(60).default(12),
+      maxBands: z.number().int().min(5).max(60).default(12).describe("Band cap for the optional structure pass (5-60, default 12)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.create_design_brief(args)),
@@ -140,7 +140,7 @@ export function registerSearchElements(ctx: ToolContext): void {
   ctx.tool(
     "search_elements",
     "Search Awwwards' curated element gallery — award-grade UI components (footers, menus, loaders, transitions, micro-interactions…). " +
-      "Usage: pass query text and at most one of category/stack; every result links back to its source element page and parent project.",
+      "Usage: pass query text; category and stack combine as AND when both are provided; each result carries its element slug, source and parent project identifiers.",
     {
       query: z.string().describe("Free text: what the component is or does").optional(),
       category: z
@@ -148,7 +148,7 @@ export function registerSearchElements(ctx: ToolContext): void {
         .describe("Category id from the gallery taxonomy, e.g. 'footer', 'menu', 'cta', 'loading', 'mouse_interaction', '404_page'")
         .optional(),
       stack: z.array(z.string()).describe("Built-with tokens, e.g. ['gsap', 'webgl']").optional(),
-      limit: z.number().int().min(1).max(20).default(8),
+      limit: z.number().int().min(1).max(20).default(8).describe("Max results (1-20, default 8)"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.search_elements(args)),
@@ -303,7 +303,7 @@ export function registerWatchSite(ctx: ToolContext): void {
     "watch_site",
     "Longitudinal watchlist over Awwwards listings: track a studio (e.g. 'ToyFight'), a tag/technology slug (e.g. 'webgl'), or a site URL-slug for changes and new entries. add/list/remove; the delta is reported by watch_site list after new_winners or search_sites refreshes the listing.",
     {
-      action: z.enum(["add", "list", "remove"]),
+      action: z.enum(["add", "list", "remove"]).describe("add = create a watch; list = report deltas from the freshest cached listing (no fetch); remove = delete the watch matching kind + pattern"),
       kind: z.enum(["studio", "tag", "url"]).optional()
         .describe("studio = creator name from listing cards; tag = tag/technology slug; url = a /sites/<slug> site-slug"),
       pattern: z.string().optional().describe("What to watch (name/slug per kind)"),

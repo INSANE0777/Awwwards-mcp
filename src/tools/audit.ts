@@ -54,7 +54,7 @@ export function registerAnalyzeBundle(ctx: ToolContext): void {
     "analyze_bundle",
     "Bundle forensics for a live page: fetch it once, download its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks, 10MB, 1 request/second), save them locally, optionally de-obfuscate with webcrack if installed, and grep keywords across the code. Returns chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Opt-in bundleIntel adds route, vendor, source-map presence and module-graph evidence; source maps are detected but never fetched, and default output keys are unchanged. Runs on URLs you are authorized to analyze — does not fetch awwwards.com.",
     {
-      url: z.string().url(),
+      url: z.string().url().describe("Absolute page URL whose script chunks to inspect"),
       keywords: z.array(z.string().min(1)).max(20).optional().describe("grep these strings across chunks (e.g. class names, effect names)"),
       maxChunks: z.number().int().min(1).max(100).optional().describe("default 40"),
       walkChunks: z.boolean().optional()
@@ -88,7 +88,7 @@ export function registerVerifyFlow(ctx: ToolContext): void {
     "verify_flow",
     {
       description:
-        "Step-aligned comparison of interaction flows: runs the same 1–6 scroll/click/wait steps on a build and a reference page (two fresh headless launches, desktop or mobile), then compares path, scroll delta, skeleton hash, text hash and element count after each step. A step is same only when both sides are complete and untruncated; truncated or failed states are unknown. No screenshots: hashes are evidence, not visual truth. A click can still trigger client-side mutations. Runs on URLs you are authorized to inspect.",
+        "Step-aligned comparison of interaction flows: runs the same 1–6 scroll/click/wait steps on a build and a reference page (two fresh headless launches, desktop or mobile), then compares path, scroll delta, skeleton hash, text hash and element count after each step. A step is same only when both sides are complete and untruncated; truncated or failed states are unknown. No screenshots: hashes are evidence, not visual truth. A click can still trigger client-side mutations. Runs on URLs you are authorized to inspect. Use verify_build for a scored structure/motion comparison; build_project converts a local file into a project and never verifies. Needs the optional Playwright dependency.",
       inputSchema: verifyFlowArgsSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
@@ -105,7 +105,8 @@ export function registerVerifyBuild(ctx: ToolContext): void {
       referenceUrl: z.string().url().describe("URL of the reference site to match"),
       // Inline optional enum, not waitStrategySchema: that schema's .default("load")
       // would shadow the orchestrator's networkidle scroll-census default.
-      waitStrategy: z.enum(["load", "networkidle"]).optional(),
+      waitStrategy: z.enum(["load", "networkidle"]).optional()
+        .describe("'load' waits for load plus settle; 'networkidle' waits for network quiet; omit to let the orchestrator use its scroll-census default"),
       viewport: viewportSchema,
       domDiff: z.boolean().default(false)
         .describe("body-subtree structural diff between reference and build"),
