@@ -69,7 +69,10 @@ Optional env additions: `AWWWARDS_CACHE_DIR` (custom cache location),
 `AWWWARDS_AUTO_UPDATE=1` (background self-update on new releases),
 `AWWWARDS_MCP_PROFILE=core|full|v2` (`core` registers only the 13
 build-loop tools, including `get_annual_categories`; `full` exposes all 39;
-`v2` registers 15 consolidated tools instead of the 1.x names; default full;
+`v2` registers 10 consolidated tools plus 5 retained tools with their existing
+names and flat inputs (create_design_brief, build_project, verify_build,
+verify_flow, analyze_network_capture); only the 34 replaced 1.x names
+disappear; default full;
 changing it requires a server restart). The old → new v2 mapping lives in
 [../v2-routing.md](../v2-routing.md) — do not mix 1.x names into a v2 session.
 `AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default 32 MB; oversized results become a truncation JSON),
@@ -103,7 +106,7 @@ defaults" is a valid answer:
    `analyze_page_structure`, `record_site_motion`, `export_design_tokens`,
    `analyze_images`)? They need the optional playwright + chromium install
    (~120 MB):
-   `npm install -g playwright && npx playwright install chromium`
+   `npm install -g awwwards-mcp playwright ffmpeg-static && npm exec --global -- playwright install chromium`
    If yes, run that install now (it is one-time, safe to re-run). If no,
    skip and note that the capture tools will error until installed. Store
    as `"capturesEnabled": true | false`.
@@ -157,7 +160,7 @@ After answering preferences, sanity-check the setup in one pass:
   awwwards-mcp@latest` or set `AWWWARDS_AUTO_UPDATE=1` in the server `env`).
 - **If capturesEnabled**: a one-line confirmation that playwright resolved.
   If it fails, say the capture tools are disabled until
-  `npx playwright install chromium` succeeds — do not retry in a loop.
+  `npm exec --global -- playwright install chromium` succeeds - do not retry in a loop.
 - **If the cache dir looks broken** (tool errors about SQLite or locks):
   route to the `awwwards-doctor` skill; do not delete anything.
 - **If `AWWWARDS_MCP_PROFILE=v2`**: probe the consolidated surface with

@@ -151,7 +151,7 @@ describe("captureLiveSite", () => {
       throw new Error("Cannot find package 'playwright'");
     });
     expect("error" in res).toBe(true);
-    if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
+    if ("error" in res) expect(res.error).toContain("npm exec --global -- playwright install chromium");
   });
 
   it("returns install instructions when chromium launch fails", async () => {
@@ -159,7 +159,7 @@ describe("captureLiveSite", () => {
       chromium: { launch: async () => { throw new Error("Executable doesn't exist"); } },
     }));
     expect("error" in res).toBe(true);
-    if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
+    if ("error" in res) expect(res.error).toContain("npm exec --global -- playwright install chromium");
   });
 
   it("propagates page-level runtime errors instead of the install hint", async () => {

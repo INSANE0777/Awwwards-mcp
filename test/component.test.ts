@@ -88,7 +88,7 @@ describe("COMPONENT_SNIPPET fidelity source contract", () => {
 });
 
 describe("COMPONENT_SNIPPET hidden text", () => {
-  it("omits leaf text under hidden, inert, or aria-hidden subtrees", () => {
+  it("omits hidden and CSS-unrendered leaf text but keeps aria-hidden/inert visible text", () => {
     const el = (over: Record<string, any> = {}): any => ({
       tagName: "span",
       classList: [],
@@ -109,24 +109,30 @@ describe("COMPONENT_SNIPPET hidden text", () => {
     ariaSection.children = [leaf("Aria child copy", ariaSection)];
     const inertSection = el({ tagName: "section", attrs: { inert: "" }, children: [] });
     inertSection.children = [leaf("Inert child copy", inertSection)];
+    const cssSection = el({ tagName: "section", display: "none", children: [] });
+    cssSection.children = [leaf("CSS hidden copy", cssSection)];
     const root = el({
       tagName: "header",
-      children: [visible, hiddenSection, ariaSection, inertSection],
+      children: [visible, hiddenSection, ariaSection, inertSection, cssSection],
     });
 
     const g = globalThis as any;
     const oldDoc = g.document;
     const oldStyle = g.getComputedStyle;
     g.document = { querySelector: () => root };
-    g.getComputedStyle = () => ({});
+    g.getComputedStyle = (node: any) => ({
+      display: node.display ?? "block",
+      visibility: node.visibility ?? "visible",
+    });
     try {
       const scan = COMPONENT_SNIPPET({ selector: "header", maxNodes: 50 });
       const subtreeText = JSON.stringify(scan.root);
-      expect(scan.root!.children).toHaveLength(4); // nodes still captured
+      expect(scan.root!.children).toHaveLength(5); // nodes still captured
       expect(subtreeText).toContain("Visible copy");
+      expect(subtreeText).toContain("Aria child copy");
+      expect(subtreeText).toContain("Inert child copy");
       expect(subtreeText).not.toContain("Hidden child copy");
-      expect(subtreeText).not.toContain("Aria child copy");
-      expect(subtreeText).not.toContain("Inert child copy");
+      expect(subtreeText).not.toContain("CSS hidden copy");
     } finally {
       if (oldDoc === undefined) delete g.document;
       else g.document = oldDoc;

@@ -229,12 +229,14 @@ prefix:
 
 ```bash
 npm install -g awwwards-mcp playwright ffmpeg-static
-playwright install chromium
+npm exec --global -- playwright install chromium
 ```
 
 Point your MCP client at the installed `awwwards-mcp` command (not `npx`):
 
 ```bash
+# If an older `awwwards` entry exists in this scope, remove it first:
+claude mcp remove awwwards
 claude mcp add awwwards -- awwwards-mcp
 ```
 

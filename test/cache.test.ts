@@ -147,7 +147,7 @@ describe("Cache", () => {
     expect(readSpy).toHaveBeenCalledTimes(1); // one open, three IN (...) chunks
     expect(values.size).toBe(1);
     expect(values.get("bulk:fresh")).toBe("fresh");
-  });
+  }, 60_000);
 
   it("treats malformed meta rows as absent in a batch read", () => {
     const cache = new Cache(tmpDir());

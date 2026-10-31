@@ -37,7 +37,7 @@ The doctor checks five things and knows how to fix the mechanical ones:
 |---|---|---|
 | network | awwwards.com blocked/challenged the request | nothing to fix locally — wait, retry later; never retry in a loop |
 | parser-drift | awwwards.com markup changed under the parsers | captures the raw live page into `docs/drift-<timestamp>/` (gitignored) as the fixture for the fix |
-| playwright-chromium / ffmpeg-static | optional capture deps missing or broken | installs them (dev deps + `npx playwright install chromium`) |
+| playwright-chromium / ffmpeg-static | optional capture deps missing or broken | installs them (dev deps + `npm exec --global -- playwright install chromium`) |
 | cache | SQLite DB corrupt/locked, or index older than 30 days | moves an unreadable DB aside (kept in temp) and rebuilds via `npm run index` |
 | boot | `dist/cli.js` doesn't start | `npm run build` |
 

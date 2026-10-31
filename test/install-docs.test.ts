@@ -16,7 +16,7 @@ describe("install documentation", () => {
 
   it("README documents the global side-by-side browser install", () => {
     expect(README).toContain("npm install -g awwwards-mcp playwright ffmpeg-static");
-    expect(README).toContain("playwright install chromium");
+    expect(README).toContain("npm exec --global -- playwright install chromium");
     expect(flatten(README)).toContain('"command": "awwwards-mcp"');
     expect(flatten(README)).not.toContain("npm install -g playwright && npx playwright install chromium");
   });

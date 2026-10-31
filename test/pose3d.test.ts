@@ -157,6 +157,21 @@ describe("capturePose3d", () => {
     expect(screenshots).toHaveLength(3);
   });
 
+  it("stops adding frames once the builder's total-bytes budget is spent", async () => {
+    const eightMiB = Buffer.concat([PNG_MAGIC, Buffer.alloc(8 * 1024 * 1024 - PNG_MAGIC.length)]);
+    const huge = "data:image/png;base64," + eightMiB.toString("base64");
+    const { loader } = harness(raw({ dataUrlPng: huge }));
+    const result = await capturePose3d("u", { loader, steps: 5 });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.snapshots).toHaveLength(4); // 4 x 8 MiB fits 32 MiB; the 5th is skipped
+    const total = result.snapshots.reduce(
+      (n, s) => n + s.frames.reduce((m, f) => m + (pngDataUrlBytes(f.dataUrlPng) ?? 0), 0),
+      0,
+    );
+    expect(total).toBeLessThanOrEqual(32 * 1024 * 1024);
+  });
+
   it("returns { error } when the browser fails to launch", async () => {
     const loader = async () => ({
       chromium: {

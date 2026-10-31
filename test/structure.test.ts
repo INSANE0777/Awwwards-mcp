@@ -1090,7 +1090,7 @@ describe("analyzePageStructure", () => {
       throw new Error("Cannot find package 'playwright'");
     });
     expect("error" in res).toBe(true);
-    if ("error" in res) expect(res.error).toContain("npx playwright install chromium");
+    if ("error" in res) expect(res.error).toContain("npm exec --global -- playwright install chromium");
   });
 
   it("defaults to the load strategy, settles, and scrolls before the scan", async () => {

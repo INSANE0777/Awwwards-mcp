@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import {
   buildUpdateNotice,
   compareVersions,
@@ -28,9 +29,10 @@ describe("compareVersions", () => {
 });
 
 describe("selfUpdateCommand", () => {
-  it("uses cmd.exe /c for the npm shim on Windows without a shell", () => {
+  it("uses System32 cmd.exe for the npm shim on Windows without a shell", () => {
+    const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
     expect(selfUpdateCommand("1.2.3", "win32")).toEqual({
-      cmd: "cmd.exe",
+      cmd: join(root, "System32", "cmd.exe"),
       args: ["/d", "/s", "/c", "npm install -g awwwards-mcp@1.2.3"],
       shell: false,
     });

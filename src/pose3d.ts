@@ -298,6 +298,7 @@ export async function capturePose3d(
       let usedSelector = "";
       let canvasW = 0;
       let canvasH = 0;
+      let totalBytes = 0;
       for (let step = 0; step < steps; step++) {
         const raw = (await page.evaluate(POSE_SNIPPET, { canvasSelector })) as {
           canvasW: number;
@@ -313,13 +314,21 @@ export async function capturePose3d(
         canvasW = canvasW || raw.canvasW;
         canvasH = canvasH || raw.canvasH;
         const frames: PoseFrame[] = [];
-        if (isPngDataUrl(raw.dataUrlPng)) {
+        const fits = (url: string): boolean => {
+          const bytes = pngDataUrlBytes(url);
+          return bytes !== null && totalBytes + bytes <= POSE_LIMITS.maxTotalBytes;
+        };
+        if (isPngDataUrl(raw.dataUrlPng) && fits(raw.dataUrlPng)) {
+          totalBytes += pngDataUrlBytes(raw.dataUrlPng)!;
           frames.push({ label: "canvas", dataUrlPng: raw.dataUrlPng });
         } else if (raw.rect && raw.rect.width > 0 && raw.rect.height > 0) {
           try {
             const shot = (await page.screenshot({ clip: raw.rect })) as Buffer;
             const dataUrlPng = "data:image/png;base64," + shot.toString("base64");
-            if (isPngDataUrl(dataUrlPng)) frames.push({ label: "viewport", dataUrlPng });
+            if (isPngDataUrl(dataUrlPng) && fits(dataUrlPng)) {
+              totalBytes += pngDataUrlBytes(dataUrlPng)!;
+              frames.push({ label: "viewport", dataUrlPng });
+            }
           } catch {}
         }
         snapQueue.push({ step, scrollY: raw.scrollY, frames });

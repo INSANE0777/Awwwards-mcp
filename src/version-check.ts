@@ -10,8 +10,8 @@
 // restart their agent; without the env var, the notice just tells the agent.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
 const REGISTRY_URL = "https://registry.npmjs.org/awwwards-mcp/latest";
@@ -122,8 +122,9 @@ export function selfUpdateCommand(
 ): { cmd: string; args: string[]; shell: boolean } | null {
   if (!SAFE_VERSION.test(version)) return null;
   if (platform === "win32") {
+    const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
     return {
-      cmd: "cmd.exe",
+      cmd: join(systemRoot, "System32", "cmd.exe"),
       args: ["/d", "/s", "/c", `npm install -g awwwards-mcp@${version}`],
       shell: false,
     };
