@@ -107,7 +107,10 @@ defaults" is a valid answer:
    `analyze_images`)? They need the optional playwright + chromium install
    (~120 MB):
    `npm install -g awwwards-mcp playwright ffmpeg-static && npm exec --global -- playwright install chromium`
-   If yes, run that install now (it is one-time, safe to re-run). If no,
+   Then switch this agent's `awwwards` registration from `npx -y awwwards-mcp`
+   to the installed command (`awwwards-mcp`) in the same scope and restart, so
+   the server and Playwright resolve from the same global install. If yes, run
+   that install now (it is one-time, safe to re-run). If no,
    skip and note that the capture tools will error until installed. Store
    as `"capturesEnabled": true | false`.
    Optional extra for bundle forensics: `npm install -g webcrack`

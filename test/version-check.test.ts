@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildUpdateNotice,
   compareVersions,
@@ -29,11 +30,12 @@ describe("compareVersions", () => {
 });
 
 describe("selfUpdateCommand", () => {
-  it("uses System32 cmd.exe for the npm shim on Windows without a shell", () => {
+  it("uses System32 cmd.exe and the Node-adjacent npm.cmd on Windows without a shell", () => {
     const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const npmCmd = join(dirname(process.execPath), "npm.cmd");
     expect(selfUpdateCommand("1.2.3", "win32")).toEqual({
       cmd: join(root, "System32", "cmd.exe"),
-      args: ["/d", "/s", "/c", "npm install -g awwwards-mcp@1.2.3"],
+      args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
       shell: false,
     });
     expect(selfUpdateCommand("1.2.3", "linux")).toEqual({
@@ -41,6 +43,12 @@ describe("selfUpdateCommand", () => {
       args: ["install", "-g", "awwwards-mcp@1.2.3"],
       shell: false,
     });
+  });
+
+  it("fails closed when npm.cmd is not beside the running Node binary", () => {
+    expect(
+      selfUpdateCommand("1.2.3", "win32", join(tmpdir(), "missing-node", "node.exe")),
+    ).toBeNull();
   });
 
   it("rejects version strings that could be shell syntax", () => {

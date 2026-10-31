@@ -10,7 +10,7 @@
 // restart their agent; without the env var, the notice just tells the agent.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -119,13 +119,16 @@ const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 export function selfUpdateCommand(
   version: string,
   platform: NodeJS.Platform = process.platform,
+  execPath: string = process.execPath,
 ): { cmd: string; args: string[]; shell: boolean } | null {
   if (!SAFE_VERSION.test(version)) return null;
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const npmCmd = join(dirname(execPath), "npm.cmd");
+    if (!existsSync(npmCmd)) return null;
     return {
       cmd: join(systemRoot, "System32", "cmd.exe"),
-      args: ["/d", "/s", "/c", `npm install -g awwwards-mcp@${version}`],
+      args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@${version}"`],
       shell: false,
     };
   }
