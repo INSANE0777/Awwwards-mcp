@@ -596,7 +596,10 @@ export async function captureBundleForensics(
             headers: { "User-Agent": BUNDLE_UA },
             ...(sameOriginOnly ? { redirect: "manual" as const } : {}),
           });
-          if (sameOriginOnly && res.status >= 300 && res.status < 400) {
+          if (
+            sameOriginOnly &&
+            [301, 302, 303, 307, 308].includes(res.status)
+          ) {
             const cancel = async () => {
               try {
                 await res.body?.cancel();

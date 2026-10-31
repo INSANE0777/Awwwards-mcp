@@ -77,7 +77,11 @@ export function normalizeEase(raw: unknown): string {
 const escHtml = (s: unknown) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 // Safe literal for inline JS: standard JSON escaping + "<" neutralized so a
 // hostile selector can never close the script tag.
-const jsStr = (s: unknown) => JSON.stringify(String(s)).replace(/</g, "\\u003c");
+const jsStr = (s: unknown) =>
+  JSON.stringify(String(s))
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 // Line-comment text: no breaks (a newline would end the comment and run the
 // payload) and no raw angle brackets (they could close the surrounding
 // <script> in generated HTML).

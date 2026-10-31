@@ -506,6 +506,28 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(rep.warnings.join("\n")).toContain("invalid redirect Location");
   });
 
+  it("treats a 304 walk response as an HTTP error, not a redirect", async () => {
+    const WALKER_JS = `${pageOrigin}/walker.js`;
+    const NOT_MODIFIED_JS = `${pageOrigin}/notmodified.js`;
+    const fetchFn = async (url: string) => {
+      if (url === PAGE) return new Response(`<script src="/walker.js"></script>`, { status: 200 });
+      if (url === WALKER_JS) return new Response(`var ref = "./notmodified.js";`, { status: 200 });
+      if (url === NOT_MODIFIED_JS) return new Response(null, { status: 304 });
+      return new Response("not found", { status: 404 });
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    const warnings = rep.warnings.join("\n");
+    expect(warnings).toContain("HTTP 304");
+    expect(warnings).not.toContain("redirect without Location");
+  });
+
   it("walkChunks absent → zero extra fetches (pin)", async () => {
     const calls: string[] = [];
     const rep = await captureBundleForensics(PAGE, {
