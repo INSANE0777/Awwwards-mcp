@@ -65,7 +65,7 @@ export interface PerfMeasurement {
 
 export interface PerfChild {
   stderr: { on(event: "data", cb: (chunk: unknown) => void): void } | null;
-  on(event: "exit", cb: () => void): void;
+  on(event: "exit" | "error", cb: (err?: Error) => void): void;
   kill(): void;
 }
 
@@ -75,7 +75,10 @@ export type SpawnFn = (
   opts: { stdio: ["ignore", "ignore", "pipe"] },
 ) => PerfChild;
 
-export type FetchFn = (url: string) => Promise<{ json(): Promise<unknown> }>;
+export type FetchFn = (
+  url: string,
+  init?: { signal?: AbortSignal },
+) => Promise<{ json(): Promise<unknown> }>;
 
 /** One CDP wire response for a command: a result envelope or an exception. */
 export interface CdpResult {
@@ -143,29 +146,83 @@ export function findBrowser(deps: FindBrowserDeps = {}): string | null {
   return null;
 }
 
+const CDP_OPEN_TIMEOUT_MS = 5_000;
+const CDP_COMMAND_TIMEOUT_MS = 10_000;
+
+/** Race work against a deadline; aborting the signal lets the transport clean up. */
+async function withTimeout<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ac.abort();
+      reject(new Error(message));
+    }, ms);
+  });
+  try {
+    return await Promise.race([work(ac.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface PendingCommand {
+  resolve: (v: CdpResult) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 /**
  * One CDP connection over a WebSocket. Messages are plain JSON; command
- * results resolve, protocol errors and page exceptions reject.
+ * results resolve, protocol errors and page exceptions reject. The socket
+ * open and every command are deadline-bounded so a dead browser degrades
+ * instead of hanging the measurement forever.
  */
 export class Cdp implements CdpLike {
   private ws: WsLike;
   private nextId = 1;
-  private pending = new Map<number, { resolve: (v: CdpResult) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, PendingCommand>();
+  private commandTimeoutMs: number;
 
-  static async connect(wsUrl: string): Promise<Cdp> {
+  static async connect(
+    wsUrl: string,
+    openTimeoutMs = CDP_OPEN_TIMEOUT_MS,
+    commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS,
+  ): Promise<Cdp> {
     // Node >= 22 ships a global WebSocket; the house tsconfig has no DOM lib.
     const WS = (globalThis as { WebSocket?: new (url: string) => WsLike }).WebSocket;
     if (!WS) throw new Error("global WebSocket unavailable — Node >= 22 required");
     const ws = new WS(wsUrl);
-    await new Promise<void>((resolve, reject) => {
-      ws.addEventListener("open", () => resolve(), { once: true });
-      ws.addEventListener("error", () => reject(new Error("CDP websocket failed")), { once: true });
-    });
-    return new Cdp(ws);
+    try {
+      await withTimeout(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            ws.addEventListener("open", () => resolve(), { once: true });
+            ws.addEventListener("error", () => reject(new Error("CDP websocket failed")), {
+              once: true,
+            });
+          }),
+        openTimeoutMs,
+        `CDP websocket open timed out after ${openTimeoutMs}ms`,
+      );
+    } catch (err) {
+      try {
+        ws.close();
+      } catch {
+        /* already gone */
+      }
+      throw err;
+    }
+    return new Cdp(ws, commandTimeoutMs);
   }
 
-  private constructor(ws: WsLike) {
+  private constructor(ws: WsLike, commandTimeoutMs: number) {
     this.ws = ws;
+    this.commandTimeoutMs = commandTimeoutMs;
     ws.addEventListener("message", (ev) => {
       const msg = JSON.parse(String((ev as { data: unknown }).data)) as {
         id?: number;
@@ -173,19 +230,42 @@ export class Cdp implements CdpLike {
         result?: CdpResult;
       };
       if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id)!;
+        const p = this.pending.get(msg.id)!;
         this.pending.delete(msg.id);
-        if (msg.error) reject(new Error(`${msg.error.message} (CDP ${msg.error.code})`));
-        else resolve(msg.result ?? {});
+        clearTimeout(p.timer);
+        if (msg.error) p.reject(new Error(`${msg.error.message} (CDP ${msg.error.code})`));
+        else p.resolve(msg.result ?? {});
       }
     });
+    // A transport failure must reject in-flight commands now, not at their
+    // individual deadlines.
+    ws.addEventListener("close", () => this.failPending(new Error("CDP websocket closed")));
+    ws.addEventListener("error", () => this.failPending(new Error("CDP websocket failed")));
+  }
+
+  private failPending(err: Error): void {
+    for (const [id, p] of this.pending) {
+      clearTimeout(p.timer);
+      this.pending.delete(id);
+      p.reject(err);
+    }
   }
 
   send(method: string, params: Record<string, unknown> = {}): Promise<CdpResult> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs}ms`));
+      }, this.commandTimeoutMs);
+      this.pending.set(id, { timer, resolve, reject });
+      try {
+        this.ws.send(JSON.stringify({ id, method, params }));
+      } catch (err) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -378,12 +458,19 @@ function waitDevtoolsPort(proc: PerfChild, timeoutMs = 15_000): Promise<number> 
       const m = buf.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//);
       if (m) settle(() => resolve(Number(m[1])));
     });
+    // Missing executable / EACCES arrives as an async 'error' event. Without a
+    // listener Node throws it as an uncaught exception and the process dies.
+    proc.on("error", (err) =>
+      settle(() =>
+        reject(err instanceof Error ? err : new Error("Browser failed to start")),
+      ),
+    );
     proc.on("exit", () => settle(() => reject(new Error("Browser exited before the DevTools port opened"))));
   });
 }
 
 const defaultSpawn: SpawnFn = (cmd, args, opts) => spawn(cmd, args, opts);
-const defaultFetch: FetchFn = (url) => fetch(url);
+const defaultFetch: FetchFn = (url, init) => fetch(url, init);
 
 export interface MeasureRuntimeOpts {
   /** Capture window in seconds, clamped to (0.05 .. 10]. Default: 4. */
@@ -394,6 +481,8 @@ export interface MeasureRuntimeOpts {
   fetchFn?: FetchFn;
   connectFn?: (wsUrl: string) => Promise<CdpLike>;
   findBrowserFn?: () => string | null;
+  /** CDP /json/list fetch and websocket-open deadline (ms). Default 5000; min 10. */
+  cdpTimeoutMs?: number;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -441,7 +530,9 @@ export async function measureRuntime(
   const height = mobile ? MOBILE_HEIGHT : HEIGHT;
   const spawnFn = opts.spawnFn ?? defaultSpawn;
   const fetchFn = opts.fetchFn ?? defaultFetch;
-  const connectFn = opts.connectFn ?? ((wsUrl: string) => Cdp.connect(wsUrl));
+  const cdpTimeoutMs = Math.max(10, opts.cdpTimeoutMs ?? CDP_OPEN_TIMEOUT_MS);
+  const connectFn =
+    opts.connectFn ?? ((wsUrl: string) => Cdp.connect(wsUrl, cdpTimeoutMs));
   const findBrowserFn = opts.findBrowserFn ?? (() => findBrowser());
   let proc: PerfChild | null = null;
   let cdp: CdpLike | null = null;
@@ -464,7 +555,14 @@ export async function measureRuntime(
       { stdio: ["ignore", "ignore", "pipe"] },
     );
     const wsPort = await waitDevtoolsPort(proc);
-    const list = (await (await fetchFn(`http://127.0.0.1:${wsPort}/json/list`)).json()) as Array<{
+    // The raw /json/list fetch is bounded too: a browser that opens a port but
+    // never answers must not hang the measurement.
+    const list = (await withTimeout(
+      async (signal) =>
+        (await fetchFn(`http://127.0.0.1:${wsPort}/json/list`, { signal })).json(),
+      cdpTimeoutMs,
+      `CDP target list timed out after ${cdpTimeoutMs}ms`,
+    )) as Array<{
       type: string;
       webSocketDebuggerUrl: string;
     }>;
@@ -503,6 +601,9 @@ export async function measureRuntime(
       /* already gone */
     }
     try {
+      // Direct child kill only (no shell): Node maps this to TerminateProcess
+      // on Windows and SIGTERM on POSIX, and a dead child returns false rather
+      // than throwing, so cleanup can never mask the real result.
       proc?.kill();
     } catch {
       /* already gone */

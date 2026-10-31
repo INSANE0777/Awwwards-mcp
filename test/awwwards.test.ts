@@ -4,8 +4,10 @@ import { join } from "node:path";
 import {
   AwwwardsClient,
   BlockedError,
+  DEFAULT_CDN_MAX_BYTES,
   canonicalFacet,
   canonicalizeTechnology,
+  cdnMaxBytes,
   RateLimiter,
   buildFilterUrl,
   elementPosterPath,
@@ -599,8 +601,13 @@ describe("AwwwardsClient request timeouts", () => {
 
   it.each(["fetch", "body"])("bounds a hung CDN %s without retrying", async (stage) => {
     vi.useFakeTimers();
-    const response = new Response("image bytes");
-    const read = vi.spyOn(response, "arrayBuffer").mockImplementation(stalled);
+    let bodyRead = false;
+    const response = new Response(new ReadableStream({
+      pull() {
+        bodyRead = true;
+        return new Promise<never>(() => {});
+      },
+    }, { highWaterMark: 0 }));
     const fetchFn = vi.fn((_url: string | URL | Request, _init?: RequestInit) =>
       stage === "fetch" ? stalled() : Promise.resolve(response),
     );
@@ -611,12 +618,55 @@ describe("AwwwardsClient request timeouts", () => {
     await vi.advanceTimersByTimeAsync(21);
     await result;
     expect(fetchFn).toHaveBeenCalledOnce();
-    expect(read).toHaveBeenCalledTimes(stage === "body" ? 1 : 0);
+    expect(bodyRead).toBe(stage === "body");
     expect((fetchFn.mock.calls[0][1]!.signal as AbortSignal).aborted).toBe(true);
   });
 
   it("rejects invalid timeout settings", () => {
     expect(() => new AwwwardsClient({ timeoutMs: 0 })).toThrow(RangeError);
     expect(() => new AwwwardsClient({ timeoutMs: Infinity })).toThrow(RangeError);
+  });
+});
+
+describe("CDN download byte cap", () => {
+  afterEach(() => {
+    delete process.env.AWWWARDS_MCP_IMAGE_MAX_BYTES;
+  });
+
+  it("aborts a streamed body that exceeds the configured cap", async () => {
+    process.env.AWWWARDS_MCP_IMAGE_MAX_BYTES = "8";
+    const client = new AwwwardsClient({
+      fetchFn: (async () => new Response("more than eight bytes")) as unknown as typeof fetch,
+    });
+    await expect(client.getThumbnail("x.jpg")).rejects.toThrow(
+      /AWWWARDS_MCP_IMAGE_MAX_BYTES \(8 bytes\)/,
+    );
+  });
+
+  it("rejects a declared oversize body before reading it", async () => {
+    process.env.AWWWARDS_MCP_IMAGE_MAX_BYTES = "8";
+    let pulled = false;
+    const response = new Response(new ReadableStream({
+      pull() {
+        pulled = true;
+        return new Promise<never>(() => {});
+      },
+    }, { highWaterMark: 0 }), { headers: { "content-length": "100" } });
+    const client = new AwwwardsClient({
+      fetchFn: (async () => response) as unknown as typeof fetch,
+    });
+    await expect(client.getThumbnail("x.jpg")).rejects.toThrow(/AWWWARDS_MCP_IMAGE_MAX_BYTES/);
+    expect(pulled).toBe(false);
+  });
+
+  it("returns bodies within the cap and falls back on invalid settings", async () => {
+    process.env.AWWWARDS_MCP_IMAGE_MAX_BYTES = "8";
+    const client = new AwwwardsClient({
+      fetchFn: (async () => new Response("12345678")) as unknown as typeof fetch,
+    });
+    expect((await client.getThumbnail("x.jpg")).toString()).toBe("12345678");
+    expect(cdnMaxBytes({} as NodeJS.ProcessEnv)).toBe(DEFAULT_CDN_MAX_BYTES);
+    expect(cdnMaxBytes({ AWWWARDS_MCP_IMAGE_MAX_BYTES: "nope" } as NodeJS.ProcessEnv))
+      .toBe(DEFAULT_CDN_MAX_BYTES);
   });
 });

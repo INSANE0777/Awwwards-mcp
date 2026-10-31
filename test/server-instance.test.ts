@@ -31,6 +31,7 @@ describe("server factory", () => {
         "hand-rebuild",
         "build_pose_stub",
         "CDP",
+        "untrusted data",
       ]) {
         expect(SERVER_INSTRUCTIONS, word).toContain(word);
       }

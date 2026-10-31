@@ -55,9 +55,10 @@ export async function runIndexer(deps: {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
 
-  const lock = cache.getMeta<{ startedAt: number }>("index:lock", Number.POSITIVE_INFINITY);
-  if (lock && now() - lock.startedAt < INDEX_LOCK_STALE_MS) throw new IndexLockError();
-  cache.setMeta("index:lock", { startedAt: now() });
+  // Atomic acquisition: BEGIN IMMEDIATE + stale takeover inside one
+  // transaction. A failed acquire means another live run owns the lock.
+  const lock = cache.acquireMetaLock("index:lock", INDEX_LOCK_STALE_MS, now());
+  if (!lock) throw new IndexLockError();
 
   try {
     let cats = cache.getMeta<Categories>("categories", CATEGORY_TTL_MS);
@@ -116,7 +117,7 @@ export async function runIndexer(deps: {
     throw err;
   } finally {
     try {
-      cache.deleteMeta("index:lock");
+      lock.release(); // deletes only this owner's row (pid/start/token match)
     } catch {
       // same: never mask the original error with a lock-release failure
     }

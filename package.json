@@ -42,6 +42,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "tsx test/live-smoke.ts",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",
     "prepublishOnly": "npm run build"

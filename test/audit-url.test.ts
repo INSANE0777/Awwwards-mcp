@@ -1,3 +1,6 @@
+import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_UA,
@@ -253,19 +256,38 @@ describe("auditUrl", () => {
     expect(result.coverage).toEqual({ assetsScanned: 2, failed: 0 });
   });
 
-  it("rejects an asset redirect that leaves the final page origin", async () => {
+  it("rejects an asset redirect that leaves the page origin", async () => {
     const calls: string[] = [];
     const fetchFn = (async (input: string | URL | Request) => {
       const url = String(input);
       calls.push(url);
       if (url === PAGE) return responseAt(PAGE, '<link rel="stylesheet" href="/a.css">');
-      return responseAt("https://cdn.other.example/a.css", "body { transition: all 1s }");
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://cdn.other.example/a.css" },
+      });
     }) as unknown as typeof fetch;
     const result = await auditUrl(PAGE, { fetchFn, perfFn: perfOk, limiter: fastLimiter });
     if ("error" in result) throw new Error(result.error);
     expect(calls).toEqual([PAGE, "https://example.com/a.css"]);
     expect(result.coverage).toEqual({ assetsScanned: 0, failed: 1 });
     expect(result.note).toContain("1 asset(s) were skipped");
+  });
+
+  it("follows redirects for the page but never for assets", async () => {
+    const seen: Array<{ url: string; redirect?: string }> = [];
+    const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      seen.push({ url, redirect: init?.redirect });
+      if (url === PAGE) return new Response('<link rel="stylesheet" href="/a.css">', { status: 200 });
+      return new Response("a { transition: all 1s }", { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await auditUrl(PAGE, { fetchFn, perfFn: perfOk, limiter: fastLimiter });
+    if ("error" in result) throw new Error(result.error);
+    expect(seen).toEqual([
+      { url: PAGE, redirect: "follow" },
+      { url: "https://example.com/a.css", redirect: "manual" },
+    ]);
   });
 
   it("stops reading a streamed asset at the 2MB cap", async () => {
@@ -338,6 +360,102 @@ describe("auditUrl", () => {
     }) as unknown as typeof fetch;
     await auditUrl(PAGE, { fetchFn, perfFn: perfOk, limiter: fastLimiter });
     expect(seen).toEqual([AUDIT_UA]);
+  });
+});
+
+describe("auditUrl asset redirect boundaries (loopback)", () => {
+  const fast = { acquire: async () => {} };
+  async function listen(
+    handler: (req: IncomingMessage, res: ServerResponse) => void,
+  ): Promise<{ origin: string; close: () => Promise<void> }> {
+    const server = createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    return {
+      origin: `http://127.0.0.1:${port}`,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+  const page = (res: ServerResponse) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end('<link rel="stylesheet" href="/a.css">');
+  };
+  const redirect = (res: ServerResponse, location: string) => {
+    res.writeHead(302, { location });
+    res.end();
+  };
+  const css = (res: ServerResponse) => {
+    res.writeHead(200, { "content-type": "text/css" });
+    res.end("a { transition: all 1s }");
+  };
+
+  it("cuts a leave-and-return chain at the first leave: the other server gets zero requests", async () => {
+    const hits: string[] = [];
+    let aOrigin = "";
+    const b = await listen((req, res) => {
+      hits.push(`B ${req.url}`);
+      redirect(res, `${aOrigin}/returned.css`); // a return leg that must never be reached
+    });
+    const a = await listen((req, res) => {
+      hits.push(`A ${req.url}`);
+      if (req.url === "/page") page(res);
+      else if (req.url === "/a.css") redirect(res, `${b.origin}/a.css`);
+      else css(res);
+    });
+    aOrigin = a.origin;
+    try {
+      const result = await auditUrl(`${a.origin}/page`, { perfFn: perfOk, limiter: fast });
+      if ("error" in result) throw new Error(result.error);
+      expect(hits).toEqual(["A /page", "A /a.css"]);
+      expect(hits.some((h) => h.startsWith("B"))).toBe(false);
+      expect(result.coverage).toEqual({ assetsScanned: 0, failed: 1 });
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("caps same-origin asset redirects at five hops and never requests the sixth target", async () => {
+    const seen: string[] = [];
+    const a = await listen((req, res) => {
+      const url = req.url ?? "";
+      seen.push(url);
+      if (url === "/page") page(res);
+      else if (url === "/a.css") redirect(res, "/hop1");
+      else if (/^\/hop[1-5]$/.test(url)) {
+        const n = Number(url.slice(4));
+        redirect(res, n < 5 ? `/hop${n + 1}` : "/hop6");
+      } else css(res);
+    });
+    try {
+      const result = await auditUrl(`${a.origin}/page`, { perfFn: perfOk, limiter: fast });
+      if ("error" in result) throw new Error(result.error);
+      expect(seen).toEqual(["/page", "/a.css", "/hop1", "/hop2", "/hop3", "/hop4", "/hop5"]);
+      expect(seen).not.toContain("/hop6");
+      expect(result.coverage).toEqual({ assetsScanned: 0, failed: 1 });
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("still follows allowed same-origin asset redirects", async () => {
+    const seen: string[] = [];
+    const a = await listen((req, res) => {
+      const url = req.url ?? "";
+      seen.push(url);
+      if (url === "/page") page(res);
+      else if (url === "/a.css") redirect(res, "/real/a.css");
+      else css(res);
+    });
+    try {
+      const result = await auditUrl(`${a.origin}/page`, { perfFn: perfOk, limiter: fast });
+      if ("error" in result) throw new Error(result.error);
+      expect(seen).toEqual(["/page", "/a.css", "/real/a.css"]);
+      expect(result.coverage).toEqual({ assetsScanned: 1, failed: 0 });
+      expect(result.antiPatterns.count).toBeGreaterThan(0);
+    } finally {
+      await a.close();
+    }
   });
 });
 

@@ -218,6 +218,18 @@ describe("runIndexer", () => {
     expect(cache.getMeta("index:status", 10_000)).toBeNull();
   });
 
+  it("serializes two runs on the same cache and releases only after both settle", async () => {
+    const cache = new Cache(tmpDir());
+    const first = runIndexer({ client: fakeClient().client, cache });
+    // runIndexer acquires synchronously before its first await, so the second
+    // contender sees the live lock (same path a second process takes).
+    await expect(runIndexer({ client: fakeClient().client, cache }))
+      .rejects.toBeInstanceOf(IndexLockError);
+    const result = await first;
+    expect(result.pagesDone).toBe(tags.length);
+    expect(cache.getMeta("index:lock", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
   it("takes over a stale lock", async () => {
     const cache = new Cache(tmpDir());
     let t = 1_000_000;

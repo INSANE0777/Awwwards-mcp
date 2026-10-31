@@ -4,7 +4,14 @@ Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
 sourced from the web's best award-winning websites.
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-12ujax?v=2)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-12ujax?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/INSANE0777/Awwwards-mcp/main/assets/White%20awwwards-mcp%20logo%20on%20transparent.png">
+    <img src="https://raw.githubusercontent.com/INSANE0777/Awwwards-mcp/main/assets/Awwwards-mcp%20ribbon%20monogram%20with%20mint%20node.png" alt="awwwards-mcp" width="420">
+  </picture>
+</p>
 
 <a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif?v=2" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="480"></a>
 
@@ -130,6 +137,13 @@ JSON-RPC channel — your agent sees the notice as a log line). Set
 self-update; restart your agent afterwards to load it. Nothing is fetched
 more than once a day and serving never waits on the check.
 
+> **`npx` is the core, no-browser path.** `npx -y awwwards-mcp` runs the
+> package from an isolated cache that does not contain Playwright or
+> ffmpeg-static, so `capture_live_site`, `analyze_page_structure`,
+> `record_site_motion`, `verify_build` and the other browser tools return an
+> install hint instead of running. For those, use the
+> [global side-by-side install](#browser-enabled-install-side-by-side).
+
 **Claude Code**
 
 ```bash
@@ -189,7 +203,7 @@ or `~/.gemini/settings.json`):
 ```
 
 **Anything else** — awwwards-mcp is a plain stdio MCP server: point your client
-at `npx -y awwwards-mcp` and it works. To pin a version, use
+at `npx -y awwwards-mcp` for the core tools. To pin a version, use
 `npx -y awwwards-mcp@1.9.0`.
 
 **pi coding agent** has no built-in MCP by design — it uses skills and
@@ -204,17 +218,40 @@ extensions instead. Two options:
    awwwards.com, or use a shared skills directory (`~/.agents/skills/`) so the
    same skill file serves pi and every other agent.
 
-Optional browser captures (needed by `capture_live_site`,
-`analyze_page_structure`, `record_site_motion`, the scroll/hover censuses,
-`verify_build`, `capture_component`, `export_design_tokens`, `analyze_images`
-and `capture_pose_3d`):
+### Browser-enabled install (side-by-side)
+
+Browser captures (`capture_live_site`, `analyze_page_structure`,
+`record_site_motion`, the scroll/hover censuses, `verify_build`,
+`capture_component`, `export_design_tokens`, `analyze_images` and
+`capture_pose_3d`) need optional packages that are **not** dependencies of
+awwwards-mcp. Install the server and those packages side by side in one global
+prefix:
 
 ```bash
-npm install -g playwright && npx playwright install chromium
+npm install -g awwwards-mcp playwright ffmpeg-static
+playwright install chromium
 ```
 
-`record_site_motion` additionally uses ffmpeg; it resolves the `ffmpeg-static`
-package automatically if present.
+Point your MCP client at the installed `awwwards-mcp` command (not `npx`):
+
+```bash
+claude mcp add awwwards -- awwwards-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "awwwards": { "command": "awwwards-mcp" }
+  }
+}
+```
+
+In this layout all three packages are siblings in the same `node_modules`, so
+the server's bare `import("playwright")` / `import("ffmpeg-static")` resolve
+from its own install location; `record_site_motion` uses ffmpeg-static
+automatically. `npx -y awwwards-mcp` has no such siblings: core tools work,
+browser tools cannot. Installing only `awwwards-mcp` globally has the same
+limitation — Playwright and ffmpeg-static must be installed globally too.
 
 ### Resource limits and diagnostics
 
@@ -226,6 +263,7 @@ All optional and read at startup:
 | `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Text + inline image bytes per tool response. Larger responses keep `isError` and other result fields but replace `content` with a `{truncated:true, tool, bytes, limit, note}` JSON block. |
 | `AWWWARDS_MCP_DEBUG_MEMORY` | unset | `1` logs one JSON line per tool call (duration, rss, heap) to stderr - never stdout. |
 | `AWWWARDS_MCP_IMAGE_RETENTION_DAYS` | `0` (off) | A positive N prunes cached `images/` files older than N days once at startup. |
+| `AWWWARDS_MCP_IMAGE_MAX_BYTES` | `26214400` (25 MB) | Maximum size of one cached CDN image/asset download; larger responses (declared or streamed) are aborted before they are fully buffered. |
 
 The v1.14.0 `AWARDS_MCP_*` spellings (one fewer W) are still accepted as a one-release fallback; the `AWWWARDS_MCP_*` name wins when both are set.
 

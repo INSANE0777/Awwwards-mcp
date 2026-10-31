@@ -12,8 +12,8 @@
 // {error}) / 3 io (thrown upstream) — the Task-3 bin mirrors verify-cli's
 // mapping. No console.* in this module: all user-visible output is returned.
 
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { copyFile, lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 // Call-time-only cycle (house precedent: capture.ts/structure.ts) — the
 // vite/next emit dispatch below and emit-next's cssTo/nn/attributeBlocks both
 // resolve at invocation, never at module eval.
@@ -603,14 +603,73 @@ export interface CopyAssetsResult {
   missing: string[];
 }
 
+// Canonical containment: a discovered source or a destination is only usable
+// when its real path (symlinks/junctions resolved) stays under the canonical
+// root. Logical `resolve()` alone is not enough — a link inside the tree can
+// point anywhere.
+const within = (root: string, target: string): boolean => {
+  const rel = relative(root, target);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+};
+
+// Canonical form of a path whose tail may not exist yet: the deepest existing
+// ancestor is realpath-resolved and the missing components are re-appended.
+// Every existing symlink/junction along the way is therefore honored.
+const canonicalPath = async (p: string): Promise<string> => {
+  const abs = resolve(p);
+  const tail: string[] = [];
+  let probe = abs;
+  for (;;) {
+    try {
+      const real = await realpath(probe);
+      return tail.length ? join(real, ...tail.reverse()) : real;
+    } catch {
+      const parent = dirname(probe);
+      if (parent === probe) return abs;
+      tail.push(basename(probe));
+      probe = parent;
+    }
+  }
+};
+
+// Source read guard: the file must exist and resolve inside the canonical root.
+const readContained = async (root: string, file: string): Promise<string | null> => {
+  try {
+    const real = await realpath(file);
+    if (!within(root, real)) return null;
+    return await readFile(real, "utf8");
+  } catch {
+    return null;
+  }
+};
+
+// Destination guard: the canonical destination must stay inside the canonical
+// output root, and an existing final entry must not be a link — a broken
+// symlink would otherwise let the write land outside while canonicalPath()
+// cannot resolve it.
+const containedOutput = async (root: string, dest: string): Promise<string | null> => {
+  if (!within(root, await canonicalPath(dest))) return null;
+  try {
+    if ((await lstat(dest)).isSymbolicLink()) return null;
+  } catch {
+    // final entry does not exist yet: the contained parent decides
+  }
+  return dest;
+};
+
 // Copies every local ref into <outDir>/<into>/<ref path>, preserving the
 // source's relative shape (assets/css/js keep resolving next to their page).
 // Copied css/js files are scanned for their own local deps (fonts, audio,
 // images), so a stylesheet or app script cannot 404 its children. A missing
 // source is a warning (missing[]), never a hard failure.
 export async function copyAssets(html: string, srcDir: string, outDir: string, opts: { into?: string; skip?: string[] } = {}): Promise<CopyAssetsResult> {
-  const root = join(resolve(outDir), opts.into ?? "");
+  const baseOut = resolve(outDir);
+  const root = join(baseOut, opts.into ?? "");
   const srcRoot = resolve(srcDir);
+  const srcRootReal = await canonicalPath(srcRoot);
+  // Containment is against the caller's outDir, not `into`: a junction at
+  // out/public must not become the effective root for astro/next.
+  const outRootReal = await canonicalPath(baseOut);
   const skip = new Set(opts.skip ?? []);
   const copied: string[] = [];
   const missing: string[] = [];
@@ -631,30 +690,44 @@ export async function copyAssets(html: string, srcDir: string, outDir: string, o
   }));
   while (jobs.length > 0) {
     const job = jobs.shift()!;
-    const dest = resolve(job.to);
+    const dest = await containedOutput(outRootReal, job.to);
+    const logicalFrom = job.from;
+    let from: string;
+    try {
+      from = await realpath(job.from);
+    } catch {
+      addMissing(job.label);
+      continue;
+    }
+    // Escape via a symlink/junction in either direction is a missing asset,
+    // never a read or write outside the two roots.
+    if (dest === null || !within(srcRootReal, from)) {
+      addMissing(job.label);
+      continue;
+    }
     if (seen.has(dest)) continue;
     seen.add(dest);
     // skip: the file moves to its own project folder later; still scan it for
     // dependencies so those keep resolving from their original page-relative base.
     if (!skip.has(job.label)) {
       try {
-        await mkdir(dirname(job.to), { recursive: true });
-        await copyFile(job.from, job.to);
+        await mkdir(dirname(dest), { recursive: true });
+        await copyFile(from, dest);
         copied.push(job.label);
       } catch {
         addMissing(job.label);
         continue;
       }
     }
-    if (!TEXT_ASSET.test(job.from)) continue;
-    if (JS_TEXT_ASSET.test(job.from) && VENDOR_JS.test(job.from)) continue;
+    if (!TEXT_ASSET.test(from)) continue;
+    if (JS_TEXT_ASSET.test(from) && VENDOR_JS.test(from)) continue;
     try {
-      const text = await readFile(job.from, "utf8");
-      const found = collectTextAssetRefs(text, JS_TEXT_ASSET.test(job.from));
+      const text = await readFile(from, "utf8");
+      const found = collectTextAssetRefs(text, JS_TEXT_ASSET.test(from));
       found.rejected.forEach(addMissing);
       for (const ref of found.refs) {
         jobs.push({
-          from: resolve(dirname(job.from), ref),
+          from: resolve(dirname(logicalFrom), ref),
           to: join(dirname(job.to), ref.replace(/^\.\//, "")),
           label: ref,
         });
@@ -1128,6 +1201,7 @@ const foldCssText = async (
   depth: number,
   seen: Set<string>,
   warnings: string[],
+  root: string,
 ): Promise<string> => {
   const clean = stripCssComments(source);
   const dir = dirname(rel);
@@ -1162,15 +1236,13 @@ const foldCssText = async (
       warnings.push(`CSS @import cycle skipped: ${ref} (from ${rel})`);
       continue;
     }
-    let childSource: string;
-    try {
-      childSource = await readFile(childAbs, "utf8");
-    } catch {
+    const childSource = await readContained(root, childAbs);
+    if (childSource === null) {
       warnings.push(`CSS @import not found: ${ref} (from ${rel})`);
       continue;
     }
     seen.add(childAbs);
-    const child = await foldCssText(childSource, target, childAbs, depth + 1, seen, warnings);
+    const child = await foldCssText(childSource, target, childAbs, depth + 1, seen, warnings, root);
     seen.delete(childAbs);
     head.push(wrapCssImport(child, condition));
   }
@@ -1185,6 +1257,7 @@ const foldCssText = async (
 const inlineLocalStyles = async (
   html: string,
   srcDir: string,
+  root: string,
 ): Promise<{ html: string; folded: string[]; warnings: string[]; changed: boolean }> => {
   const folded: string[] = [];
   const warnings: string[] = [];
@@ -1209,13 +1282,9 @@ const inlineLocalStyles = async (
     const rel = href.split(/[?#]/)[0] ?? "";
     if (rel === "") continue;
     const abs = resolve(srcDir, rel);
-    let source: string;
-    try {
-      source = await readFile(abs, "utf8");
-    } catch {
-      continue; // copyAssets reports the missing file; the link stays
-    }
-    const css = await foldCssText(source, rel, abs, 0, new Set([abs]), warnings);
+    const source = await readContained(root, abs);
+    if (source === null) continue; // copyAssets reports it missing; the link stays
+    const css = await foldCssText(source, rel, abs, 0, new Set([abs]), warnings, root);
     parts.push(html.slice(last, m.index));
     parts.push(`<style data-folded="${rel}">\n${escapeStyleClose(css)}\n</style>`);
     last = (m.index ?? 0) + tag.length;
@@ -1235,7 +1304,7 @@ const inlineLocalStyles = async (
     const body = m[2] ?? "";
     // New regex per test: the shared global would leak lastIndex between styles.
     if (!new RegExp(CSS_IMPORT_ONE.source, "i").test(stripCssComments(body))) continue;
-    const css = await foldCssText(body, "inline.css", resolve(srcDir, "inline.css"), 0, new Set(), warnings);
+    const css = await foldCssText(body, "inline.css", resolve(srcDir, "inline.css"), 0, new Set(), warnings, root);
     styleParts.push(out.slice(styleLast, m.index));
     styleParts.push(`<style${m[1] ?? ""}>${escapeStyleClose(css)}</style>`);
     styleLast = (m.index ?? 0) + m[0].length;
@@ -1734,6 +1803,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   } catch (err) {
     return { error: `cannot read ${src}: ${err instanceof Error ? err.message : String(err)}` };
   }
+  const srcRoot = await canonicalPath(dirname(src));
   const name = args.name ?? "rebuild-site";
   const authored = args.authored === true;
   let census: NormalizedCensus | undefined;
@@ -1765,7 +1835,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   let cssWarnings: string[] = [];
   let assetHtml = html;
   if (split.rehost) {
-    const inlined = await inlineLocalStyles(html, dirname(src));
+    const inlined = await inlineLocalStyles(html, dirname(src), srcRoot);
     if (inlined.changed) {
       split = splitBuild(inlined.html);
       assetHtml = inlined.html;
@@ -1785,6 +1855,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   // and `vite build` rewrites refs); astro and next serve public/ at the site
   // root — matching each emitter's css re-basing and local link/script hrefs.
   const outDir = resolve(args.out);
+  const outRoot = await canonicalPath(outDir);
   const legacyScripts =
     split.rehost === null
       ? []
@@ -1811,10 +1882,21 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
     for (const entry of rehostScripts) {
       const rel = scriptFile(entry.src);
       if (rel === "" || rel.includes("..")) continue;
+      const to = await containedOutput(outRoot, join(outDir, into, rel));
+      let from: string;
       try {
-        const to = join(outDir, into, rel);
+        from = await realpath(resolve(dirname(src), rel));
+      } catch {
+        missingScripts.push(entry.src);
+        continue;
+      }
+      if (to === null || !within(srcRoot, from)) {
+        missingScripts.push(entry.src);
+        continue;
+      }
+      try {
         await mkdir(dirname(to), { recursive: true });
-        await copyFile(resolve(dirname(src), rel), to);
+        await copyFile(from, to);
       } catch {
         missingScripts.push(entry.src);
       }
@@ -1822,7 +1904,8 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
   }
   try {
     for (const f of emitted.files) {
-      const to = join(outDir, f.path);
+      const to = await containedOutput(outRoot, join(outDir, f.path));
+      if (to === null) throw new Error(`refusing unsafe output path: ${f.path}`);
       await mkdir(dirname(to), { recursive: true });
       await writeFile(to, f.content, "utf8");
     }
@@ -1838,8 +1921,7 @@ export async function buildProject(args: BuildProjectArgs): Promise<BuildProject
       ...emitted.warnings,
       ...censusWarnings,
       ...cssWarnings,
-      ...missing.map((ref) => `asset not found: ${ref}`),
-      ...missingScripts.map((ref) => `asset not found: ${ref}`),
+      ...[...new Set([...missing, ...missingScripts])].map((ref) => `asset not found: ${ref}`),
     ],
   };
 }

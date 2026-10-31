@@ -1,6 +1,14 @@
-import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalizeTechnology } from "./awwwards.js";
@@ -10,6 +18,13 @@ import type { ElementRecord, MotionDna, SiteSummary } from "./types.js";
 // Expired lookups are misses (single-arg getSite returns null for rows older
 // than this window); getSites(Infinity) remains the stale fallback.
 const DEFAULT_SITE_TTL_MS = 10_000;
+// SQLite write-lock wait for the per-operation open/close handles. Without it
+// a second process (indexer vs server, two servers) fails immediately with
+// SQLITE_BUSY instead of waiting for the short write transaction.
+const BUSY_TIMEOUT_MS = 5_000;
+// Keys per IN (...) statement. Keeps the bound-variable count well under
+// SQLite's default 999 limit on older builds/builds configured low.
+const META_KEY_CHUNK = 500;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS sites (
@@ -160,6 +175,9 @@ export class Cache {
   private readonly dbPath: string;
   private readonly now: () => number;
   readonly imagesDir: string;
+  // In-flight image writes keyed by target file. Parallel previews of the same
+  // thumbnail share one fetch/write instead of racing two renames onto it.
+  private readonly imageWrites = new Map<string, Promise<Buffer>>();
   // FTS5 capability of this Node build, probed on the first DB open (the
   // constructor's eager withDb). null = not yet probed; false = FTS5 compiled
   // out → searchSites returns null and callers keep the legacy substring
@@ -169,11 +187,33 @@ export class Cache {
 
   constructor(rootDir: string, now: () => number = Date.now) {
     this.now = now;
-    mkdirSync(rootDir, { recursive: true });
+    // 0700/0600 keep the cache (tokens, page text) private to the OS user.
+    // Windows ignores POSIX modes, so passing them must not fail there.
+    mkdirSync(rootDir, { recursive: true, mode: 0o700 });
     this.imagesDir = join(rootDir, "images");
-    mkdirSync(this.imagesDir, { recursive: true });
+    mkdirSync(this.imagesDir, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") {
+      // Repair pre-existing permissive installs; Windows ignores POSIX modes.
+      try {
+        chmodSync(rootDir, 0o700);
+        chmodSync(this.imagesDir, 0o700);
+      } catch {
+        /* best effort on read-only or foreign-owned dirs */
+      }
+    }
     this.pruneImages();
     this.dbPath = join(rootDir, "cache.db");
+    if (process.platform !== "win32") {
+      let fd: number | undefined;
+      try {
+        fd = openSync(this.dbPath, "a", 0o600);
+        chmodSync(this.dbPath, 0o600);
+      } catch {
+        /* SQLite will surface a real permission error */
+      } finally {
+        if (fd !== undefined) closeSync(fd);
+      }
+    }
     // Create cache.db + schema eagerly so the storage layout exists right
     // after construction. The handle is closed immediately (see withDb).
     this.withDb(() => {});
@@ -213,6 +253,9 @@ export class Cache {
   private withDb<T>(fn: (db: DatabaseSync) => T): T {
     const db = new DatabaseSync(this.dbPath);
     try {
+      // Wait (instead of failing SQLITE_BUSY) when another process holds the
+      // short write transaction used by migrations and lock acquisition.
+      db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       db.exec(SCHEMA);
       // Lazy column migration: databases created before Task 5 lack the
       // elements.siteSlug column. CREATE TABLE above adds it for fresh
@@ -237,11 +280,20 @@ export class Cache {
         /* column already exists */
       }
       if (this.ftsAvailable === null) {
+        // One transaction: an interruption must not leave a partial FTS layer
+        // (e.g. the elements_fts table without its sync triggers).
+        db.exec("BEGIN IMMEDIATE");
         try {
           db.exec(FTS_SCHEMA);
           db.exec(ELEMENTS_FTS_SCHEMA);
+          db.exec("COMMIT");
           this.ftsAvailable = true;
         } catch {
+          try {
+            db.exec("ROLLBACK");
+          } catch {
+            /* no transaction left to roll back */
+          }
           this.ftsAvailable = false; // FTS5 compiled out → legacy fallback
         }
       }
@@ -255,10 +307,28 @@ export class Cache {
           "SELECT COALESCE((SELECT value FROM meta WHERE key = 'elements_fts_version'), '0') AS v",
         ).get() as { v: string };
         if (Number(v) < ELEMENTS_FTS_VERSION) {
-          db.exec("DROP TRIGGER IF EXISTS elements_fts_ai; DROP TRIGGER IF EXISTS elements_fts_au; DROP TRIGGER IF EXISTS elements_fts_ad; DROP TABLE IF EXISTS elements_fts;");
-          db.exec(ELEMENTS_FTS_SCHEMA);
-          db.exec("INSERT INTO elements_fts (slug, title, author, builtWith, category) SELECT slug, title, author, builtWith, category FROM elements");
-          db.prepare("INSERT INTO meta (key, value) VALUES ('elements_fts_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(ELEMENTS_FTS_VERSION));
+          // Re-check inside the write transaction: a second process may have
+          // migrated while this one waited on the busy timeout.
+          db.exec("BEGIN IMMEDIATE");
+          try {
+            const { v: current } = db.prepare(
+              "SELECT COALESCE((SELECT value FROM meta WHERE key = 'elements_fts_version'), '0') AS v",
+            ).get() as { v: string };
+            if (Number(current) < ELEMENTS_FTS_VERSION) {
+              db.exec("DROP TRIGGER IF EXISTS elements_fts_ai; DROP TRIGGER IF EXISTS elements_fts_au; DROP TRIGGER IF EXISTS elements_fts_ad; DROP TABLE IF EXISTS elements_fts;");
+              db.exec(ELEMENTS_FTS_SCHEMA);
+              db.exec("INSERT INTO elements_fts (slug, title, author, builtWith, category) SELECT slug, title, author, builtWith, category FROM elements");
+              db.prepare("INSERT INTO meta (key, value) VALUES ('elements_fts_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(ELEMENTS_FTS_VERSION));
+            }
+            db.exec("COMMIT");
+          } catch (err) {
+            try {
+              db.exec("ROLLBACK");
+            } catch {
+              /* no transaction left to roll back */
+            }
+            throw err;
+          }
         }
         // The fts table is derived and must never gate correctness: if sites
         // has rows but sites_fts is empty (pre-FTS database opened for the
@@ -271,7 +341,24 @@ export class Cache {
         const { s: sitesN } = db.prepare("SELECT COUNT(*) AS s FROM sites").get() as { s: number };
         const { s: ftsN } = db.prepare("SELECT COUNT(*) AS s FROM sites_fts").get() as { s: number };
         if (sitesN > 0 && ftsN === 0) {
-          db.exec("INSERT INTO sites_fts (slug, title, tags, awards) SELECT slug, title, tags, awards FROM sites WHERE slug NOT IN (SELECT slug FROM sites_fts)");
+          db.exec("BEGIN IMMEDIATE");
+          try {
+            // Same double-check as the migration: the other process may have
+            // backfilled while this one waited.
+            const { s: sitesAgain } = db.prepare("SELECT COUNT(*) AS s FROM sites").get() as { s: number };
+            const { s: ftsAgain } = db.prepare("SELECT COUNT(*) AS s FROM sites_fts").get() as { s: number };
+            if (sitesAgain > 0 && ftsAgain === 0) {
+              db.exec("INSERT INTO sites_fts (slug, title, tags, awards) SELECT slug, title, tags, awards FROM sites WHERE slug NOT IN (SELECT slug FROM sites_fts)");
+            }
+            db.exec("COMMIT");
+          } catch (err) {
+            try {
+              db.exec("ROLLBACK");
+            } catch {
+              /* no transaction left to roll back */
+            }
+            throw err;
+          }
         }
       }
       return fn(db);
@@ -416,6 +503,96 @@ export class Cache {
     });
   }
 
+  /**
+   * TTL-filtered meta read for a candidate list: one DB open and a bounded
+   * number of IN (...) statements instead of one open per key. Missing,
+   * expired, or malformed rows are simply absent from the map, so callers
+   * keep their normal "no value" fallback.
+   */
+  getMetaMany<T>(keys: string[], maxAgeMs: number): Map<string, T> {
+    const values = new Map<string, T>();
+    if (keys.length === 0) return values;
+    return this.withReadDb((db) => {
+      const min = this.now() - maxAgeMs;
+      for (let i = 0; i < keys.length; i += META_KEY_CHUNK) {
+        const chunk = keys.slice(i, i + META_KEY_CHUNK);
+        const rows = db.prepare(
+          `SELECT key, value FROM meta WHERE key IN (${chunk.map(() => "?").join(",")}) AND fetchedAt > ?`,
+        ).all(...chunk, min) as { key: string; value: string }[];
+        for (const row of rows) {
+          try {
+            values.set(row.key, JSON.parse(row.value) as T);
+          } catch {
+            /* malformed cached JSON counts as missing */
+          }
+        }
+      }
+      return values;
+    });
+  }
+
+  /**
+   * Atomic cross-process lock stored as a meta row. BEGIN IMMEDIATE serializes
+   * contenders (busy_timeout waits for the winner); a stale row is replaced
+   * inside the same transaction, so two processes can never both acquire.
+   * Release deletes only the exact value this process wrote (pid/start/token),
+   * never another owner's lock.
+   */
+  acquireMetaLock(
+    key: string,
+    staleMs: number,
+    now: number = this.now(),
+  ): { token: string; release: () => void } | null {
+    const token = randomUUID();
+    const startedAt = now;
+    const value = JSON.stringify({ pid: process.pid, startedAt, token });
+    return this.withDb((db) => {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as
+          | { value: string }
+          | undefined;
+        if (row) {
+          let ownerStart: number | null = null;
+          try {
+            const parsed = JSON.parse(row.value) as { startedAt?: unknown };
+            if (typeof parsed?.startedAt === "number" && Number.isFinite(parsed.startedAt)) {
+              ownerStart = parsed.startedAt;
+            }
+          } catch {
+            /* malformed legacy lock: treated as stale below */
+          }
+          // Malformed/half-written locks have no trustworthy age; treating
+          // them as stale is safe because acquisition is serialized here.
+          if (ownerStart !== null && startedAt - ownerStart < staleMs) {
+            db.exec("ROLLBACK");
+            return null;
+          }
+        }
+        db.prepare(
+          `INSERT INTO meta (key, value, fetchedAt) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, fetchedAt=excluded.fetchedAt`,
+        ).run(key, value, startedAt);
+        db.exec("COMMIT");
+        return {
+          token,
+          release: () => {
+            this.withDb((releaseDb) => {
+              releaseDb.prepare("DELETE FROM meta WHERE key = ? AND value = ?").run(key, value);
+            });
+          },
+        };
+      } catch (err) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* no transaction left to roll back */
+        }
+        throw err;
+      }
+    });
+  }
+
   deleteMeta(key: string): void {
     this.withDb((db) => {
       db.prepare("DELETE FROM meta WHERE key = ?").run(key);
@@ -511,16 +688,34 @@ export class Cache {
   }
 
   // Disk cache keyed by the awwwards asset path (immutable content → no TTL).
+  // Private mode + temp-then-rename: a concurrent or interrupted write can
+  // never leave a truncated image that later reads treat as a cache hit.
   async getImage(assetPath: string, fetcher: () => Promise<Buffer>): Promise<Buffer> {
     const ext = assetPath.endsWith(".png") ? ".png" : ".jpg";
     const file = join(this.imagesDir, createHash("sha1").update(assetPath).digest("hex") + ext);
     try {
       return await readFile(file);
     } catch {
-      const buf = await fetcher();
-      await writeFile(file, buf);
-      return buf;
+      /* miss: fetch below */
     }
+    const inflight = this.imageWrites.get(file);
+    if (inflight) return inflight;
+    const write = (async () => {
+      const buf = await fetcher();
+      const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(tmp, buf, { mode: 0o600 });
+        await rename(tmp, file);
+      } catch (err) {
+        await rm(tmp, { force: true }).catch(() => {});
+        throw err;
+      }
+      return buf;
+    })().finally(() => {
+      this.imageWrites.delete(file);
+    });
+    this.imageWrites.set(file, write);
+    return write;
   }
 
   // ---- motion dna ----

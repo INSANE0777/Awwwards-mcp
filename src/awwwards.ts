@@ -154,6 +154,61 @@ async function cancelBody(res: Response): Promise<void> {
   } catch {}
 }
 
+// Default cap for one CDN image/asset download. The preview path embeds these
+// buffers in MCP responses, so an unbounded body is both a memory and payload
+// risk; oversized responses are aborted before they are fully buffered.
+export const DEFAULT_CDN_MAX_BYTES = 25 * 1024 * 1024;
+
+export function cdnMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.AWWWARDS_MCP_IMAGE_MAX_BYTES;
+  if (!raw) return DEFAULT_CDN_MAX_BYTES;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_CDN_MAX_BYTES;
+  const floored = Math.floor(n);
+  return floored > 0 ? floored : DEFAULT_CDN_MAX_BYTES;
+}
+
+async function readCappedBody(res: Response, maxBytes: number, label: string): Promise<Buffer> {
+  const tooLarge = () => new Error(
+    `Refusing ${label}: response exceeds AWWWARDS_MCP_IMAGE_MAX_BYTES (${maxBytes} bytes)`,
+  );
+  // Content-Length is advisory but lets a declared-oversize body fail before
+  // any of it is read; the stream check below covers missing/lying headers.
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await cancelBody(res);
+    throw tooLarge();
+  }
+  const body = res.body;
+  if (!body) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > maxBytes) throw tooLarge();
+    return buf;
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw tooLarge();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already released/cancelled */
+    }
+  }
+  return Buffer.concat(chunks, total);
+}
+
 // Decodes %XX byte-wise and never throws, so malformed escapes cannot fail open.
 // Shortcut: decodes bytes as Latin-1, not UTF-8 — enough for path comparison.
 function decodePercentEscapes(value: string): string {
@@ -376,7 +431,7 @@ export class AwwwardsClient {
       { headers: { "User-Agent": USER_AGENT } },
       async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${label}`);
-        return Buffer.from(await res.arrayBuffer());
+        return readCappedBody(res, cdnMaxBytes(), label);
       },
     );
   }

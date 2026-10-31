@@ -219,6 +219,29 @@ describe("captureBundleForensics", () => {
     expect(rep.warnings.join("\n")).toContain("skipped");
   });
 
+  it("failed initial script fetches consume the maxChunks attempt budget", async () => {
+    const srcs = [0, 1, 2].map((i) => `https://site.test/fail${i}.js`);
+    const map: Record<string, string> = {
+      [PAGE]: `<html>${srcs.map((s) => `<script src="${s}"></script>`).join("")}</html>`,
+    };
+    const calls: string[] = [];
+    const fetchFn = async (url: string) => {
+      calls.push(url);
+      return fakeFetchMap(map)(url);
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn,
+      maxChunks: 1,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(0);
+    expect(calls.filter((c) => c !== PAGE)).toEqual([srcs[0]]);
+    expect(rep.warnings.join("\n")).toContain("attempt budget (1)");
+  });
+
   it("returns { error } and no throw when the page fetch fails", async () => {
     const fetchFn = async () => {
       throw new Error("network down");
@@ -590,6 +613,115 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(calls).toEqual([PAGE, A_JS, VENDOR]); // vendor discovered, junk never fetched
     expect(rep.chunks.map((c) => c.url)).toEqual([A_JS, VENDOR]);
     expect(rep.warnings).toEqual([]);
+  });
+});
+
+describe("captureBundleForensics bounds (Codex review #5)", () => {
+  const countingFetch = (map: Record<string, string>, calls: string[]) => async (url: string) => {
+    calls.push(url);
+    return fakeFetchMap(map)(url);
+  };
+
+  it("failed walk attempts consume the 20-attempt cap — no 21st request", async () => {
+    const names = Array.from({ length: 25 }, (_, i) => `w${String(i).padStart(3, "0")}.js`);
+    // Every ref is real-shaped but the walk URLs all 404: attempts must still
+    // spend the cap, so the run stops after 20 walk requests.
+    const map: Record<string, string> = {
+      [PAGE]: `<html><script src="/a.js"></script></html>`,
+      [A_JS]: names.map((n) => `var p="/${n}";`).join(""),
+    };
+    const calls: string[] = [];
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: countingFetch(map, calls),
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(1); // only the HTML-advertised chunk
+    expect(calls).toHaveLength(2 + 20); // page + a.js + exactly 20 attempts
+    expect(calls.filter((u) => u.includes("/w")).length).toBe(20);
+    expect(calls).not.toContain(`${pageOrigin}/${names[20]}`);
+    expect(rep.warnings.filter((w) => w.startsWith("skipped walk chunk"))).toHaveLength(20);
+    expect(rep.warnings.join("\n")).toContain("walk cap (20)");
+    expect(rep.warnings.join("\n")).toContain("5 discovered chunk(s) left unfetched");
+  });
+
+  it("keeps the chunk deadline through body consumption, not just headers", async () => {
+    const stalled = new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => {}), // never enqueues, never closes
+    });
+    const fetchFn = async (url: string) =>
+      url === PAGE
+        ? new Response(`<html><script src="/a.js"></script></html>`, { status: 200 })
+        : new Response(stalled, { status: 200 });
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn,
+      timeoutMs: 250,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(0);
+    expect(rep.warnings.join("\n")).toContain("timed out");
+  });
+
+  it("cuts an oversized streamed chunk at the byte cap and cancels the body", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(512).fill(120);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls++;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchFn = async (url: string) =>
+      url === PAGE
+        ? new Response(`<html><script src="/a.js"></script></html>`, { status: 200 })
+        : new Response(stream, { status: 200 });
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn,
+      maxTotalBytes: 1500,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(rep.chunkCount).toBe(0);
+    expect(cancelled).toBe(true);
+    // 512-byte pulls: the third crosses 1500; no full materialization.
+    expect(pulls).toBeLessThanOrEqual(5);
+    expect(rep.warnings.join("\n")).toContain("maxTotalBytes");
+  });
+
+  it("cuts an oversized streamed HTML body at the byte cap", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls++;
+        controller.enqueue(new Uint8Array(1024).fill(60));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn: async () => new Response(stream, { status: 200 }),
+      maxTotalBytes: 2048,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(true);
+    if (!("error" in rep)) return;
+    expect(rep.error).toContain("maxTotalBytes");
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThanOrEqual(5);
   });
 });
 

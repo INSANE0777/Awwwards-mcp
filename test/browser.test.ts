@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { attachPage, closeAttached, validateCdpEndpoint } from "../src/browser.js";
 
@@ -184,6 +186,62 @@ describe("attachPage", () => {
       expect(res.error).toContain("ECONNREFUSED");
     }
     expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("requests discovery in manual redirect mode and refuses a 3xx", async () => {
+    const seen: Array<string | undefined> = [];
+    const { chromium, loader } = fakeLoader([fakePage("https://example.com/")]);
+    const res = await attachPage(
+      loader,
+      "http://127.0.0.1:9222",
+      "https://example.com/",
+      async (_url, init) => {
+        seen.push(init?.redirect);
+        return { ok: false, status: 302, json: async () => ({}) };
+      },
+    );
+    expect(seen).toEqual(["manual"]);
+    expect("error" in res).toBe(true);
+    if ("error" in res) {
+      expect(res.error).toContain("refused a redirect");
+      expect(res.error).toContain("HTTP 302");
+    }
+    expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("refuses an opaque redirect from discovery", async () => {
+    const { chromium, loader } = fakeLoader([fakePage("https://example.com/")]);
+    const res = await attachPage(
+      loader,
+      "http://127.0.0.1:9222",
+      "https://example.com/",
+      async () => ({ ok: false, status: 0, type: "opaqueredirect", json: async () => ({}) }),
+    );
+    expect("error" in res).toBe(true);
+    if ("error" in res) expect(res.error).toContain("refused a redirect");
+    expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("does not follow a loopback discovery redirect (local server)", async () => {
+    const hits: string[] = [];
+    const server = createServer((req, res) => {
+      hits.push(req.url ?? "");
+      res.writeHead(302, { location: WS_TARGET });
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const { chromium, loader } = fakeLoader([fakePage("https://example.com/")]);
+    try {
+      const res = await attachPage(loader, `http://127.0.0.1:${port}`, "https://example.com/");
+      expect("error" in res).toBe(true);
+      if ("error" in res) expect(res.error).toContain("refused a redirect");
+      // One loopback request; the redirect target is never contacted.
+      expect(hits).toEqual(["/json/version"]);
+      expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("keeps the direct ws input path without discovery", async () => {

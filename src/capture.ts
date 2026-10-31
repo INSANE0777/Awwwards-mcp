@@ -9,7 +9,7 @@ import { resolveViewport } from "./viewport.js";
 
 export const CAPTURE_INSTALL_HINT =
   "Full-page capture needs Playwright, which is an optional dependency.\n" +
-  "Install it where this server runs (globally works for a global install):  npm install -g playwright && npx playwright install chromium\n" +
+  "Install the side-by-side global layout and run the installed awwwards-mcp (not npx):  npm install -g awwwards-mcp playwright ffmpeg-static && npx playwright install chromium\n" +
   "Then retry the capture or structure tool (or restart your agent afterward).";
 
 // Inline previews are base64, ~33% larger than the PNG. Past this budget the

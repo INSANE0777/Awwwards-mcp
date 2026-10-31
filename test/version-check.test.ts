@@ -3,6 +3,7 @@ import {
   buildUpdateNotice,
   compareVersions,
   parseVersion,
+  selfUpdateCommand,
 } from "../src/version-check.js";
 
 describe("parseVersion", () => {
@@ -23,6 +24,28 @@ describe("compareVersions", () => {
     expect(compareVersions("1.0.1", "1.0.0")).toBe(1);
     expect(compareVersions("1.0.0", "1.0.0")).toBe(0);
     expect(compareVersions("1.0.0", "2.0.0")).toBe(-1);
+  });
+});
+
+describe("selfUpdateCommand", () => {
+  it("uses cmd.exe /c for the npm shim on Windows without a shell", () => {
+    expect(selfUpdateCommand("1.2.3", "win32")).toEqual({
+      cmd: "cmd.exe",
+      args: ["/d", "/s", "/c", "npm install -g awwwards-mcp@1.2.3"],
+      shell: false,
+    });
+    expect(selfUpdateCommand("1.2.3", "linux")).toEqual({
+      cmd: "npm",
+      args: ["install", "-g", "awwwards-mcp@1.2.3"],
+      shell: false,
+    });
+  });
+
+  it("rejects version strings that could be shell syntax", () => {
+    expect(selfUpdateCommand("1.2.3 && calc", "win32")).toBeNull();
+    expect(selfUpdateCommand("$(id)", "linux")).toBeNull();
+    expect(selfUpdateCommand("1.2.3-beta.1", "linux")).not.toBeNull();
+    expect(selfUpdateCommand("1.2.3+build.5", "linux")).not.toBeNull();
   });
 });
 

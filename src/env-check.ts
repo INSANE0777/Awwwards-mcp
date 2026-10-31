@@ -55,9 +55,9 @@ function writeState(): void {
 
 export const ENV_FIX_HINTS = {
   playwright:
-    "awwwards-mcp: live capture/analyze/motion tools need Playwright - run:  npm install -g playwright && npx playwright install chromium  (restart your agent afterward)\n",
+    "awwwards-mcp: live capture/analyze/motion tools need Playwright - run:  npm install -g awwwards-mcp playwright ffmpeg-static && npx playwright install chromium  (use the installed awwwards-mcp, not npx; restart your agent afterward)\n",
   ffmpeg:
-    "awwwards-mcp: motion recording needs ffmpeg-static - run:  npm install -g ffmpeg-static  (restart your agent afterward)\n",
+    "awwwards-mcp: motion recording needs ffmpeg-static - run:  npm install -g awwwards-mcp ffmpeg-static  (use the installed awwwards-mcp, not npx; restart your agent afterward)\n",
   webcrack:
     "awwwards-mcp: optional - bundle de-obfuscation/unpack mode needs webcrack - run:  npm install -g webcrack  (restart your agent afterward; bundle fetch/grep works without it)\n",
 } as const;
