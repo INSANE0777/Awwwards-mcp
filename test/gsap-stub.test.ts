@@ -119,7 +119,7 @@ describe("buildGsapStub", () => {
   });
 
   it("neutralizes newlines and angle brackets in comment-borne census fields", () => {
-    const payload = "\n}); alert('pwn'); //</script><script>";
+    const payload = "\rX\nB\u2028C\u2029D</script><script>";
     const html = buildGsapStub(
       null,
       census([
@@ -130,10 +130,12 @@ describe("buildGsapStub", () => {
         }),
       ]),
     );
-    expect(html).not.toContain("\n}); alert('pwn')");
+    expect(html).not.toContain("\rX");
+    expect(html).not.toContain("X\nB");
+    expect(html).not.toContain("B\u2028C");
+    expect(html).not.toContain("C\u2029D");
     expect(html).not.toContain("</script><script>");
     expect(html).toContain("\\u003c/script\\u003e");
-    expect(html).toContain("alert('pwn')"); // inert inside the same line comment
   });
 
   it("neutralizes all line terminators in the camera-source comment", () => {
