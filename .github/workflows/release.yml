@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -58,9 +59,9 @@ jobs:
         if: steps.npmcheck.outputs.published != 'true'
         run: |
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            npm publish ".release-artifact/${{ steps.artifact.outputs.filename }}" --tag beta
+            npm publish ".release-artifact/${{ steps.artifact.outputs.filename }}" --tag beta --provenance
           else
-            npm publish ".release-artifact/${{ steps.artifact.outputs.filename }}" --tag latest
+            npm publish ".release-artifact/${{ steps.artifact.outputs.filename }}" --tag latest --provenance
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -28,8 +28,8 @@ export const DISCOVERY_TIMEOUT_MS = 5000;
 /** Minimal fetch seam so tests never open a socket; global fetch is the default. */
 export type FetchLike = (
   url: string,
-  init?: { signal?: AbortSignal },
-) => Promise<{ ok?: boolean; status?: number; json: () => Promise<unknown> }>;
+  init?: { signal?: AbortSignal; redirect?: "manual" },
+) => Promise<{ ok?: boolean; status?: number; type?: string; json: () => Promise<unknown> }>;
 
 /** Canonical href for exact-match comparison; invalid URLs compare as-is. */
 function normalizeHref(raw: string): string {
@@ -80,7 +80,9 @@ function availableOrigins(pages: any[]): string[] {
 /**
  * Resolve an http CDP endpoint to the browser's ws endpoint and re-validate it:
  * whatever /json/version returns is untrusted until it passes the same loopback
- * rules as a user-supplied ws URL.
+ * rules as a user-supplied ws URL. Redirects are never followed: a manual-mode
+ * 3xx (or opaque redirect) fails the discovery, so a loopback endpoint cannot
+ * bounce the request elsewhere.
  */
 async function discoverWsEndpoint(
   httpEndpoint: string,
@@ -89,7 +91,20 @@ async function discoverWsEndpoint(
   const versionUrl = new URL("/json/version", httpEndpoint).href;
   let payload: unknown;
   try {
-    const res = await fetchFn(versionUrl, { signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS) });
+    const res = await fetchFn(versionUrl, {
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+      redirect: "manual",
+    });
+    if (
+      res.type === "opaqueredirect" ||
+      (typeof res.status === "number" && res.status >= 300 && res.status < 400)
+    ) {
+      return {
+        error:
+          `CDP discovery refused a redirect (${versionUrl}): HTTP ${res.status ?? "redirect"}. ` +
+          ATTACH_SETUP_HINT,
+      };
+    }
     if (res.ok === false) {
       return {
         error: `CDP discovery failed (${versionUrl}): HTTP ${res.status ?? "error"}. ${ATTACH_SETUP_HINT}`,

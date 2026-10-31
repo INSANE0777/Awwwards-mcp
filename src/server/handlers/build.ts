@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { buildGsapStub } from "../../gsap-stub.js";
 import { censusInputError, poseCensusError, scaffoldMotionManifest, unwrapScrollCensus } from "../../motion-manifest.js";
-import type { PoseGrid } from "../../pose3d.js";
+import { poseGridInputError, type PoseGrid } from "../../pose3d.js";
 import { buildPoseStubHtml, poseSuggestions } from "../../pose-stub.js";
 import type { ScrollCensus } from "../../census.js";
 import type { HandlerContext } from "../context.js";
@@ -47,6 +47,9 @@ export async function build_pose_stub(ctx: HandlerContext, args: {
         isError: true,
       };
     }
+    // Frames ship inline: require bounded PNG payloads and finite numbers.
+    const gridError = poseGridInputError(args.poseGrid);
+    if (gridError) return { content: [text(gridError)], isError: true };
     // The optional census feeds poseSuggestions, which indexes counts[] and
     // anims[] directly. Validate and unwrap before the notes path.
     let poseCensus: ScrollCensus | undefined;

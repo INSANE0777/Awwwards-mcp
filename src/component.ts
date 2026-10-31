@@ -213,6 +213,26 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
     return rows;
   }
 
+  // Text inside a hidden, inert, or aria-hidden subtree is not visible page
+  // copy. Capture the node/styles but omit its leaf text so offscreen templates
+  // and assistive-only strings never reach the pack. Ancestors count too.
+  function hiddenFromAT(el: any): boolean {
+    let cur = el;
+    for (let i = 0; cur && i < 100; i++) {
+      try {
+        if (cur.hasAttribute && (cur.hasAttribute("hidden") || cur.hasAttribute("inert"))) return true;
+        if (
+          cur.getAttribute &&
+          String(cur.getAttribute("aria-hidden") || "").trim().toLowerCase() === "true"
+        ) {
+          return true;
+        }
+      } catch {}
+      cur = cur.parentElement;
+    }
+    return false;
+  }
+
   function ser(el: any): ComponentNode | null {
     if (count >= maxNodes) return null;
     count++;
@@ -237,8 +257,10 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
     } catch {}
     try {
       if (!el.children || el.children.length === 0) {
-        const t = el.textContent;
-        if (t && t.trim()) node.text = String(t).trim().slice(0, 200);
+        if (!hiddenFromAT(el)) {
+          const t = el.textContent;
+          if (t && t.trim()) node.text = String(t).trim().slice(0, 200);
+        }
       }
     } catch {}
     try {

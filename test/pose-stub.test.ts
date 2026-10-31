@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildPoseStubHtml } from "../src/pose-stub.js";
 import { createHandlers } from "../src/server.js";
-import type { PoseGrid } from "../src/pose3d.js";
+import { POSE_LIMITS, type PoseGrid } from "../src/pose3d.js";
 import type { ScrollCensus } from "../src/census.js";
 import type { AwwwardsClient } from "../src/awwwards.js";
 import type { Cache } from "../src/cache.js";
 
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const DATA_URL = (i: number) =>
-  "data:image/png;base64," + Buffer.from("frame-" + i).toString("base64");
+  "data:image/png;base64," + Buffer.concat([PNG_MAGIC, Buffer.from([i])]).toString("base64");
 
 // Minimal well-formed grid: 6 steps × 1 frame each, ascending scroll ratios.
 function grid(): PoseGrid {
@@ -107,6 +108,55 @@ describe("buildPoseStubHtml", () => {
   });
 });
 
+describe("buildPoseStubHtml input validation", () => {
+  it("rejects a non-PNG data URL", () => {
+    const g = grid();
+    g.snapshots[0]!.frames[0]!.dataUrlPng = "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==";
+    expect(() => buildPoseStubHtml(g)).toThrow(/PNG data URL/);
+  });
+
+  it("rejects invalid base64 inside a PNG prefix", () => {
+    const g = grid();
+    g.snapshots[1]!.frames[0]!.dataUrlPng = "data:image/png;base64,not base64!!";
+    expect(() => buildPoseStubHtml(g)).toThrow(/PNG data URL/);
+  });
+
+  it("rejects an oversized frame", () => {
+    const g = grid();
+    g.snapshots[0]!.frames[0]!.dataUrlPng =
+      "data:image/png;base64," +
+      Buffer.concat([PNG_MAGIC, Buffer.alloc(POSE_LIMITS.maxFrameBytes)]).toString("base64");
+    expect(() => buildPoseStubHtml(g)).toThrow(/per-frame limit/);
+  });
+
+  it("rejects more frames than the cap", () => {
+    const g = grid();
+    const frame = { label: "canvas", dataUrlPng: DATA_URL(0) };
+    g.snapshots = Array.from({ length: POSE_LIMITS.maxFrames + 1 }, (_, i) => ({
+      step: i,
+      scrollY: i,
+      scrollRatio: 0,
+      frames: [frame],
+    }));
+    expect(() => buildPoseStubHtml(g)).toThrow(/more than 120 frames/);
+  });
+
+  it("rejects non-finite numeric fields and anchors", () => {
+    expect(() => buildPoseStubHtml({ ...grid(), canvasW: Number.NaN })).toThrow(/canvasW/);
+    const anchored = grid();
+    anchored.snapshots[0]!.scrollRatio = Number.POSITIVE_INFINITY;
+    expect(() => buildPoseStubHtml(anchored)).toThrow(/scrollRatio/);
+  });
+
+  it("neutralizes </script> breakout in census suggestion comments", () => {
+    const c = census();
+    c.anims[0]!.easing = "</script><script>alert(1)</script>";
+    const html = buildPoseStubHtml(grid(), { scrollCensus: c });
+    expect(html.toLowerCase()).not.toContain("</script><script");
+    expect(html).toContain("\\u003c/script");
+  });
+});
+
 describe("pose handlers", () => {
   it("capture_pose_3d returns the injected grid as JSON", async () => {
     const h = createHandlers(deps({ pose3dFn: async () => grid() }));
@@ -179,6 +229,42 @@ describe("pose handlers", () => {
     });
     expect(res.isError).toBe(true);
     expect((res.content[0] as any).text).toContain("poseGrid has no captured frames");
+  });
+
+  it("build_pose_stub rejects script-breakout and non-PNG frame payloads", async () => {
+    const h = createHandlers(deps({}));
+    for (const payload of [
+      "</script><script>alert(1)</script>",
+      "data:text/html;base64,PHNjcmlwdD4=",
+      "data:image/png;base64,%%%%",
+    ]) {
+      const bad = grid();
+      bad.snapshots[2]!.frames[0]!.dataUrlPng = payload;
+      const res = await h.build_pose_stub({ poseGrid: bad });
+      expect(res.isError).toBe(true);
+      expect((res.content[0] as any).text).toContain("PNG data URL");
+    }
+  });
+
+  it("build_pose_stub rejects NaN and Infinity grid numbers", async () => {
+    const h = createHandlers(deps({}));
+    const nan = { ...grid(), canvasH: Number.NaN };
+    const inf = grid();
+    inf.snapshots[0]!.scrollRatio = Number.POSITIVE_INFINITY;
+    for (const poseGrid of [nan, inf]) {
+      const res = await h.build_pose_stub({ poseGrid });
+      expect(res.isError).toBe(true);
+      expect((res.content[0] as any).text).toMatch(/finite/);
+    }
+  });
+
+  it("build_pose_stub still returns a renderable stub for a valid grid", async () => {
+    const h = createHandlers(deps({}));
+    const res = await h.build_pose_stub({ poseGrid: grid() });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.stubHtml).toMatch(/^<!doctype html>/);
+    expect(parsed.stubHtml).toContain("const FRAMES = [\"data:image/png;base64,");
   });
 
   it("build_pose_stub accepts a full census without gsapTriggers", async () => {

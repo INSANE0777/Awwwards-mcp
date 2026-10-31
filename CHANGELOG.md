@@ -52,6 +52,20 @@ unchanged: `full` still registers all 39 tools.
 
 - Vitest 4.1.12 and `@vitest/mocker` 4.1.12 (dev only), clearing the two moderate advisories; no runtime dependency change.
 
+### Review hardening
+
+- `build_project` now enforces canonical source/output containment for asset, stylesheet, script and generated-file reads/writes, rejecting symlink and junction escapes.
+- Pose evidence is validated as PNG data URLs with frame/total byte and count caps; finite numeric fields are required, and embedded JSON escapes `<`, preventing `</script>` breakout in generated stubs.
+- `audit_url` validates protocol and origin before every asset redirect hop (max 5); CDP discovery refuses redirects instead of following them.
+- Bundle acquisition counts attempted initial and walk fetches against their caps, keeps deadlines through body consumption, and streams HTML/chunk bodies against byte limits.
+- Browser launch subscribes to child `error` and bounds CDP discovery/WebSocket/command waits, returning an error instead of crashing.
+- Advertised Unix bins have shebangs and alias-safe entry guards; `npm run pack:smoke` installs the tarball and exercises every bin on CI.
+- Browser-enabled installs are documented as a global side-by-side layout (`awwwards-mcp`, `playwright`, `ffmpeg-static`); `npx` is core-only.
+- Score sorting batches metadata reads instead of reopening SQLite per candidate. Cache locks are atomic and owner-scoped; SQLite uses a busy timeout and transactional migrations.
+- Cache directories/database and newly written images use private POSIX modes, image writes are atomic, image downloads are capped, attribute-hidden (hidden/inert/aria-hidden) page text is omitted from component evidence, and page-derived text is labeled untrusted.
+- npm publication requests provenance.
+- README logo and icon use repository-relative assets so GitHub renders them on the branch and after merge.
+
 ## v1.15.1 - 2026-10-30
 
 Tool-definition clarity: descriptions, parameter semantics and published server

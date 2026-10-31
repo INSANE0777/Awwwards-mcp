@@ -1639,6 +1639,41 @@ describe("search sortBy score", () => {
     expect(order[2]).toBeLessThan(order[3]);
     expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/sites/")).length).toBe(0); // enrichment reads cache only
   });
+
+  it("sorts many candidates with one batched meta read", async () => {
+    const cache = new Cache(tmpDir());
+    const sites = Array.from({ length: 60 }, (_, i) => site({
+      slug: `bulk-${String(i).padStart(3, "0")}`,
+      createdAt: 1789516800 + i,
+      thumbnailPath: `submissions/bulk-${i}.jpg`,
+    }));
+    cache.upsertSites(sites);
+    for (let i = 0; i < 60; i++) cache.setMeta(`detail:bulk-${String(i).padStart(3, "0")}`, { score: i % 7 });
+    const readSpy = vi.spyOn(cache, "withReadDb");
+    const { client } = fakeClient();
+    vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+
+    const res = await createHandlers({ client, cache }).search_sites({
+      sortBy: "score", count: 12, responseMode: "compact",
+    });
+
+    // One batched metadata read for all 60 candidates, not one open per slug.
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    const expected = sites
+      .map((s, i) => ({ s, score: i % 7 }))
+      .sort((a, b) =>
+        b.score - a.score ||
+        b.s.createdAt - a.s.createdAt ||
+        a.s.slug.localeCompare(b.s.slug))
+      .slice(0, 12)
+      .map((w) => w.s.slug);
+    const body = (res.content[0] as { type: "text"; text: string }).text;
+    const positions = expected.map((slug) => body.indexOf(`slug: ${slug}`));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    for (let i = 1; i < positions.length; i++) {
+      expect(positions[i - 1]).toBeLessThan(positions[i]);
+    }
+  });
 });
 
 describe("analyze_page_structure", () => {

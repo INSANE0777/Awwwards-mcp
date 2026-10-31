@@ -1,9 +1,11 @@
+#!/usr/bin/env node
 // awwwards-build-project — build_project CLI wrapper (plan Task 3). Output is
 // ONE machine-parseable JSON line: {outDir, target, files, warnings} on
 // success, {error} on failure. Exit codes: 0 ok, 2 usage (malformed args),
 // 3 io (unreadable html, unwritable out, thrown error). The MCP build_project
 // handler calls buildProject() itself — this bin exists for agents on plain
 // CLIs; verify-cli's shape (DI fn, main guard) is mirrored exactly.
+import { isCliEntry } from "./cli-entry.js";
 import { parseBuildArgs, buildProject, type BuildProjectFn } from "./build-project.js";
 
 export type { BuildProjectFn };
@@ -31,9 +33,16 @@ export async function runBuildProjectCli({ args, write, buildFn }: RunBuildProje
   }
 }
 
-// Main guard (house pattern): only run when this compiled file is the entry,
-// so tests can import runBuildProjectCli without side effects.
-if (process.argv[1]?.replace(/\\/g, "/").endsWith("build-project-cli.js")) {
+// Main guard (house pattern): only run when this file is the entry, so tests
+// can import runBuildProjectCli without side effects. isCliEntry follows npm's
+// extensionless bin symlink and the advertised alias.
+if (
+  isCliEntry(import.meta.url, process.argv[1], [
+    "awwwards-build-project",
+    "build-project-cli.js",
+    "build-project-cli.ts",
+  ])
+) {
   runBuildProjectCli({
     args: process.argv.slice(2),
     write: (line) => process.stdout.write(line + "\n"),

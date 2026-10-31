@@ -44,6 +44,16 @@ CLI — `awwwards-verify <buildUrl> <referenceUrl> [--viewport desktop|mobile]`
 prints one JSON verdict line (exit 0 pass / 1 warn / 2 fail / 3 error / 4 usage).
 Note: it spawns a real browser.
 
+**Install layout.** Bins are thin wrappers (`src/cli-entry.ts` decides whether
+they are the entry). Browser features import `playwright` / `ffmpeg-static` as
+bare optional deps and resolve them from the package's own install location.
+The supported browser-enabled layout is a global side-by-side install
+(`npm install -g awwwards-mcp playwright ffmpeg-static`, MCP command
+`awwwards-mcp`); `npx -y awwwards-mcp` is core-tools-only because its cache has
+no sibling packages. `scripts/pack-smoke.mjs` installs the packed tarball into a
+throwaway global prefix to prove the installed-bin aliases and that layout,
+including a synthetic side-by-side `playwright` / `ffmpeg-static` import.
+
 ## Module map (`src/`)
 
 | Module | Lines | Role |
@@ -216,6 +226,12 @@ called from `server-instance.ts`, once per `serveStdio` factory invocation.
   `process.memoryUsage()`) on stderr; stdout stays JSON-RPC-only.
 - `AWWWARDS_MCP_IMAGE_RETENTION_DAYS=N` - prune cached images older than N days
   at `Cache` construction; 0/unset keeps them.
+- `AWWWARDS_MCP_IMAGE_MAX_BYTES` (default `26214400`, 25 MB) - cap for one CDN
+  image/asset download; a declared or streamed oversize body is aborted and
+  never fully buffered. Cache dirs are created 0700 and the database is 0600
+  on POSIX; newly written images use 0600 and atomic rename. Existing cache
+  dirs are repaired on open; existing image files are not chmod-repaired.
+  Windows ignores the modes.
 - Screenshots: 2.5 MB base64 inline budget (`maxInlineBytes` overrides it),
   estimated from the raw buffer (`4*ceil(n/3)`) before conversion;
   `inline:false` omits the preview. Pose and component inline images count
@@ -236,6 +252,7 @@ one-release fallback; the canonical `AWWWARDS_MCP_*` value wins.
 | `scripts/enrich-styles.mjs` | Phase-1 style-classification experiment via a self-hosted simple-jev classifier (spec: `docs/superpowers/specs/2026-09-20-jev-style-enrichment-design.md`). |
 | `scripts/make-demo.mjs` | Builds the README demo assets. |
 | `scripts/record-scrollthrough.mjs` | The validated recording script `motion.ts` was ported from. |
+| `scripts/pack-smoke.mjs` | `npm run pack:smoke` — packs, installs into a temp global prefix, runs all four bins and the side-by-side browser layout (CI, after build). |
 | `scripts/skill-memory.mjs` | Journal → techniques distillation for the skills flywheel (`skills/_memory/techniques.json`). |
 
 ## Skills & showcase
@@ -259,6 +276,10 @@ These are hard-won; check for them before "simplifying":
   time and resolve lazily at runtime. Capture/structure/a11y/motion/browser
   failures return in-band install hints; component/images/tokens pass the raw
   loader/module error through.
+- Bin wrappers use `isCliEntry` (`src/cli-entry.ts`) — realpath plus the
+  advertised aliases — because npm runs a bin through an extensionless
+  `.bin` symlink. Never go back to a compiled-filename suffix check: it misses
+  the alias and exits 0 silently.
 - stdout is the MCP JSON-RPC channel — every log/notice goes to stderr.
 - New crawler code must keep the politeness contract: `/websites/…` paths
   only, 1 req/s, no query-string pagination (`/tag/`, `/search-websites`,

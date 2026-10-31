@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { runVerifyCli } from "../src/verify-cli.js";
 import type { VerifyReport } from "../src/verify-build.js";
 import type { RunVerifyCliIo } from "../src/verify-cli.js";
@@ -97,12 +95,5 @@ describe("runVerifyCli (C4, offline injected verifyBuildFn)", () => {
     const eq = harness();
     await eq.run(["--viewport=desktop", "https://b", "https://r"], report("pass"));
     expect(eq.calls[0].viewport).toBe("desktop");
-  });
-});
-
-describe("verify-cli main guard (house pattern)", () => {
-  it("guards the entry on the compiled verify-cli.js filename so imports stay side-effect-free", () => {
-    const src = readFileSync(join(__dirname, "..", "src", "verify-cli.ts"), "utf8");
-    expect(src).toContain('process.argv[1]?.replace(/\\\\/g, "/").endsWith("verify-cli.js")');
   });
 });

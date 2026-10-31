@@ -171,9 +171,16 @@ export function createHandlerContext(deps: CreateHandlersDeps): HandlerContext {
   // follow, newest-first.
   function orderByScore(list: SiteSummary[], sortBy: SearchArgs["sortBy"]): SiteSummary[] {
     if (sortBy !== "score") return list;
+    // One batched cache read for every candidate: per-site getMeta opened the
+    // SQLite file once per row (N+1) and made score sorting O(candidates) DB
+    // opens. map() preserves the input order for the stable sort fallback.
+    const scores = cache.getMetaMany<{ score?: number }>(
+      list.map((s) => `detail:${s.slug}`),
+      SITE_TTL_MS,
+    );
     const withScores = list.map((s) => ({
       s,
-      score: cache.getMeta<{ score?: number }>(`detail:${s.slug}`, SITE_TTL_MS)?.score ?? null,
+      score: scores.get(`detail:${s.slug}`)?.score ?? null,
     }));
     withScores.sort(
       (a, b) =>

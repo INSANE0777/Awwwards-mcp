@@ -1,4 +1,4 @@
-import type { PoseGrid } from "./pose3d.js";
+import { poseGridInputError, type PoseGrid } from "./pose3d.js";
 import type { ScrollCensus } from "./census.js";
 
 // Deterministic one-line derived note values shared with the server handler's
@@ -19,6 +19,15 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Inline-script literal: JSON with "<" neutralized so no embedded string can
+// terminate the surrounding <script> (</script> breakout).
+const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, "\\u003c");
+
+// Line-comment text: neutralize "<" and collapse line terminators so an
+// attacker-controlled census value cannot escape the comment or the script.
+const commentText = (s: string): string =>
+  s.replace(/</g, "\\u003c").replace(/[\r\n\u2028\u2029]+/g, " ");
+
 const r4 = (n: number): number => Math.round(n * 1000) / 1000;
 
 // PURE + synchronous: renders a PoseGrid as a standalone three.js stub page —
@@ -32,6 +41,8 @@ export function buildPoseStubHtml(
   grid: PoseGrid,
   extra?: { scrollCensus?: ScrollCensus },
 ): string {
+  const invalid = poseGridInputError(grid);
+  if (invalid) throw new Error(invalid);
   const frames = grid.snapshots
     .flatMap((s) => s.frames.map((f) => f.dataUrlPng))
     .filter(Boolean);
@@ -58,13 +69,13 @@ export function buildPoseStubHtml(
       );
     if (s.ease.length > 0)
       lines.push(
-        `// SUGGESTION(ease) from reference census: ${s.ease.join(", ")} — reuse these easings between camera anchors`,
+        `// SUGGESTION(ease) from reference census: ${commentText(s.ease.join(", "))} — reuse these easings between camera anchors`,
       );
     suggestions = lines.length ? lines.join("\n") + "\n" : "";
   }
 
-  const framesJson = JSON.stringify(frames);
-  const anchorsJson = JSON.stringify(anchors);
+  const framesJson = scriptJson(frames);
+  const anchorsJson = scriptJson(anchors);
 
   return `<!doctype html>
 <!-- awwwards-mcp pose stub (pose-grid-v1) — source: ${esc(grid.url)} -->
