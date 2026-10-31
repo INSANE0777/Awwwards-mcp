@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { canonicalizeTechnology } from "./awwwards.js";
 import type { ElementRecord, MotionDna, SiteSummary } from "./types.js";
 
 // Freshness window applied by getSite() when the caller does not pass one.
@@ -370,10 +371,15 @@ export class Cache {
     limit?: number,
     matchMode: "AND" | "OR" = "AND",
   ): SiteSummary[] | null {
-    // Sanitization strips quotes/parens/operators, leaving [a-z0-9-] only —
-    // the quoted `"tok"*` MATCH string below cannot inject FTS syntax.
-    const tokens = query.toLowerCase().split(/\s+/)
-      .map((t) => t.replace(/[^a-z0-9-]/g, ""))
+    // Sanitization turns every punctuation run into a token boundary, the way
+    // the FTS tokenizer indexes text — "next.js" is ["next", "js"], never a
+    // glued "nextjs" that matches nothing. Split BEFORE alias expansion so a
+    // wrapped alias ("nextjs,", "(nextjs)") is still recognized, then split
+    // again because aliases resolve to hyphenated slugs. Letters of any script
+    // stay intact. The quoted `"tok"*` MATCH string below cannot inject FTS
+    // syntax.
+    const tokens = query.toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u)
+      .flatMap((t) => canonicalizeTechnology(t).split(/[^\p{L}\p{M}\p{N}]+/u))
       .filter((t) => t.length > 0);
     if (!tokens.length) return null;
     return this.withDb((db) => {

@@ -64,8 +64,9 @@ export interface SearchArgs extends SearchFilters {
   responseMode?: "full" | "compact";
   count?: number;
   page?: number;
-  // "newest" (default) = current newest-first behavior; "score" orders scored
-  // sites first (detail-meta score, desc), unscored after, newest-first.
+  // "newest" (default) = default order: bm25 relevance for an FTS-served
+  // query, otherwise newest-first; "score" orders scored sites first
+  // (detail-meta score, desc), unscored after, newest-first.
   sortBy?: "score" | "newest";
 }
 
@@ -333,15 +334,18 @@ export type BatchDetailEntry =
   | { slug: string; status: "error"; error: string; blocked?: true }
   | { slug: string; status: "skipped"; error: "blocked-before-request"; blocked: true };
 
-export function slugifyTag(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
+// Taxonomy helpers live in awwwards.ts (the lowest layer that owns technology
+// aliases and URL building); re-exported here so every server-side consumer
+// keeps one import site.
+export { canonicalFacet, slugifyTag } from "../awwwards.js";
 
-// Free-text queries match token-wise: every whitespace-separated token must
-// substring-match the site's title+tags. A single token behaves exactly like
-// the old whole-query substring check.
+// Free-text queries match token-wise: every punctuation-separated token must
+// substring-match the site's title+tags. Punctuation is a boundary (the FTS
+// tokenizer does the same), so "next.js" becomes ["next", "js"] instead of a
+// glued "nextjs" token. Letters of any script stay intact ("Léo" is one
+// token, not ["l", "o"]).
 export function tokenizeQuery(q: string): string[] {
-  return q.toLowerCase().split(/\s+/).filter(Boolean);
+  return q.toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
 }
 
 // Zero-result suggestions: rank taxonomy slugs against the query's tokens.

@@ -222,14 +222,14 @@ All optional and read at startup:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 12 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_nominees`, `get_collections`); `full` keeps all 39; `v2` (beta) replaces the list with the 15-tool consolidated surface. |
+| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 39; `v2` (beta) replaces the list with the 15-tool consolidated surface. The old → new v2 mapping is in [skills/v2-routing.md](skills/v2-routing.md). |
 | `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Text + inline image bytes per tool response. Larger responses keep `isError` and other result fields but replace `content` with a `{truncated:true, tool, bytes, limit, note}` JSON block. |
 | `AWWWARDS_MCP_DEBUG_MEMORY` | unset | `1` logs one JSON line per tool call (duration, rss, heap) to stderr - never stdout. |
 | `AWWWARDS_MCP_IMAGE_RETENTION_DAYS` | `0` (off) | A positive N prunes cached `images/` files older than N days once at startup. |
 
 The v1.14.0 `AWARDS_MCP_*` spellings (one fewer W) are still accepted as a one-release fallback; the `AWWWARDS_MCP_*` name wins when both are set.
 
-`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools, never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same).
+`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools, never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup — `full` = 39, `core` = 13, `v2` = 15 — so changing the value requires a server restart. The complete 1.x → v2 mapping for all 34 replaced names is in [skills/v2-routing.md](skills/v2-routing.md).
 
 `capture_live_site` also accepts `inline: false` to skip the base64 preview and `maxInlineBytes` to change the budget; captures whose base64 would exceed the budget (default 2.5 MB) are saved without an inline image, decided from the raw PNG size before conversion. Inline images from `capture_pose_3d` and `capture_component` count toward the same `AWWWARDS_MCP_MAX_RESPONSE_BYTES` budget. `analyze_network_capture` reads HAR files up to 20 MB (re-checked after reading) and 2000 entries. The `analyze_bundle` import graph supports import/reexport declarations up to 8 KB each.
 
@@ -275,7 +275,7 @@ your agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate node_modules/awwwards-mcp/skills/motion-authoring ~/.agents/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate node_modules/awwwards-mcp/skills/motion-authoring node_modules/awwwards-mcp/skills/v2-routing.md ~/.agents/skills/
 ```
 
 | Skill | What it teaches |
@@ -295,8 +295,13 @@ mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-ins
 | ZCode | `~/.zcode/skills/` |
 | Agent Skills-standard agents | `~/.agents/skills/` |
 
-Windows: run this from Git Bash, or copy
-`node_modules\awwwards-mcp\skills\awwwards-setup` manually.
+Windows: run the block above from Git Bash. To copy manually, copy the skill
+directories you need from `node_modules\awwwards-mcp\skills\` (all seven ship:
+`awwwards-setup`, `awwwards-inspiration`, `awwwards-motion-study`,
+`awwwards-doctor`, `awwwards-section-loop`, `recreate`, `motion-authoring`)
+and copy `node_modules\awwwards-mcp\skills\v2-routing.md` beside them — the
+skills link to the routing file at `../v2-routing.md`, so it must sit beside
+the skill directories.
 
 ## Indexing (recommended)
 
@@ -321,7 +326,7 @@ npm run index
 ### Elements corpus (gallery crawl retired)
 
 The `/elements/*` gallery is robots-disallowed; it has not been fetched since
-v1.15.2, when the gallery crawl was removed. `npm run index -- --elements`
+v1.16.0, when the gallery crawl was removed. `npm run index -- --elements`
 (and the published `awwwards-index --elements`) exits 2 with an explanation
 before any request, and `search_elements` returns an empty-corpus note instead
 of indexing. There is no replacement crawler.
@@ -561,7 +566,7 @@ indexer uses:
   (one filter per URL; deep pagination stays un-crawled).
 - **Disallowed**: `/tag/`, `/search-websites`,
   `/websites/?` (query-string pagination), `/elements/*` (not fetched since
-  v1.15.2; the gallery crawl was removed; the client rejects these paths),
+  v1.16.0; the gallery crawl was removed; the client rejects these paths),
   `/vote/`, favourites/likes/follows, and the rest of the 33 rules.
 - Our client (`src/awwwards.ts` `buildFilterUrl`) constructs **only**
   `/websites/…` paths at 1 request/second — the loop stays inside the

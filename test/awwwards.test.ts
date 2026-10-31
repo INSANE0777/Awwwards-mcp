@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AwwwardsClient,
   BlockedError,
+  canonicalFacet,
   canonicalizeTechnology,
   RateLimiter,
   buildFilterUrl,
@@ -84,6 +85,57 @@ describe("buildFilterUrl", () => {
       "https://www.awwwards.com/websites/3d/",
     );
   });
+
+  it("normalizes the URL facet with the same path used for client matching", () => {
+    // Whitespace and punctuation cannot produce a different URL facet than
+    // the one matchesFilters compares against.
+    expect(buildFilterUrl({ technology: " next js " })).toBe(
+      "https://www.awwwards.com/websites/next-js/",
+    );
+    expect(buildFilterUrl({ tags: ["Magazine / Newspaper / Blog"] })).toBe(
+      "https://www.awwwards.com/websites/magazine-newspaper-blog/",
+    );
+    expect(canonicalFacet(" Next.js ")).toBe("next-js");
+  });
+});
+
+describe("canonicalFacet display-name pairs", () => {
+  // Live /websites/ pairs where the visible tag's slug differs from the URL
+  // slug. Both the display name and the URL slug must normalize to the URL
+  // slug, and the URL builder must use it.
+  const pairs: Array<[display: string, urlSlug: string]> = [
+    ["Adobe Illustrator", "illustrator"],
+    ["Adobe Photoshop", "photoshop"],
+    ["Angular", "angularjs"],
+    ["CSS", "css3"],
+    ["Curtains.js", "curtains"],
+    ["Matter.js", "matterjs"],
+    ["P5.js", "p5js"],
+    ["Sketch", "sketchapp"],
+    ["Swiper.js", "swiper"],
+    ["Navigation Menu", "navigation"],
+    ["SEO", "seo-1"],
+  ];
+
+  it("meets display slug and URL slug on the URL slug", () => {
+    for (const [display, urlSlug] of pairs) {
+      expect(canonicalFacet(display), display).toBe(urlSlug);
+      expect(canonicalFacet(urlSlug), urlSlug).toBe(urlSlug);
+      expect(buildFilterUrl({ technology: display })).toBe(
+        `https://www.awwwards.com/websites/${urlSlug}/`,
+      );
+      expect(buildFilterUrl({ technology: urlSlug })).toBe(
+        `https://www.awwwards.com/websites/${urlSlug}/`,
+      );
+    }
+  });
+
+  it("leaves the free-text alias table unchanged for cache FTS", () => {
+    // The display-slug mapping lives only in canonicalFacet; widening
+    // canonicalizeTechnology would rewrite free-text query tokens.
+    expect(canonicalizeTechnology("css")).toBe("css");
+    expect(canonicalizeTechnology("illustrator")).toBe("illustrator");
+  });
 });
 
 describe("canonicalizeTechnology", () => {
@@ -121,7 +173,17 @@ describe("canonicalizeTechnology", () => {
       expect(canonicalizeTechnology(exact)).toBe(exact);
     }
     expect(canonicalizeTechnology("some-unknown-tech")).toBe("some-unknown-tech");
-    expect(canonicalizeTechnology("WebGL")).toBe("WebGL"); // passthrough keeps casing; buildFilterUrl lowercases after
+    expect(canonicalizeTechnology("WebGL")).toBe("WebGL"); // passthrough keeps casing; canonicalFacet slugifies it
+  });
+
+  it("never resolves inherited object names through the alias tables", () => {
+    // Own-property lookup: a bare table[key] returned Object.prototype's
+    // constructor/toString and canonicalFacet leaked the same way.
+    for (const token of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(canonicalizeTechnology(token), token).toBe(token);
+    }
+    expect(canonicalFacet("constructor")).toBe("constructor");
+    expect(canonicalFacet("__proto__")).toBe("proto"); // slugified before lookup
   });
 });
 

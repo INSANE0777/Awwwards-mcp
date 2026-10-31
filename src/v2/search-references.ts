@@ -41,7 +41,7 @@ export const searchReferencesRequestSchema = z.discriminatedUnion("kind", [
         .enum(["score", "newest"])
         .default("newest")
         .describe(
-          "Sort results: by Awwwards jury score (details previously fetched) or newest first",
+          "Sort results: by Awwwards jury score (details previously fetched) or default order — newest first, or bm25 relevance for a free-text query",
         ),
       responseMode: z
         .enum(["full", "compact"])
@@ -178,7 +178,7 @@ export async function runSearchReferences(
 export function registerSearchReferences(ctx: ToolContext): void {
   ctx.tool(
     "search_references",
-    "One entry point for finding Awwwards references. Choose exactly one request.kind: sites (award-winning site index with query, color, tag, technology and award filters; color searches always fetch the live filter page, and a failed top-up serves cached page 1 with color unchecked), elements (cached gallery records plus source:\"site\" records from new winners' own site pages; the /elements/* gallery is not crawled), directory (agencies/studios; country/category/budget are path-based, so only one applies per call, in that priority), motion (cached Motion DNA corpus only) or collections (curated moodboards; the index is live for pages 1-4, page > 4 is rejected). collections lists collections only - use get_reference with kind=collection for one collection's sites. There is no all mode: exactly one kind per call.",
+    "One entry point for finding Awwwards references. Choose exactly one request.kind: sites (award-winning site index with query, color, tag, technology and award filters; color searches always fetch the live filter page, a failed top-up keeps the requested cached page window, and only a failed cold fetch falls back to stale cached page 1), elements (cached gallery records plus source:\"site\" records from new winners' own site pages; the /elements/* gallery is not crawled), directory (agencies/studios; country/category/budget are path-based, so only one applies per call, in that priority), motion (cached Motion DNA corpus only) or collections (curated moodboards; the index is live for pages 1-4, page > 4 is rejected). collections lists collections only - use get_reference with kind=collection for one collection's sites. There is no all mode: exactly one kind per call.",
     searchReferencesInputSchema,
     { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: { request: SearchReferencesRequest }) =>

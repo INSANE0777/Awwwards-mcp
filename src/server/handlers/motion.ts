@@ -1,5 +1,6 @@
 import { choreographyFromCensus } from "../../choreography.js";
 import type { WaitStrategy } from "../../structure.js";
+import type { MotionDna } from "../../types.js";
 import { compactScrollCensus } from "../../verify-build.js";
 import type { ViewportName } from "../../viewport.js";
 import type { HandlerContext } from "../context.js";
@@ -91,10 +92,22 @@ export async function record_site_motion(ctx: HandlerContext, args: {
   }
 }
 
+// Pre-change cache rows (old captureMotionDna, or the first unified summaries)
+// carry no censusSummary.gsapRegistryCount; serving one warm would omit the
+// new diagnostic, so it counts as a miss and is recaptured once.
+function hasCensusRegistryCount(dna: MotionDna): boolean {
+  const summary = (dna as { censusSummary?: { gsapRegistryCount?: unknown } }).censusSummary;
+  return (
+    !!summary &&
+    typeof summary.gsapRegistryCount === "number" &&
+    Number.isFinite(summary.gsapRegistryCount)
+  );
+}
+
 export async function get_motion_dna(ctx: HandlerContext, args: { url: string; recapture?: boolean }): Promise<ToolResponse> {
   try {
     const cached = args.recapture ? null : ctx.cache.getMotionDna(args.url);
-    if (cached && Date.now() - cached.capturedAt < MOTION_DNA_TTL_MS) {
+    if (cached && Date.now() - cached.capturedAt < MOTION_DNA_TTL_MS && hasCensusRegistryCount(cached)) {
       return { content: [text(JSON.stringify(cached, null, 1))] };
     }
     // C2: lazy default switched to the single-launch orchestrator (the old

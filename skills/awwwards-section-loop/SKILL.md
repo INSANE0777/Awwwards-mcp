@@ -15,6 +15,23 @@ before the next starts; drift is caught where it began.**
 The tools to run this loop already exist. This skill is the order to run
 them in, and the judgment calls the tool outputs don't make for you.
 
+> **Profile note:** this skill's tools are `analyze_page_structure`,
+> `capture_component`, `analyze_stack`, `capture_pose_3d`,
+> `analyze_scroll_map`, `analyze_hover_census`, `audit_url`, `analyze_bundle`,
+> `build_gsap_stub` and retained `build_project` / `verify_build`. Examples
+> below use 1.x names (default `full`). On `AWWWARDS_MCP_PROFILE=v2`, use
+> `inspect_page {request:{kind:"structure", url}}`,
+> `capture_page {request:{kind:"component", url}}`,
+> `inspect_page {request:{kind:"stack", url}}`,
+> `capture_page {request:{kind:"pose", url}}`,
+> `analyze_motion {request:{kind:"scroll", url}}`,
+> `analyze_motion {request:{kind:"hover", url}}`,
+> `audit_page {request:{kind:"performance", url, compact:true}}`,
+> `audit_page {request:{kind:"bundle", url}}` and
+> `build_motion {request:{kind:"gsap_stub", scrollCensus}}`; `build_project`
+> and `verify_build` stay flat. Feed `build_motion` a `compact:false` scroll
+> census. Full mapping: [v2-routing.md](../v2-routing.md).
+
 ## The loop
 
 ```

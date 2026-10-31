@@ -64,8 +64,10 @@ export interface ScrollScan {
   anims: RawAnim[];
   smilSelectors: string[];
   nativeTimelines: { selector: string; kind: "scroll" | "view" }[];
-  /** GSAP ScrollTrigger registry rows — always emitted by the snippet ([] when no GSAP); required so the serialized JSON always carries the key (kit readers see [], never undefined). */
+  /** GSAP ScrollTrigger registry rows — always emitted by the snippet ([] when no GSAP); required so the serialized JSON always carries the key (kit readers see [], never undefined). Capped at 20 detail rows. */
   gsapTriggers: GsapTriggerRow[];
+  /** Full registry size BEFORE the 20-row detail cap — always emitted (0 when no GSAP). */
+  gsapRegistryTotal: number;
 }
 
 export interface ScrollCensus {
@@ -77,6 +79,8 @@ export interface ScrollCensus {
   nativeScrollTimelines: number;
   /** GSAP deep capture rows — always present ([] when empty; required so the serialized JSON always carries the key); passthrough from the scan, order preserved. */
   gsapTriggers: GsapTriggerRow[];
+  /** Full GSAP registry size (always emitted) — the pre-cap total from ScrollScan.gsapRegistryTotal, not the ≤20 detail rows. Separate from counts["gsap-scrolltrigger"], which tallies element animations classified onto a trigger. */
+  gsapRegistryCount: number;
   /** L3 scrub probe curves — present ONLY when opts.scrubProbe was true; [] when the probe found nothing or failed. Absent (never []) when the flag is off, so disabled keeps the payload lean. */
   scrubCurves?: ScrubCurve[];
   reducedMotion: boolean;
@@ -324,8 +328,13 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
   // Animations API.
   const STVARS_KEYS = ["x", "y", "rotate", "scale", "scaleX", "scaleY", "opacity", "autoAlpha", "stagger", "width", "height"];
   const gsapTriggers: GsapTriggerRow[] = [];
+  // Full registry size before any cap: gsapTriggers is a bounded SAMPLE
+  // (≤20 rows), so its length cannot stand in for the registry total.
+  let gsapRegistryTotal = 0;
   try {
-    const stList = stGlobal && stGlobal.getAll ? stGlobal.getAll().slice(0, 120) : [];
+    const allSt = stGlobal && stGlobal.getAll ? stGlobal.getAll() : [];
+    gsapRegistryTotal = Array.isArray(allSt) ? allSt.length : 0;
+    const stList = Array.isArray(allSt) ? allSt.slice(0, 120) : [];
     for (const st of stList) {
       if (gsapTriggers.length >= 20) break;
       try {
@@ -355,7 +364,7 @@ export const SCROLL_CENSUS_SNIPPET = function (): ScrollScan {
     }
   } catch {}
 
-  return { anims, smilSelectors, nativeTimelines, gsapTriggers };
+  return { anims, smilSelectors, nativeTimelines, gsapTriggers, gsapRegistryTotal };
 };
 
 // Phase-0 of the L3 scrub probe. Runs IN THE PAGE once, AFTER the census
@@ -540,6 +549,8 @@ export function reduceScrollCensus(
     svgStrokes: [...strokes],
     nativeScrollTimelines: scan.nativeTimelines.length,
     gsapTriggers: scan.gsapTriggers,
+    // Pre-cap registry total; the captured rows are only a bounded sample.
+    gsapRegistryCount: scan.gsapRegistryTotal ?? scan.gsapTriggers.length,
     reducedMotion,
   };
 }

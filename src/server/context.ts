@@ -1,12 +1,13 @@
-import { BlockedError, canonicalizeTechnology } from "../awwwards.js";
+import { AWARD_FILTERS, BlockedError } from "../awwwards.js";
+import type { AwardFilter } from "../awwwards.js";
 import type { SiteSummary, SiteDetails, ElementMedia } from "../types.js";
 import { parseDetail, parseElements } from "../parsers.js";
 import {
   AWARD_FILTER_LABELS,
   SITE_TTL_MS,
+  canonicalFacet,
   compactSiteDetails,
   formatCompactSite,
-  slugifyTag,
   text,
   tokenizeQuery,
 } from "./types.js";
@@ -52,6 +53,26 @@ export function isAllEmptyDetail(d: SiteDetails): boolean {
   );
 }
 
+// Annual "Winners — ..." categories: listing cards carry no award marker, so
+// only the fetched filter page proves membership (unlike sotd/sotm/soty and
+// the persisted nominee flag, which rows can verify). Derived from the URL
+// table so a new winner category cannot drift out of this set.
+const WINNER_CATEGORY_AWARDS: ReadonlySet<AwardFilter> = new Set(
+  (Object.keys(AWARD_FILTERS) as AwardFilter[])
+    .filter((key) => AWARD_FILTERS[key].startsWith("websites/winner_category_")),
+);
+
+// Color rows carry no colors and winner-category cards carry no marker: for
+// those URL filters a fresh scrape is the only membership evidence.
+export function urlFilterNeedsPageMembership(f: SearchArgs): boolean {
+  return Boolean(f.color) || (f.award !== undefined && WINNER_CATEGORY_AWARDS.has(f.award));
+}
+
+function matchesFacet(s: SiteSummary, requested: string): boolean {
+  const wanted = canonicalFacet(requested);
+  return s.tags.some((tag) => canonicalFacet(tag) === wanted);
+}
+
 export function createHandlerContext(deps: CreateHandlersDeps): HandlerContext {
   const { client, cache } = deps;
   const nowMs = deps.now ?? Date.now;
@@ -71,8 +92,7 @@ export function createHandlerContext(deps: CreateHandlersDeps): HandlerContext {
   // skipQueryCheck=true: the rows already matched the free-text query through
   // FTS (prefix+stem semantics); re-checking with substring semantics would
   // wrongly drop stem matches ("magazines" → "Magazine"), so only the
-  // non-query filters run. Scraped rows keep the check (default false) — they
-  // never came from FTS.
+  // non-query filters run.
   function matchesFilters(
     s: SiteSummary,
     f: SearchArgs,
@@ -80,22 +100,20 @@ export function createHandlerContext(deps: CreateHandlersDeps): HandlerContext {
     skipQueryCheck = false,
   ): boolean {
     const source = urlSource(f);
-    // Alias canonicalization mirrors buildFilterUrl (review I1): a combined
-    // filter never wins the URL, so its tokens are applied here — an alias
-    // like "nextjs" must match the site's display tag "Next.js" exactly the
-    // way the URL filter would have. Site tags are display names; a raw
-    // "nextjs" token is not a substring of the slug "next-js".
+    // Facets are exact after one normalization path (canonicalFacet: trim,
+    // slugify, display-slug alias, technology alias). The old substring check
+    // made "react" match "react-native" and leaned on display tags happening
+    // to contain their slug; "nextjs"/"Next.js"/"next js" all resolve to
+    // "next-js", and display names meet their URL slugs.
     if (f.tags?.length) {
       const tagsToCheck =
         honorUrlSource && source === "tag" ? f.tags.slice(1) : f.tags;
       for (const t of tagsToCheck) {
-        const slug = canonicalizeTechnology(t.toLowerCase());
-        if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
+        if (!matchesFacet(s, t)) return false;
       }
     }
     if (f.technology && !(honorUrlSource && source === "technology")) {
-      const slug = canonicalizeTechnology(f.technology.toLowerCase());
-      if (!s.tags.some((st) => slugifyTag(st).includes(slug))) return false;
+      if (!matchesFacet(s, f.technology)) return false;
     }
     if (f.award && !(honorUrlSource && source === "award")) {
       // nominees: listing cards carry no award tags, so the persisted

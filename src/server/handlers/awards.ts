@@ -6,7 +6,7 @@ import { parseCategories, parseDetail, parseElements, parseListing } from "../..
 import type { WaitOpts } from "../../structure.js";
 import type { Categories, ElementMedia, ElementRecord, SiteDetails, SiteSummary } from "../../types.js";
 import type { ViewportName } from "../../viewport.js";
-import { isAllEmptyDetail } from "../context.js";
+import { isAllEmptyDetail, urlFilterNeedsPageMembership } from "../context.js";
 import type { HandlerContext } from "../context.js";
 import {
   AWARD_FILTER_LABELS,
@@ -31,14 +31,12 @@ export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promi
     // color search always scrapes its filter page; everything else is
     // client-checkable against the index.
     let sites: SiteSummary[];
-    let ftsRows = false; // query served from FTS-ranked rows (bm25 order)
     let ftsEmpty = false; // FTS ran and matched nothing → loose hints apply
     if (args.color) {
       sites = [];
     } else if (args.query) {
       const ranked = ctx.cache.searchSites(args.query, SITE_TTL_MS);
       if (ranked) {
-        ftsRows = true;
         ftsEmpty = ranked.length === 0;
         // FTS already applied the query (prefix+stem, bm25-ranked). Re-check
         // only the non-query filters; re-checking the query here with
@@ -46,25 +44,42 @@ export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promi
         // Array.filter preserves the bm25 order.
         sites = ranked.filter((s) => ctx.matchesFilters(s, args, false, true));
       } else {
-        // FTS5 unavailable or no usable tokens: legacy substring path.
+        // FTS5 unavailable or no usable tokens: legacy substring path (the
+        // documented fallback; only this path re-checks the query text).
         sites = ctx.cache.getSites(SITE_TTL_MS).filter((s) => ctx.matchesFilters(s, args, false));
       }
     } else {
       sites = ctx.cache.getSites(SITE_TTL_MS).filter((s) => ctx.matchesFilters(s, args, false));
     }
-    // A scrape normally REPLACES the matched rows (fresh rows are only
-    // guaranteed the URL filter), so it must run when the cache cannot serve
-    // the requested page window at all. When the window is only PARTIALLY
-    // filled (e.g. a query matched 3 cached rows for count 6), replacing
-    // would discard already-verified matches — those runs scrape the filter
-    // page and MERGE instead: dedupe by slug, verified cache rows win
-    // duplicate slugs, scraped-only rows appended; the merge result is
-    // client-checked as before (cache rows already passed matchesFilters,
-    // scraped rows matchesFilters(true)). Non-FTS runs sort everything
-    // newest-first like getSites; FTS runs keep the bm25-ranked cache rows
-    // first in rank order and append the scraped-only rows newest-first
-    // among themselves — re-sorting ranked rows by createdAt would destroy
-    // the ranking the query asked for.
+    // URL filters whose membership no site row can prove (color, winner
+    // categories) are pinned to the fetched filter page; every other filter
+    // is re-checked from the row itself.
+    const pageBound = urlFilterNeedsPageMembership(args);
+    // A scrape can only prove membership for rows it returned, so freshly
+    // parsed rows must not be judged by substring semantics: after upsertSites
+    // re-run the same FTS query the warm path uses over the full fresh cache.
+    // Returns null when FTS is unavailable — callers keep the substring
+    // fallback documented above.
+    const requeryFreshCache = (fetched: SiteSummary[]): SiteSummary[] | null => {
+      if (!args.query) return null;
+      const ranked = ctx.cache.searchSites(args.query, SITE_TTL_MS);
+      if (ranked === null) return null;
+      const fetchedSlugs = pageBound ? new Set(fetched.map((s) => s.slug)) : null;
+      // pageBound rows skip the URL filter they cannot verify (honorUrlSource)
+      // and never include cached rows from another page; everything else is
+      // client-checked, including the URL filter.
+      return ranked.filter(
+        (s) =>
+          (fetchedSlugs === null || fetchedSlugs.has(s.slug)) &&
+          ctx.matchesFilters(s, args, fetchedSlugs !== null, true),
+      );
+    };
+    // A scrape replaces the matched rows when the requested page window is
+    // empty, because the cache cannot serve that window at all. A PARTIALLY
+    // filled window gets a best-effort top-up instead. Both successful paths
+    // re-run the query over the full fresh cache, so freshly parsed rows are
+    // judged by the same FTS semantics a warm query uses; the fallback below
+    // is the documented substring path for builds without FTS5.
     const pageWindowEmpty = sites.slice((page - 1) * count, page * count).length === 0;
     const pageWindowPartial = !pageWindowEmpty && sites.length < page * count;
     if (pageWindowEmpty) {
@@ -85,11 +100,12 @@ export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promi
       // cards carry no award tags, so this is the only marker they get.
       if (args.award === "nominees") for (const s of parsed) s.nominee = true;
       ctx.cache.upsertSites(parsed);
-      // Freshly parsed rows carry the URL filter by construction
-      // (honorUrlSource: true); serve only those, newest-first like getSites.
-      sites = parsed
-        .filter((s) => ctx.matchesFilters(s, args, true))
-        .sort((a, b) => b.createdAt - a.createdAt);
+      sites = requeryFreshCache(parsed) ??
+        // Substring fallback: fresh rows carry the URL filter by construction
+        // (honorUrlSource: true); serve only those, newest-first like getSites.
+        parsed
+          .filter((s) => ctx.matchesFilters(s, args, true))
+          .sort((a, b) => b.createdAt - a.createdAt);
     } else if (pageWindowPartial) {
       // Top-up scrape: best-effort in the fullest sense — a fetch failure
       // (HTTP error, BlockedError) must not escape to the outer catch, whose
@@ -101,17 +117,13 @@ export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promi
         if (parsed.length > 0) {
           if (args.award === "nominees") for (const s of parsed) s.nominee = true;
           ctx.cache.upsertSites(parsed);
-          const fresh = parsed.filter((s) => ctx.matchesFilters(s, args, true));
-          if (ftsRows) {
-            // Ranked cache rows keep their bm25 order; scraped-only rows
-            // append newest-first (cache rows win duplicate slugs, as
-            // everywhere — a slug in the ranked set is never re-added).
-            const rankedSlugs = new Set(sites.map((s) => s.slug));
-            const scrapedOnly = fresh
-              .filter((s) => !rankedSlugs.has(s.slug))
-              .sort((a, b) => b.createdAt - a.createdAt);
-            sites = [...sites, ...scrapedOnly];
+          const reranked = requeryFreshCache(parsed);
+          if (reranked) {
+            // bm25 order over the full fresh cache: cached rows that still
+            // match keep their rank, freshly fetched rows join the ranking.
+            sites = reranked;
           } else {
+            const fresh = parsed.filter((s) => ctx.matchesFilters(s, args, true));
             const bySlug = new Map<string, SiteSummary>();
             // Scraped rows seed the map; verified cache rows then overwrite any
             // duplicate slug, so they always win.

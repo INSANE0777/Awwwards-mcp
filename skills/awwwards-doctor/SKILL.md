@@ -10,6 +10,19 @@ Work in this order: **diagnose → fix mechanically → fix parsers (if drift) �
 recover the user's task**. Never delete user data; the only destructive step
 (cache DB moved aside) preserves the old file in the OS temp dir.
 
+> **Profile note:** this skill's tools are `search_sites`, `get_site_details`,
+> `capture_live_site`, `analyze_page_structure`, `capture_component`,
+> `export_design_tokens` and `analyze_images`. The examples below use those 1.x
+> names (the default `full` profile). On `AWWWARDS_MCP_PROFILE=v2`, use
+> `search_references {request:{kind:"sites", ...}}`,
+> `get_reference {request:{kind:"site_details", slug}}`,
+> `capture_page {request:{kind:"screenshot", url}}`,
+> `inspect_page {request:{kind:"structure", url}}`,
+> `capture_page {request:{kind:"component", url}}`,
+> `inspect_page {request:{kind:"tokens", url}}` and
+> `audit_page {request:{kind:"images", url}}` instead. Full mapping:
+> [v2-routing.md](../v2-routing.md).
+
 ## 1. Run the doctor (repo checkout)
 
 ```bash

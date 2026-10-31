@@ -56,6 +56,80 @@ describe("MOTION_SNIPPET", () => {
     expect(String(MOTION_SNIPPET)).not.toContain("=>");
     expect(typeof MOTION_SNIPPET).toBe("function");
   });
+
+  it("prefers a window ScrollTrigger over the plugin registry, same as the census", () => {
+    const g = globalThis as any;
+    const prevGsap = g.gsap;
+    const prevST = g.ScrollTrigger;
+    g.ScrollTrigger = { notA: "ScrollTrigger" };
+    g.gsap = {
+      plugins: {
+        ScrollTrigger: {
+          getAll: function () {
+            return [{ animation: { vars: { duration: 1 } }, vars: {} }];
+          },
+        },
+      },
+    };
+    try {
+      const scan = MOTION_SNIPPET();
+      const census = SCROLL_CENSUS_SNIPPET();
+      expect(scan.libs).not.toContain("scrolltrigger");
+      expect(scan.scrollTrigger.count).toBe(0);
+      expect(census.gsapTriggers).toEqual([]);
+    } finally {
+      if (prevGsap === undefined) delete g.gsap;
+      else g.gsap = prevGsap;
+      if (prevST === undefined) delete g.ScrollTrigger;
+      else g.ScrollTrigger = prevST;
+    }
+  });
+
+  it("reports the full registry count while the sample stays capped at 20", () => {
+    const g = globalThis as any;
+    const prevST = g.ScrollTrigger;
+    g.ScrollTrigger = {
+      getAll: function () {
+        return Array.from({ length: 25 }, function () {
+          return { animation: { vars: { duration: 1 } }, vars: {} };
+        });
+      },
+    };
+    try {
+      const scan = MOTION_SNIPPET();
+      expect(scan.scrollTrigger.count).toBe(25);
+      expect(scan.scrollTrigger.sample).toHaveLength(20);
+    } finally {
+      if (prevST === undefined) delete g.ScrollTrigger;
+      else g.ScrollTrigger = prevST;
+    }
+  });
+
+  it("resolves a plugin-only registry (gsap.plugins.ScrollTrigger) from globalThis", () => {
+    const g = globalThis as any;
+    const prevGsap = g.gsap;
+    const prevST = g.ScrollTrigger;
+    g.gsap = {
+      plugins: {
+        ScrollTrigger: {
+          getAll: function () {
+            return [{ animation: { vars: { duration: 1, ease: "power1.out" } }, vars: { scrub: true } }];
+          },
+        },
+      },
+    };
+    delete g.ScrollTrigger;
+    try {
+      const scan = MOTION_SNIPPET();
+      expect(scan.libs).toContain("scrolltrigger");
+      expect(scan.scrollTrigger.count).toBeGreaterThan(0);
+    } finally {
+      if (prevGsap === undefined) delete g.gsap;
+      else g.gsap = prevGsap;
+      if (prevST === undefined) delete g.ScrollTrigger;
+      else g.ScrollTrigger = prevST;
+    }
+  });
 });
 
 describe("captureMotionDnaUnified (C2, offline DI)", () => {
@@ -70,7 +144,11 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
     ],
     smilSelectors: ["#pulse"],
     nativeTimelines: [],
-    gsapTriggers: [],
+    gsapTriggers: [
+      { selector: "a", scrub: true, pin: false, startPx: 0, endPx: 500, progress: 0.1, vars: {} },
+      { selector: "b", scrub: false, pin: true, startPx: 0, endPx: 900, progress: 0, vars: {} },
+    ],
+    gsapRegistryTotal: 2,
   };
 
   function fakeLoader(dispatch: (fn: unknown) => unknown) {
@@ -141,9 +219,10 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
     expect(s.counts["css-keyframe"]).toBe(1);
     expect(s.counts.smil).toBe(1);
     expect(s.counts.unknown).toBe(1);
-    // Slimmed (v1.12 dev reshape): the summary carries counts ONLY — runtime
-    // scrub/pin truth stays in dna.scroll, one source per response.
-    expect(Object.keys(s).sort()).toEqual(["counts"]);
+    // Runtime scrub/pin truth stays in dna.scroll; the summary carries the
+    // census tallies plus the registry row count (diagnostics only).
+    expect(Object.keys(s).sort()).toEqual(["counts", "gsapRegistryCount"]);
+    expect(s.gsapRegistryCount).toBe(2);
   });
 
   it("supports the census opts contract: reducedMotion reaches the page context", async () => {

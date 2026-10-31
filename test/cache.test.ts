@@ -150,6 +150,36 @@ describe("searchSites (FTS5)", () => {
     expect(stemmed.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("splits punctuation into token boundaries and expands technology aliases", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "next", title: "Studio", tags: ["Next.js"] }),
+      site({ slug: "plain", title: "Plain", tags: [] }),
+      site({ slug: "accents", title: "Léo Parpeix", tags: [] }),
+    ]);
+    // "next.js" must not glue into "nextjs" (which matches no indexed token);
+    // punctuation is split before alias expansion, so wrapped aliases
+    // ("nextjs,", "(nextjs)") still resolve to the same tokens.
+    for (const query of ["next.js", "nextjs", "next-js", "nextjs,", "nextjs.", "(nextjs)"]) {
+      const rows = cache.searchSites(query, 1000)!;
+      expect(rows.map((r) => r.slug), query).toEqual(["next"]);
+    }
+    expect(cache.searchSites("nextjs plain", 1000)).toEqual([]);
+    // Accented letters stay inside one token instead of degrading to letters.
+    expect(cache.searchSites("léo", 1000)!.map((r) => r.slug)).toEqual(["accents"]);
+  });
+
+  it("treats inherited object names as ordinary unknown tokens", () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "plain", title: "Plain Studio", tags: [] })]);
+    // A prototype-chain alias lookup used to return Object.prototype members
+    // and throw when the caller called .split() on them.
+    for (const query of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(() => cache.searchSites(query, 1000), query).not.toThrow();
+      expect(cache.searchSites(query, 1000), query).toEqual([]);
+    }
+  });
+
   it("respects maxAgeMs and sanitizes FTS operators out of tokens", () => {
     const cache = new Cache(tmpDir());
     seed(cache);
