@@ -77,7 +77,19 @@ export function normalizeEase(raw: unknown): string {
 const escHtml = (s: unknown) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 // Safe literal for inline JS: standard JSON escaping + "<" neutralized so a
 // hostile selector can never close the script tag.
-const jsStr = (s: unknown) => JSON.stringify(String(s)).replace(/</g, "\\u003c");
+const jsStr = (s: unknown) =>
+  JSON.stringify(String(s))
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+// Line-comment text: no breaks (a newline would end the comment and run the
+// payload) and no raw angle brackets (they could close the surrounding
+// <script> in generated HTML).
+const noteText = (s: unknown) =>
+  String(s)
+    .replace(/[\r\n\u2028\u2029]+/g, " ")
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e");
 const round2 = (v: number) => Math.round(v * 100) / 100;
 const num = (v: unknown, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
@@ -182,7 +194,7 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
     const st = [`trigger: ${jsStr(t.selector)}`, `start: "top 80%"`];
     if (t.scrub) st.push(`scrub: true`);
     if (t.pin) st.push(`pin: true`);
-    const note = `// census anim: ${t.selector.replace(/</g, "\\u003c")} | trigger: ${t.trigger}${t.props ? ` | props: ${t.props}` : ""}${t.svgStroke ? " | svg stroke draw (wire dashoffset here)" : ""}`;
+    const note = `// census anim: ${noteText(t.selector)} | trigger: ${noteText(t.trigger)}${t.props ? ` | props: ${noteText(t.props)}` : ""}${t.svgStroke ? " | svg stroke draw (wire dashoffset here)" : ""}`;
     return `${note}
   gsap.timeline({ scrollTrigger: { ${st.join(", ")} }, defaults: { duration: ${t.dur}, ease: ${jsStr(t.ease)} } })
     .from(${jsStr(t.selector)}, { opacity: 0, y: 40 });`;
@@ -200,7 +212,7 @@ export function buildGsapStub(poseGrid: unknown, scrollCensus: unknown): string 
   const measuredLines = measured
     .filter((m) => m.tos.length > 0 || !emitSels.has(m.selector))
     .map((m) => {
-      const note = `// measured scrub curve: ${m.selector.replace(/</g, "\\u003c")} ${m.startPx}->${m.endPx}`;
+      const note = `// measured scrub curve: ${noteText(m.selector)} ${m.startPx}->${m.endPx}`;
       const body = m.tos.length
         ? m.tos.map((tf) => `.to(${jsStr(m.selector)}, { transform: ${jsStr(tf)} })`).join("\n    ") + ";"
         : `.from(${jsStr(m.selector)}, { opacity: 0, y: 40 });`;
@@ -256,7 +268,7 @@ function poseAt(t) {
 
 // placeholder stage object -- swap in the real scene
 // runtime canvas is THIS stub's own #stage; the audited site's selector
-// (canvasSelector: ${jsStr(canvasSel)}) only documents the source capture.
+// (canvasSelector: ${noteText(canvasSel)}) only documents the source capture.
 const canvas = document.querySelector("#stage") ?? document.body;
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
 ${canvasW > 0 && canvasH > 0 ? `renderer.setSize(${canvasW}, ${canvasH}, false);` : ""}
