@@ -137,7 +137,7 @@ export function registerCapturePage(ctx: ToolContext): void {
     "capture_page",
     "Capture the artifact needed for a rebuild. Choose exactly one request.kind: screenshot (full-page or inner-scroller anchors), component (portable component pack with structure, styles and animations), pose (WebGL/canvas pose grid for scroll-driven 3D), or recording (motion filmstrip video of preloader, scroll and hover). Component packs cap serialized tree depth at 12 (not configurable on this surface; depthCapped:true means deeper nodes were omitted) so the payload stays inside Code Mode's depth limit. Dependencies differ: all four need the optional Playwright dependency; recording also needs ffmpeg-static. This tool is not read-only: the recording branch can click interactive elements and submit their forms to expose hover/click motion.",
     capturePageInputSchema,
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     (args: { request: CapturePageRequest }) =>
       asMcpResult(runCapturePage(ctx.handlers, args.request)),
   );

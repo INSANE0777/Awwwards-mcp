@@ -12,9 +12,9 @@ Security and correctness hotfix for the published 1.16.0.
   cannot close the surrounding `<script>` tag.
 - The opt-in bundle walk rejects a discovered chunk whose redirect leaves the
   page origin; every walk redirect hop is validated before the request.
-- Motion recording is now annotated non-read-only in both profiles (`record_site_motion`
-  and v2 `capture_page`) and its description discloses that it can click
-  interactive elements and submit their forms.
+- Motion recording is now annotated non-read-only and destructive in both
+  profiles (`record_site_motion` and v2 `capture_page`) and its description
+  discloses that it can click interactive elements and submit their forms.
 - The motion-study skill marks `scripts/skill-memory.mjs` as checkout-only, and
   the README skill-copy commands include `skills/_memory`.
 

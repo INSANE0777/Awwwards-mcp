@@ -440,13 +440,21 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     const REDIRECT_JS = `${pageOrigin}/redirect.js`;
     const EVIL_JS = "https://evil.test/secret.js";
     const urls: string[] = [];
+    let cancelled = 0;
     const fetchFn = async (url: string, init?: RequestInit) => {
       urls.push(url);
       if (url === PAGE) return new Response(`<script src="/walker.js"></script>`, { status: 200 });
       if (url === WALKER_JS) return new Response(`var ref = "./redirect.js";`, { status: 200 });
       if (url === REDIRECT_JS) {
         return init?.redirect === "manual"
-          ? new Response(null, { status: 302, headers: { location: EVIL_JS } })
+          ? new Response(
+              new ReadableStream({
+                cancel() {
+                  cancelled++;
+                },
+              }),
+              { status: 302, headers: { location: EVIL_JS } },
+            )
           : new Response("followed", { status: 200 });
       }
       return new Response("not found", { status: 404 });
@@ -462,6 +470,7 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(urls).not.toContain(EVIL_JS);
     expect(rep.warnings.join("\n")).toContain("redirect left the page origin");
     expect(rep.chunks.some((c) => c.url === EVIL_JS)).toBe(false);
+    expect(cancelled).toBe(1);
   });
 
   it("walkChunks absent → zero extra fetches (pin)", async () => {

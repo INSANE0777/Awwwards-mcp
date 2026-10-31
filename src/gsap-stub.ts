@@ -264,7 +264,7 @@ function poseAt(t) {
 
 // placeholder stage object -- swap in the real scene
 // runtime canvas is THIS stub's own #stage; the audited site's selector
-// (canvasSelector: ${jsStr(canvasSel)}) only documents the source capture.
+// (canvasSelector: ${noteText(canvasSel)}) only documents the source capture.
 const canvas = document.querySelector("#stage") ?? document.body;
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
 ${canvasW > 0 && canvasH > 0 ? `renderer.setSize(${canvasW}, ${canvasH}, false);` : ""}

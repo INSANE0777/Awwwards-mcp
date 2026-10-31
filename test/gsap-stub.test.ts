@@ -135,6 +135,20 @@ describe("buildGsapStub", () => {
     expect(html).toContain("alert('pwn')"); // inert inside the same line comment
   });
 
+  it("neutralizes U+2028 in the camera-source comment", () => {
+    const html = buildGsapStub(
+      {
+        canvasW: 100,
+        canvasH: 100,
+        canvasSelector: "#gl\u2028alert(1)//",
+        snapshots: [{ scrollRatio: 0 }, { scrollRatio: 1 }],
+      },
+      census(),
+    );
+    expect(html).not.toContain("\u2028alert(1)");
+    expect(html).toContain("alert(1)");
+  });
+
   it("is byte-deterministic for identical inputs", () => {
     const a = buildGsapStub(null, census([anim()]));
     const b = buildGsapStub(null, census([anim()]));

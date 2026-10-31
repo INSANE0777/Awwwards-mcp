@@ -205,7 +205,7 @@ export function registerRecordSiteMotion(ctx: ToolContext): void {
       waitStrategy: waitStrategySchema,
       viewport: viewportSchema,
     },
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.record_site_motion(args)),
   );
 }

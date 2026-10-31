@@ -1105,7 +1105,7 @@ describe("registerCapturePage", () => {
     expect(schema).toBe(capturePageInputSchema);
     expect(annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true,
     });

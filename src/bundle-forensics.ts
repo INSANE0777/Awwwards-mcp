@@ -597,16 +597,26 @@ export async function captureBundleForensics(
             ...(sameOriginOnly ? { redirect: "manual" as const } : {}),
           });
           if (sameOriginOnly && res.status >= 300 && res.status < 400) {
-            if (hop >= MAX_REDIRECTS) throw new Error(`too many redirects for ${current}`);
+            const cancel = async () => {
+              try {
+                await res.body?.cancel();
+              } catch {}
+            };
+            if (hop >= MAX_REDIRECTS) {
+              await cancel();
+              throw new Error(`too many redirects for ${current}`);
+            }
             const location = res.headers.get("location");
-            if (!location) throw new Error(`redirect without Location for ${current}`);
+            if (!location) {
+              await cancel();
+              throw new Error(`redirect without Location for ${current}`);
+            }
             const next = new URL(location, current);
             if (next.origin !== pageOrigin) {
+              await cancel();
               throw new Error(`redirect left the page origin: ${current} -> ${next.href}`);
             }
-            try {
-              await res.body?.cancel();
-            } catch {}
+            await cancel();
             current = next.href;
             await limiter.acquire();
             continue;
