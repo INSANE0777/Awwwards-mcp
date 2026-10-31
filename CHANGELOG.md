@@ -3,6 +3,21 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.16.1 - 2026-11-01
+
+Security and correctness hotfix for the published 1.16.0.
+
+- `build_gsap_stub` no longer interpolates census text into generated JavaScript
+  comments without escaping: newlines cannot end the comment, and angle brackets
+  cannot close the surrounding `<script>` tag.
+- The opt-in bundle walk rejects a discovered chunk whose redirect leaves the
+  page origin; every walk redirect hop is validated before the request.
+- Motion recording is now annotated non-read-only and destructive in both
+  profiles (`record_site_motion` and v2 `capture_page`) and its description
+  discloses that it can click interactive elements and submit their forms.
+- The motion-study skill marks `scripts/skill-memory.mjs` as checkout-only, and
+  the README skill-copy commands include `skills/_memory`.
+
 ## v1.16.0 - 2026-10-31
 
 Robots compliance, an opt-in consolidated v2 surface, and correctness fixes

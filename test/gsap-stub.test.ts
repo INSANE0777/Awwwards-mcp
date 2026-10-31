@@ -118,6 +118,42 @@ describe("buildGsapStub", () => {
     expect(html).not.toContain("<img src=x");
   });
 
+  it("neutralizes newlines and angle brackets in comment-borne census fields", () => {
+    const payload = "\n}); alert('pwn'); //</script><script>";
+    const html = buildGsapStub(
+      null,
+      census([
+        anim({
+          selector: ".hero",
+          trigger: payload,
+          props: [payload],
+        }),
+      ]),
+    );
+    expect(html).not.toContain("\n}); alert('pwn')");
+    expect(html).not.toContain("</script><script>");
+    expect(html).toContain("\\u003c/script\\u003e");
+    expect(html).toContain("alert('pwn')"); // inert inside the same line comment
+  });
+
+  it("neutralizes all line terminators in the camera-source comment", () => {
+    const html = buildGsapStub(
+      {
+        canvasW: 100,
+        canvasH: 100,
+        canvasSelector: "\rA\nB\u2028C\u2029D</script><script>",
+        snapshots: [{ scrollRatio: 0 }, { scrollRatio: 1 }],
+      },
+      census(),
+    );
+    expect(html).not.toContain("\rA");
+    expect(html).not.toContain("A\nB");
+    expect(html).not.toContain("B\u2028C");
+    expect(html).not.toContain("C\u2029D");
+    expect(html).not.toContain("</script><script>");
+    expect(html).toContain("\\u003c/script\\u003e");
+  });
+
   it("is byte-deterministic for identical inputs", () => {
     const a = buildGsapStub(null, census([anim()]));
     const b = buildGsapStub(null, census([anim()]));
@@ -145,6 +181,22 @@ describe("buildGsapStub", () => {
         { scrollY: 1500, progress: 1, transform: "translateY(60px)" },
       ],
       ...over,
+    });
+
+    it("neutralizes all line terminators and angle brackets in measured-selector comments", () => {
+      const selector = "\rA\nB\u2028C\u2029D</script><script>";
+      const html = buildGsapStub(
+        null,
+        census([anim({ selector: ".hero", scrub: true })], {
+          scrubCurves: [curve({ selector })],
+        }),
+      );
+      expect(html).not.toContain("\rA");
+      expect(html).not.toContain("A\nB");
+      expect(html).not.toContain("B\u2028C");
+      expect(html).not.toContain("C\u2029D");
+      expect(html).not.toContain("</script><script>");
+      expect(html).toContain("\\u003c/script\\u003e");
     });
 
     it("emits a scrub timeline per curve with per-step measured .to() transforms", () => {

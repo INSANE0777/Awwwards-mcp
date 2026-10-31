@@ -565,6 +565,8 @@ export async function captureBundleForensics(
     const fetched = opts.fetchFn ?? fetch;
     const pageUrl = new URL(url).href;
     const host = new URL(url).host;
+    const pageOrigin = new URL(url).origin;
+    const MAX_REDIRECTS = 5;
 
     // One shared limiter for the page fetch + all chunk fetches; created up
     // front so the page fetch is rate-limited too.
@@ -577,17 +579,60 @@ export async function captureBundleForensics(
     // RateLimiter-gated request with a deadline that spans body consumption.
     // The stream cap is checked as bytes arrive, so an oversized body is never
     // materialized whole; BudgetError means the shared byte budget is spent.
-    const fetchBounded = async (target: string, cap: number, httpLabel: string): Promise<string> => {
+    const fetchBounded = async (
+      target: string,
+      cap: number,
+      httpLabel: string,
+      sameOriginOnly = false,
+    ): Promise<string> => {
       await limiter.acquire();
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(), timeoutMs);
       try {
-        const res = await fetched(target, {
-          signal: ac.signal,
-          headers: { "User-Agent": BUNDLE_UA },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}${httpLabel}`);
-        return await readCappedBody(res, cap, ac.signal, timeoutMs);
+        let current = target;
+        for (let hop = 0; ; hop++) {
+          const res = await fetched(current, {
+            signal: ac.signal,
+            headers: { "User-Agent": BUNDLE_UA },
+            ...(sameOriginOnly ? { redirect: "manual" as const } : {}),
+          });
+          if (
+            sameOriginOnly &&
+            [301, 302, 303, 307, 308].includes(res.status)
+          ) {
+            const cancel = async () => {
+              try {
+                await res.body?.cancel();
+              } catch {}
+            };
+            if (hop >= MAX_REDIRECTS) {
+              await cancel();
+              throw new Error(`too many redirects for ${current}`);
+            }
+            const location = res.headers.get("location");
+            if (!location) {
+              await cancel();
+              throw new Error(`redirect without Location for ${current}`);
+            }
+            let next: URL;
+            try {
+              next = new URL(location, current);
+            } catch {
+              await cancel();
+              throw new Error(`invalid redirect Location for ${current}`);
+            }
+            if (next.origin !== pageOrigin) {
+              await cancel();
+              throw new Error(`redirect left the page origin: ${current} -> ${next.href}`);
+            }
+            await cancel();
+            current = next.href;
+            await limiter.acquire();
+            continue;
+          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}${httpLabel}`);
+          return await readCappedBody(res, cap, ac.signal, timeoutMs);
+        }
       } finally {
         clearTimeout(timer);
       }
@@ -600,8 +645,8 @@ export async function captureBundleForensics(
 
     // Remote-chunk fetch shared by the first pass and the walk. The cap is the
     // REMAINING budget, so the stream stops before it can overshoot.
-    const fetchChunkText = (chunkUrl: string): Promise<string> =>
-      fetchBounded(chunkUrl, maxTotalBytes - totalBytes, "");
+    const fetchChunkText = (chunkUrl: string, sameOriginOnly = false): Promise<string> =>
+      fetchBounded(chunkUrl, maxTotalBytes - totalBytes, "", sameOriginOnly);
 
     // One pass over <script>/<link> open tags keeps HTML appearance order
     // across the three sources: script srcs, inline scripts, and
@@ -785,7 +830,7 @@ export async function captureBundleForensics(
           // absolutized against the page URL.
           const abs = absolutize(m[1], refBase);
           // same origin as the page only; absolutize already deduped via `seen`
-          if (abs && new URL(abs).host === host) queue.push(abs);
+          if (abs && new URL(abs).origin === pageOrigin) queue.push(abs);
         }
       };
       // Inline scripts' ref base is the page itself; remote chunks use their
@@ -809,7 +854,7 @@ export async function captureBundleForensics(
         walkCount++;
         let text: string;
         try {
-          text = await fetchChunkText(walkUrl);
+          text = await fetchChunkText(walkUrl, true);
         } catch (err) {
           warnings.push(`skipped walk chunk ${walkUrl}: ${msg(err)}`);
           continue;
