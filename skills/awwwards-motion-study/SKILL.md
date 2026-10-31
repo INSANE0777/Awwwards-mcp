@@ -13,6 +13,23 @@ covers the whole chain: **record → review → inventory → build → re-recor
 The one rule everything serves: **never write animation code from memory or
 posters — every shipped animation must trace to frames you actually studied.**
 
+> **Profile note:** this skill's tools are `record_site_motion`, `analyze_stack`,
+> `analyze_scroll_map`, `analyze_hover_census`, `get_motion_dna`,
+> `capture_pose_3d`, `analyze_bundle`, `build_pose_stub`, `build_gsap_stub` and
+> retained `build_project` / `verify_build`. Examples below use 1.x names
+> (default `full`). On `AWWWARDS_MCP_PROFILE=v2`, use
+> `capture_page {request:{kind:"recording", url}}`,
+> `inspect_page {request:{kind:"stack", url}}`,
+> `analyze_motion {request:{kind:"scroll", url}}`,
+> `analyze_motion {request:{kind:"hover", url}}`,
+> `analyze_motion {request:{kind:"dna", url}}`,
+> `capture_page {request:{kind:"pose", url}}`,
+> `audit_page {request:{kind:"bundle", url}}`,
+> `build_motion {request:{kind:"pose_stub", poseGrid}}` and
+> `build_motion {request:{kind:"gsap_stub", scrollCensus}}`; `build_project`
+> and `verify_build` stay flat. Feed `build_motion` a `compact:false` scroll
+> census. Full mapping: [v2-routing.md](../v2-routing.md).
+
 ## 1. What to capture
 
 Record a **motion-through pass**: load, dwell, slow scroll, hover tour.

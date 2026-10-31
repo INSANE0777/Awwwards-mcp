@@ -92,7 +92,7 @@ describe("v2 server profile", () => {
 
   it("switches between default, core and v2 in one process", () => {
     expect(toolNames(serverFor(undefined))).toHaveLength(39);
-    expect(toolNames(serverFor("core"))).toHaveLength(12);
+    expect(toolNames(serverFor("core"))).toHaveLength(13);
     expect(toolNames(serverFor("v2"))).toHaveLength(15);
   });
 

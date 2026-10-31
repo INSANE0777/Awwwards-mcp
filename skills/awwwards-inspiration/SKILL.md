@@ -9,6 +9,33 @@ You have access to the `awwwards` MCP server: a searchable library of
 award-winning websites with inline screenshots and per-site design DNA. Use
 it to ground design decisions in real, proven references instead of guessing.
 
+> **Profile note:** this skill's tools are `search_sites`, `get_site_details`,
+> `get_site_elements`, `list_categories`, `get_annual_categories`,
+> `get_annual_nominees`, `get_annual_nominee`, `get_collections`,
+> `search_directory`, `new_winners`, `watch_site`, `capture_live_site`,
+> `analyze_page_structure`, `record_site_motion` and retained
+> `create_design_brief`. Examples below use 1.x names (default `full`). On
+> `AWWWARDS_MCP_PROFILE=v2`, use
+> `search_references {request:{kind:"sites", ...}}`,
+> `get_reference {request:{kind:"site_details", slug}}` or
+> `get_reference {request:{kind:"site_details", slugs}}` for a batch of 1-10,
+> `get_reference {request:{kind:"site_elements", slug}}`,
+> `browse_awards {request:{kind:"filters"}}`,
+> `browse_awards {request:{kind:"annual_categories"}}` (also
+> `kind:"annual_nominees"` with `category`, and `kind:"annual_nominee"` with
+> `id` or `category` + `slug`),
+> `search_references {request:{kind:"collections"}}` (or
+> `get_reference {request:{kind:"collection", slug}}` for one collection),
+> `search_references {request:{kind:"directory", ...}}`,
+> `monitor_awards {request:{action:"poll_winners"}}`,
+> `monitor_awards {request:{action:"add_watch", kind, pattern}}`,
+> `monitor_awards {request:{action:"list_watches"}}`,
+> `monitor_awards {request:{action:"remove_watch", kind, pattern}}`,
+> `capture_page {request:{kind:"screenshot", url}}`,
+> `inspect_page {request:{kind:"structure", url}}` and
+> `capture_page {request:{kind:"recording", url}}`; `create_design_brief` stays
+> flat. Full mapping: [v2-routing.md](../v2-routing.md).
+
 ## When to use this skill
 
 0. **First time on this machine?** If `~/.awwwards-mcp/preferences.json`
@@ -149,6 +176,12 @@ finer winner cuts:
 
 All image results arrive as MCP image content blocks — look at them, don't
 just read the text blocks.
+
+On `AWWWARDS_MCP_PROFILE=v2` the `watch_site` row becomes `monitor_awards`:
+add is `{request:{action:"add_watch", kind, pattern}}`, list is
+`{request:{action:"list_watches"}}`, and remove is
+`{request:{action:"remove_watch", kind, pattern}}` — `kind` and `pattern` are
+required for both mutations ([v2-routing.md](../v2-routing.md)).
 
 ## Staying current
 

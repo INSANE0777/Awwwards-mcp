@@ -2,7 +2,7 @@
 // a response-byte ceiling. Kept out of the server factory so tests can
 // exercise it without starting the stdio server.
 
-// The 12 tool core an agent needs for the capture -> analyze -> build -> verify
+// The 13 tool core an agent needs for the capture -> analyze -> build -> verify
 // loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 39.
 export const CORE_TOOL_NAMES: readonly string[] = [
   "search_sites",
@@ -15,6 +15,7 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   "get_motion_dna",
   "analyze_stack",
   "capture_live_site",
+  "get_annual_categories",
   "get_annual_nominees",
   "get_collections",
 ];

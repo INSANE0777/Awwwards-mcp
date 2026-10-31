@@ -26,7 +26,7 @@ Choose tools by domain:
 - Build vs verify: build_project converts a local HTML rebuild into Vite/Astro/Next; verify_build scores a build against a reference; verify_flow compares interaction steps; build_pose_stub, build_gsap_stub and build_motion_manifest are pure/offline builders.
 - Evidence tools (audit_url, analyze_accessibility, analyze_images, analyze_stack, analyze_bundle, analyze_network_capture) report evidence, not grades; read coverage/error fields before trusting numbers.
 
-AWWWARDS_MCP_PROFILE=core exposes 12 core tools for the build loop and its discovery helpers; the default full profile exposes the complete set. Optional browser tools need Playwright; audit_url uses an installed Chrome/Edge over CDP instead, and record_site_motion also needs ffmpeg-static. Awwwards requests are rate-limited and cached.`;
+AWWWARDS_MCP_PROFILE=core exposes 13 core tools for the build loop and its discovery helpers; the default full profile exposes the complete set. Optional browser tools need Playwright; audit_url uses an installed Chrome/Edge over CDP instead, and record_site_motion also needs ffmpeg-static. Awwwards requests are rate-limited and cached.`;
 
 /** A fresh McpServer with the profile-selected tool surface. */
 export function createServer({ handlers, version }: ServerOptions): McpServer {
