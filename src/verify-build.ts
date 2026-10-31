@@ -30,6 +30,8 @@ export interface BandRow {
   label: string;
   bg: string | null;
   tag: string;
+  /** Band height in px; optional evidence for the generic-label fallback. */
+  height?: number;
 }
 
 export interface VerifyReport {
@@ -124,6 +126,19 @@ export function motionDiffScore(a: string, b: string): number {
 const normLabel = (s: string) => s.trim().toLowerCase().slice(0, 24);
 const normBg = (s: string | null) => (s ?? "").trim().toLowerCase();
 
+// Labels the structure scanner emits for anonymous wrappers: they name no
+// section, so label equality alone proves nothing about which band is which.
+const GENERIC_LABELS = new Set(["", "body", "div", "section", "main", "header", "footer", "nav", "(unlabeled)"]);
+
+const heightOf = (row: BandRow): number | null =>
+  typeof row.height === "number" && Number.isFinite(row.height) ? row.height : null;
+
+// Relative height gap, symmetric and 0 when both sides are 0.
+const heightGap = (a: number, b: number): number => {
+  const denom = Math.max(Math.abs(a), Math.abs(b));
+  return denom === 0 ? 0 : Math.abs(a - b) / denom;
+};
+
 export function compareBands(
   ref: BandRow[],
   build: BandRow[]
@@ -132,8 +147,13 @@ export function compareBands(
     label: normLabel(b.label),
     bg: normBg(b.bg),
     tag: b.tag,
+    height: heightOf(b),
     used: false,
   }));
+  const buildLabelCounts = new Map<string, number>();
+  for (const b of pool) {
+    buildLabelCounts.set(b.label, (buildLabelCounts.get(b.label) ?? 0) + 1);
+  }
   const matched: string[] = [];
   const refOnly: string[] = [];
   // Greedy first match, consuming the build pool so one build band can't
@@ -141,11 +161,33 @@ export function compareBands(
   for (const r of ref) {
     const rl = normLabel(r.label);
     const rb = normBg(r.bg);
-    const hit = pool.find(
+    let hit = pool.find(
       (b) =>
         !b.used &&
-        (b.label === rl || (b.bg !== "" && b.bg === rb && b.tag === r.tag))
+        (((b.label === rl && !GENERIC_LABELS.has(rl) && (buildLabelCounts.get(rl) ?? 0) === 1)) ||
+          (b.bg !== "" && b.bg === rb && b.tag === r.tag))
     );
+    // A rebuild with anonymous wrappers (empty/body labels, or duplicates) has
+    // no label identity; fall back to same-tag + closest height. A named build
+    // band never matches an unrelated generic ref band by height alone.
+    if (!hit) {
+      const rh = heightOf(r);
+      const buildGeneric = (b: typeof pool[number]) =>
+        GENERIC_LABELS.has(b.label) || (buildLabelCounts.get(b.label) ?? 0) > 1;
+      if (rh !== null) {
+        let bestGap = Infinity;
+        for (const b of pool) {
+          if (b.used || b.tag !== r.tag || b.height === null || !buildGeneric(b)) continue;
+          // Different explicit backgrounds are different sections, not a match.
+          if (rb !== "" && b.bg !== "" && rb !== b.bg) continue;
+          const gap = heightGap(rh, b.height);
+          if (gap <= 0.25 && gap < bestGap) {
+            bestGap = gap;
+            hit = b;
+          }
+        }
+      }
+    }
     if (hit) {
       hit.used = true;
       matched.push(rl);
@@ -495,6 +537,7 @@ export async function verifyBuild(
         label: b.label ?? "",
         bg: b.bg ?? b.background ?? "",
         tag: b.tag,
+        height: b.height,
       }));
     const bands = compareBands(bandRows(refStruct.bands), bandRows(buildStruct.bands));
     const refFp = motionFingerprint(refScroll);

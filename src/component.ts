@@ -30,6 +30,8 @@ export interface ComponentPack {
   capturedAt: number;
   viewport: { width: number; height: number };
   nodeCount: number;
+  /** True when maxDepth stopped the walk before serializing every child. */
+  depthCapped?: boolean;
   root: ComponentNode;
   fonts: string[];
   colors: string[];
@@ -40,6 +42,8 @@ export interface RawComponentScan {
   notFound: boolean;
   selector: string;
   nodeCount: number;
+  /** True when maxDepth stopped the walk before serializing every child. */
+  depthCapped?: boolean;
   fonts: string[];
   colors: string[];
   root: ComponentNode | null;
@@ -51,6 +55,8 @@ export interface CaptureComponentOptions {
   viewport?: ViewportName;
   /** Max nodes the in-page walk may serialize (default 400; clamp lives in the reducer 50..2000). */
   maxNodes?: number;
+  /** Max serialized tree depth, root = 0 (clamped 0..64; 0/undefined = unlimited). */
+  maxDepth?: number;
   loader?: () => Promise<any>;
 }
 
@@ -67,14 +73,15 @@ type StyleProp =
   | "minHeight" | "maxHeight" | "minWidth" | "maxWidth"
   | "filter" | "backdropFilter" | "objectFit" | "aspectRatio";
 
-// Runs IN THE PAGE via page.evaluate(COMPONENT_SNIPPET, { selector, maxNodes }).
+// Runs IN THE PAGE via page.evaluate(COMPONENT_SNIPPET, { selector, maxNodes, maxDepth }).
 // Plain `function` expression (no arrow — page.evaluate re-serializes the
 // source) with zero outer references, browser globals through globalThis (Node
 // tsconfig has no DOM lib), every probe try/caught. Mirrors POSE_SNIPPET
 // (pose3d.ts) and SCROLL_CENSUS_SNIPPET (census.ts). Depth-first walk with an
-// explicit counter; stops enqueueing children past maxNodes so the returned
-// tree is bounded. Fonts/colors collect into Sets at the root during the walk.
-export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: number }): RawComponentScan {
+// explicit counter; stops enqueueing children past maxNodes or maxDepth so the
+// returned tree is bounded. Fonts/colors collect into Sets at the root during
+// the walk.
+export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: number; maxDepth?: number }): RawComponentScan {
   const g = globalThis as any;
   const doc = g.document;
   // Declared INSIDE the snippet: page.evaluate serializes the function source
@@ -94,9 +101,14 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
   // In-page safety clamp: the reducer clamps 50..2000 too, but a hostile arg
   // must not explode the walk before the pack ever reaches the reducer.
   const maxNodes = Math.max(1, Math.min(2000, (arg && arg.maxNodes) || 400));
+  // Depth budget: 0/undefined = unlimited; otherwise clamp 0..64. Callers that
+  // must cross Code Mode's depth cap (v2 capture_page) pass 12.
+  const rawDepth = arg && arg.maxDepth ? Math.floor(Number(arg.maxDepth)) : 0;
+  const maxDepth = Number.isFinite(rawDepth) ? Math.max(0, Math.min(64, rawDepth)) : 0;
   const fonts: string[] = [];
   const colors: string[] = [];
   let count = 0;
+  let depthCapped = false;
 
   function addFont(v: unknown): void {
     try {
@@ -242,15 +254,20 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
     return node;
   }
 
-  function walk(el: any): ComponentNode | null {
+  function walk(el: any, depth: number): ComponentNode | null {
     const node = ser(el);
     if (!node) return null;
     try {
+      const kids = el.children ? Array.from(el.children) : [];
+      // At the depth limit the node is kept but its children are omitted.
+      if (maxDepth > 0 && depth >= maxDepth) {
+        if (kids.length > 0) depthCapped = true;
+        return node;
+      }
       if (count < maxNodes) {
-        const kids = el.children ? Array.from(el.children) : [];
         for (let i = 0; i < kids.length; i++) {
           if (count >= maxNodes) break;
-          const sub = walk(kids[i]);
+          const sub = walk(kids[i], depth + 1);
           if (sub) node.children.push(sub);
         }
       }
@@ -262,13 +279,14 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
   let usedSelector = arg && arg.selector ? String(arg.selector) : "header";
   try {
     const el = doc.querySelector(usedSelector);
-    if (el) root = walk(el);
+    if (el) root = walk(el, 0);
   } catch {}
 
   return {
     notFound: !root,
     selector: usedSelector,
     nodeCount: count,
+    depthCapped: depthCapped,
     fonts: fonts,
     colors: colors,
     root: root,
@@ -341,6 +359,8 @@ export function reduceComponent(
     capturedAt: input.capturedAt,
     viewport: input.viewport,
     nodeCount: nodeCount,
+    // Only surfaced when true: old packs keep their exact shape.
+    ...(input.scan.depthCapped ? { depthCapped: true } : {}),
     root: input.scan.root,
     fonts: Array.from(fonts).sort(),
     colors: Array.from(colors).sort(),
@@ -530,7 +550,11 @@ export async function captureComponent(
       // 500ms after returning to top: entrance animations fire and the
       // component is at rest before serialization.
       await page.waitForTimeout(500);
-      const arg = { selector: opts?.selector ?? "header", maxNodes: opts?.maxNodes ?? 400 };
+      const arg = {
+        selector: opts?.selector ?? "header",
+        maxNodes: opts?.maxNodes ?? 400,
+        ...(opts?.maxDepth !== undefined ? { maxDepth: opts.maxDepth } : {}),
+      };
       const scan = (await page.evaluate(COMPONENT_SNIPPET, arg)) as RawComponentScan;
       return reduceComponent(
         { url: url, capturedAt: Date.now(), selector: arg.selector, viewport: { width: width, height: height }, scan: scan },

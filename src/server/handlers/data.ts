@@ -196,7 +196,7 @@ export async function new_winners(ctx: HandlerContext, args: { award?: "sotd" | 
       : `${res.newWinners.length} new ${AWARD_FILTER_LABELS[args.award ?? "sotd"]} winner(s) for ${res.day} ` +
         `(listing shows ${res.totalInListing})` +
         (backfilled > 0 ? `; ${backfilled} site page(s) backfilled into the component index.` : ".") +
-        ` Search components with search_elements (source hits show siteSlug).`;
+        ` Search the element corpus (source hits show siteSlug).`;
     return {
       content: [
         text(body),
@@ -259,7 +259,7 @@ export async function watch_site(ctx: HandlerContext, args: {
       content: [
         text(
           `Watching [${rec.kind}] ${rec.pattern}. Poll with action=list after new winners land ` +
-            "(new_winners also advances the baseline any watch compares against).",
+            "(the winners poll also advances the baseline any watch compares against).",
         ),
       ],
     };

@@ -131,27 +131,76 @@ const normalizeRows = <T extends { selector: string }>(
   return { rows: out, skipped };
 };
 
+const COMPACT_CENSUS_ERROR =
+  "scrollCensus is a compact summary (missing anims[]); rerun the scroll census with compact=false before building motion";
+
+/**
+ * Validates the shape a builder needs: a JSON object carrying anims[] and
+ * gsapTriggers[]. Returns the user-facing error, or null when usable. Compact
+ * census output (counts/animCount, no anims) gets an explicit rerun hint.
+ */
+export function censusInputError(raw: unknown): string | null {
+  const root = asRecord(raw);
+  if (!root) return "scrollCensus: expected a JSON object";
+  const source = asRecord(root.scrollCensus) ?? root;
+  const compact = !Array.isArray(source.anims) && (source.animCount !== undefined || source.counts !== undefined);
+  if (!Array.isArray(source.anims)) {
+    return compact ? COMPACT_CENSUS_ERROR : "motion census: anims[] is missing";
+  }
+  if (!Array.isArray(source.gsapTriggers)) {
+    return compact ? COMPACT_CENSUS_ERROR : "motion census: gsapTriggers[] is missing";
+  }
+  return null;
+}
+
+/** Unwraps a verify_build dump that nests the census under `scrollCensus`. */
+export function unwrapScrollCensus(raw: unknown): unknown {
+  const root = asRecord(raw);
+  return (root ? asRecord(root.scrollCensus) : null) ?? raw;
+}
+
+/**
+ * Pose-stub suggestions need the full census AS WELL AS `counts[]` (the
+ * builder indexes it directly). Compact output has counts but no anims; a
+ * hand-written full census may lack counts. gsapTriggers is not required here.
+ */
+export function poseCensusError(raw: unknown): string | null {
+  const root = asRecord(raw);
+  if (!root) return "scrollCensus: expected a JSON object";
+  const source = asRecord(root.scrollCensus) ?? root;
+  if (!Array.isArray(source.anims)) {
+    const compact = source.animCount !== undefined || source.counts !== undefined;
+    return compact ? COMPACT_CENSUS_ERROR : "motion census: anims[] is missing";
+  }
+  if (!asRecord(source.counts)) {
+    return "scrollCensus.counts is missing; use the full scroll census result (compact=false)";
+  }
+  return null;
+}
+
 /**
  * Validates and normalizes an analyze_scroll_map payload. Missing required
  * arrays are errors; malformed rows are skipped with a warning. A verify_build
  * dump that nests the census under `scrollCensus` is accepted too.
  */
 export function normalizeScrollCensus(raw: unknown): CensusParse | { error: string } {
-  const root = asRecord(raw);
-  if (!root) return { error: "motion census: expected a JSON object" };
+  const error = censusInputError(raw);
+  if (error) return { error };
+  const root = asRecord(raw) as Record<string, unknown>;
   const source = asRecord(root.scrollCensus) ?? root;
-  if (!Array.isArray(source.anims)) return { error: "motion census: anims[] is missing" };
-  if (!Array.isArray(source.gsapTriggers)) return { error: "motion census: gsapTriggers[] is missing" };
+  // censusInputError already proved both are arrays.
+  const animsRaw = source.anims as unknown[];
+  const triggersRaw = source.gsapTriggers as unknown[];
   const curvesRaw = Array.isArray(source.scrubCurves) ? source.scrubCurves : [];
 
-  const anims = normalizeRows(source.anims, MAX_ANIMS, (row, selector) => ({
+  const anims = normalizeRows(animsRaw, MAX_ANIMS, (row, selector) => ({
     selector,
     durationMs: durationMs(row.durationMs),
     easing: unquote(text(row.easing, 80)) || null,
     scrub: bool(row.scrub),
     pin: bool(row.pin),
   }));
-  const triggers = normalizeRows(source.gsapTriggers, MAX_TRIGGERS, (row, selector) => {
+  const triggers = normalizeRows(triggersRaw, MAX_TRIGGERS, (row, selector) => {
     const vars = asRecord(row.vars);
     return {
       selector,
@@ -484,7 +533,7 @@ export function scaffoldMotionManifest(input: unknown): MotionManifestScaffold |
     const root = asRecord(input);
     const bandsRoot = asRecord(root?.bands);
     if (!bandsRoot || !Array.isArray(bandsRoot.bands)) {
-      return { error: "bands: expected the analyze_page_structure result object with bands[]" };
+      return { error: "bands: expected the structure inspector result object with bands[]" };
     }
     const explicit = root?.sections;
     if (explicit !== undefined && explicit !== null && !Array.isArray(explicit)) {

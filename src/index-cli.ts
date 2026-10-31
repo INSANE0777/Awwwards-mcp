@@ -14,7 +14,7 @@ const elementsRequested = process.argv.some(
 if (elementsRequested) {
   console.error(
     "awwwards-index: --elements is retired — robots.txt disallows /elements/*, so the element gallery crawl is disabled. " +
-      "new_winners now backfills elements from each new winner's own site page; cached gallery records stay searchable.",
+      "The winners poll now backfills elements from each new winner's own site page; cached gallery records stay searchable.",
   );
   process.exit(2);
 }

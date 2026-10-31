@@ -52,6 +52,39 @@ describe("COMPONENT_SNIPPET fidelity source contract", () => {
     expect(src).toContain("Math.max(1, Math.min(");
     expect(src).toContain("|| 400)");
   });
+  it("clamps maxDepth in-page and stops the walk at the limit (source-lock)", () => {
+    expect(src).toContain("arg.maxDepth");
+    expect(src).toContain("Math.min(64");
+    expect(src).toContain("depthCapped = true");
+    expect(src).toContain("walk(el, 0)");
+  });
+  it("stops the walk at maxDepth and reports depthCapped (behavioural)", () => {
+    const makeEl = (depth: number): any => ({
+      tagName: "div",
+      classList: [],
+      children: depth > 0 ? [makeEl(depth - 1)] : [],
+      getBoundingClientRect: () => ({ x: 0, y: 0, width: 1, height: 1 }),
+      getAnimations: () => [],
+      textContent: "",
+    });
+    const g = globalThis as any;
+    const oldDoc = g.document;
+    const oldStyle = g.getComputedStyle;
+    g.document = { querySelector: () => makeEl(20) };
+    g.getComputedStyle = () => ({});
+    try {
+      const scan = COMPONENT_SNIPPET({ selector: "body", maxNodes: 100, maxDepth: 12 });
+      const depthOf = (node: any): number =>
+        node && node.children && node.children.length ? 1 + Math.max(...node.children.map(depthOf)) : 0;
+      expect(depthOf(scan.root)).toBe(12);
+      expect(scan.depthCapped).toBe(true);
+    } finally {
+      if (oldDoc === undefined) delete g.document;
+      else g.document = oldDoc;
+      if (oldStyle === undefined) delete g.getComputedStyle;
+      else g.getComputedStyle = oldStyle;
+    }
+  });
 });
 
 // --- reducer fixtures -------------------------------------------------------
@@ -127,6 +160,12 @@ describe("reduceComponent", () => {
   it("maps a notFound scan to the selector error contract", () => {
     const miss = reduceComponent(input({ notFound: true, root: null, nodeCount: 0 }));
     expect(miss).toEqual({ error: "selector not found: header" });
+  });
+
+  it("keeps depthCapped only when the scan reports it", () => {
+    const capped = reduceComponent(input({ depthCapped: true })) as ComponentPack;
+    expect(capped.depthCapped).toBe(true);
+    expect(reduceComponent(input({}))).not.toHaveProperty("depthCapped");
   });
 
   it("passes pseudos through untouched and harvests fonts/colors from them", () => {
@@ -302,7 +341,7 @@ describe("capture_component handler", () => {
   };
 
   it("returns the pack as a JSON text block (pass-through of pack fields)", async () => {
-    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number } }> = [];
+    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number; maxDepth?: number } }> = [];
     const h = createHandlers({
       client: new AwwwardsClient(),
       cache: new Cache(tmpDir()),
@@ -324,7 +363,8 @@ describe("capture_component handler", () => {
     expect(parsed.nodeCount).toBe(3);
     expect(parsed.fonts).toEqual(["Arial"]);
     expect(parsed.colors).toEqual(["#ffffff"]);
-    // args map onto the capture fn's opts (maxNodes included — MIT-I1)
+    // args map onto the capture fn's opts (maxNodes included — MIT-I1; maxDepth
+    // stays absent unless the caller asks for it)
     expect(seen[0]).toEqual({
       url: pack.url,
       opts: { selector: ".hero", viewport: "mobile", maxNodes: 1200 },
@@ -343,7 +383,7 @@ describe("capture_component handler", () => {
   });
 
   it("passes maxNodes through to the capture fn (MIT-I1)", async () => {
-    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number } }> = [];
+    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number; maxDepth?: number } }> = [];
     const h = createHandlers({
       client: new AwwwardsClient(),
       cache: new Cache(tmpDir()),
@@ -355,6 +395,23 @@ describe("capture_component handler", () => {
     const res = await h.capture_component({ url: pack.url, maxNodes: 1200 });
     expect(res.isError).toBeUndefined();
     expect(seen[0]).toEqual({ url: pack.url, opts: { viewport: "desktop", maxNodes: 1200 } });
+  });
+
+  it("forwards an explicit maxDepth and keeps depthCapped in the JSON", async () => {
+    const seen: Array<{ url: string; opts?: { selector?: string; viewport?: string; maxNodes?: number; maxDepth?: number } }> = [];
+    const h = createHandlers({
+      client: new AwwwardsClient(),
+      cache: new Cache(tmpDir()),
+      captureComponentFn: async (url, opts) => {
+        seen.push({ url, opts });
+        return { ...pack, depthCapped: true };
+      },
+    });
+    const res = await h.capture_component({ url: pack.url, maxDepth: 8 });
+    expect(res.isError).toBeUndefined();
+    expect(seen[0]?.opts?.maxDepth).toBe(8);
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.depthCapped).toBe(true);
   });
 
   it("adds typography/paletteSummary by default and omits both in compact mode", async () => {
@@ -451,6 +508,19 @@ describe("captureComponent", () => {
     expect(evaluateCalls[evaluateCalls.length - 1][1]).toEqual({ selector: "header", maxNodes: 50 });
     // ...and to the reducer, whose 50..2000 clamp keeps it (fixture is 3 nodes).
     expect(result.nodeCount).toBe(3);
+  });
+
+  it("forwards maxDepth to the snippet and keeps depthCapped on the pack", async () => {
+    const { loader, evaluateCalls } = harness(scan({ depthCapped: true }));
+    const result = await captureComponent("u", { loader, maxDepth: 12 });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(evaluateCalls[evaluateCalls.length - 1][1]).toEqual({
+      selector: "header",
+      maxNodes: 400,
+      maxDepth: 12,
+    });
+    expect(result.depthCapped).toBe(true);
   });
 
   it("returns the selector error contract when the scan misses", async () => {

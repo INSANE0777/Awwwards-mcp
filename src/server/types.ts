@@ -163,7 +163,7 @@ export type { ComponentPack };
 
 export type CaptureComponentFn = (
   url: string,
-  opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number },
+  opts?: { selector?: string; viewport?: ViewportName; maxNodes?: number; maxDepth?: number },
 ) => Promise<ComponentPack | { error: string }>;
 
 // Raw document.images scan; the handler owns the pure summarizeImages reducer.
@@ -228,6 +228,7 @@ export function compactComponentPack(p: ComponentPack): {
   capturedAt: number;
   viewport: { width: number; height: number };
   nodeCount: number;
+  depthCapped?: boolean;
   root: SlimComponentNode;
   fonts: string[];
   colors: string[];
@@ -247,6 +248,7 @@ export function compactComponentPack(p: ComponentPack): {
     capturedAt: p.capturedAt,
     viewport: p.viewport,
     nodeCount: p.nodeCount,
+    ...(p.depthCapped ? { depthCapped: true } : {}),
     root: walk(p.root),
     fonts: p.fonts,
     colors: p.colors,
@@ -493,6 +495,7 @@ export interface Handlers {
     selector?: string;
     viewport?: ViewportName;
     maxNodes?: number;
+    maxDepth?: number;
     compact?: boolean;
   }): Promise<ToolResponse>;
   export_design_tokens(args: {

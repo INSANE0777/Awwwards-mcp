@@ -152,7 +152,7 @@ export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promi
             content: [
               text(
                 `No sites matched the search. Closest filter tags: ${suggestions.join(", ")}. ` +
-                  `Run list_categories for the full taxonomy.${looseHint}`,
+                  `Run the taxonomy tool for the full filter list.${looseHint}`,
               ),
             ],
           };
@@ -161,7 +161,7 @@ export async function search_sites(ctx: HandlerContext, args: SearchArgs): Promi
       return {
         content: [
           text(
-            `No sites matched the search on this page. Try fewer filters or run list_categories. ` +
+            `No sites matched the search on this page. Try fewer filters or fetch the taxonomy first. ` +
               "(Deep pagination is unavailable by design: awwwards.com's robots.txt disallows it.)" +
               // looseHint is empty unless this is a true FTS zero result.
               looseHint,
@@ -552,7 +552,7 @@ export async function search_elements(ctx: HandlerContext, args: {
               {
                 count: 0,
                 results: [],
-                note: "Element corpus is empty. The Awwwards gallery crawl is retired for robots.txt compliance; elements are indexed from new SOTD winners' own Elements sections by new_winners after its first baseline poll. Cached gallery records remain searchable if present.",
+                note: "Element corpus is empty. The Awwwards gallery crawl is retired for robots.txt compliance; elements are indexed from new SOTD winners' own Elements sections by the winners poll after it has seeded its baseline. Cached gallery records remain searchable if present.",
               },
               null,
               1,
@@ -650,7 +650,7 @@ export async function list_categories(ctx: HandlerContext): Promise<ToolResponse
               technologies,
               ...(technologiesNote ? { technologiesNote } : {}),
               usage:
-                "Pass one of: color (hex), award (any filter from awards), technology or a tag slug to search_sites. Run list_categories first when unsure of a slug. Combine at most one URL filter with client-side tags.",
+                "Pass one of: color (hex), award (any filter from awards), technology or a tag slug to the site index. Fetch the taxonomy first when unsure of a slug. Combine at most one URL filter with client-side tags.",
             },
             null,
             1,
