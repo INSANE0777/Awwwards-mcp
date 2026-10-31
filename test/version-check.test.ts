@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dirname, join } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildUpdateNotice,
@@ -32,12 +33,19 @@ describe("compareVersions", () => {
 describe("selfUpdateCommand", () => {
   it("uses System32 cmd.exe and the Node-adjacent npm.cmd on Windows without a shell", () => {
     const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-    const npmCmd = join(dirname(process.execPath), "npm.cmd");
-    expect(selfUpdateCommand("1.2.3", "win32")).toEqual({
-      cmd: join(root, "System32", "cmd.exe"),
-      args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
-      shell: false,
-    });
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-"));
+    const execPath = join(dir, "node.exe");
+    const npmCmd = join(dir, "npm.cmd");
+    writeFileSync(npmCmd, "");
+    try {
+      expect(selfUpdateCommand("1.2.3", "win32", execPath)).toEqual({
+        cmd: join(root, "System32", "cmd.exe"),
+        args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
+        shell: false,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
     expect(selfUpdateCommand("1.2.3", "linux")).toEqual({
       cmd: "npm",
       args: ["install", "-g", "awwwards-mcp@1.2.3"],
