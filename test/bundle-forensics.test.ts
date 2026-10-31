@@ -435,6 +435,35 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(rep.warnings).toEqual([]);
   });
 
+  it("rejects a walked chunk redirect that leaves the page origin", async () => {
+    const WALKER_JS = `${pageOrigin}/walker.js`;
+    const REDIRECT_JS = `${pageOrigin}/redirect.js`;
+    const EVIL_JS = "https://evil.test/secret.js";
+    const urls: string[] = [];
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      urls.push(url);
+      if (url === PAGE) return new Response(`<script src="/walker.js"></script>`, { status: 200 });
+      if (url === WALKER_JS) return new Response(`var ref = "./redirect.js";`, { status: 200 });
+      if (url === REDIRECT_JS) {
+        return init?.redirect === "manual"
+          ? new Response(null, { status: 302, headers: { location: EVIL_JS } })
+          : new Response("followed", { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(urls).not.toContain(EVIL_JS);
+    expect(rep.warnings.join("\n")).toContain("redirect left the page origin");
+    expect(rep.chunks.some((c) => c.url === EVIL_JS)).toBe(false);
+  });
+
   it("walkChunks absent → zero extra fetches (pin)", async () => {
     const calls: string[] = [];
     const rep = await captureBundleForensics(PAGE, {

@@ -95,4 +95,14 @@ describe("tool annotations", () => {
     expect(block).toContain("openWorldHint: true");
     expect(block).toContain("No screenshots");
   });
+
+  it("registers recording as non-read-only because it clicks and submits", () => {
+    const legacy = registrationBlock("tool", "record_site_motion");
+    expect(legacy).toContain("readOnlyHint: false");
+    expect(legacy).toContain("idempotentHint: false");
+    expect(legacy).toContain("can click interactive elements and submit their forms");
+    const v2 = readFileSync(join(__dirname, "../src/v2/capture-page.ts"), "utf8");
+    expect(v2).toContain("readOnlyHint: false");
+    expect(v2).toContain("recording branch can click interactive elements and submit their forms");
+  });
 });

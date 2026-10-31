@@ -192,7 +192,7 @@ export function registerCapturePose3d(ctx: ToolContext): void {
 export function registerRecordSiteMotion(ctx: ToolContext): void {
   ctx.tool(
     "record_site_motion",
-    "Record a short motion-through video of a live website — preloader, scroll-triggered and hover/cursor animations — and return an inline filmstrip JPEG plus the .webm path. Requires the optional playwright and ffmpeg-static dependencies. Also writes a Motion Evidence Sheet (keyframes with census-stamped captions, diff masks, cursor-trail overlay, timeline strip) beside the filmstrip.",
+    "Record a short motion-through video of a live website - preloader, scroll-triggered and hover/cursor animations - and return an inline filmstrip JPEG plus the .webm path. Requires the optional playwright and ffmpeg-static dependencies. Also writes a Motion Evidence Sheet (keyframes with census-stamped captions, diff masks, cursor-trail overlay, timeline strip) beside the filmstrip. This is not read-only: to expose hover/click motion it can click interactive elements and submit their forms.",
     {
       url: z.string().url().describe("Absolute URL of the site to record"),
       frames: z
@@ -205,7 +205,7 @@ export function registerRecordSiteMotion(ctx: ToolContext): void {
       waitStrategy: waitStrategySchema,
       viewport: viewportSchema,
     },
-    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: any) => asMcpResult(ctx.handlers.record_site_motion(args)),
   );
 }

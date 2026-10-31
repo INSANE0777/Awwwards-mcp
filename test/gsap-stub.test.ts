@@ -118,6 +118,23 @@ describe("buildGsapStub", () => {
     expect(html).not.toContain("<img src=x");
   });
 
+  it("neutralizes newlines and angle brackets in comment-borne census fields", () => {
+    const payload = "\n}); alert('pwn'); //";
+    const html = buildGsapStub(
+      null,
+      census([
+        anim({
+          selector: ".hero",
+          trigger: payload,
+          props: [payload],
+        }),
+      ]),
+    );
+    expect(html).not.toContain("\n}); alert('pwn')");
+    expect(html).not.toContain("</script><script>");
+    expect(html).toContain("alert('pwn')"); // inert inside the same line comment
+  });
+
   it("is byte-deterministic for identical inputs", () => {
     const a = buildGsapStub(null, census([anim()]));
     const b = buildGsapStub(null, census([anim()]));

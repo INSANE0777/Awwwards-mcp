@@ -315,7 +315,7 @@ your agent's skills directory:
 
 ```bash
 npm install awwwards-mcp
-mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate node_modules/awwwards-mcp/skills/motion-authoring node_modules/awwwards-mcp/skills/v2-routing.md ~/.agents/skills/
+mkdir -p ~/.agents/skills && cp -r node_modules/awwwards-mcp/skills/awwwards-inspiration node_modules/awwwards-mcp/skills/awwwards-setup node_modules/awwwards-mcp/skills/awwwards-doctor node_modules/awwwards-mcp/skills/awwwards-motion-study node_modules/awwwards-mcp/skills/awwwards-section-loop node_modules/awwwards-mcp/skills/recreate node_modules/awwwards-mcp/skills/motion-authoring node_modules/awwwards-mcp/skills/_memory node_modules/awwwards-mcp/skills/v2-routing.md ~/.agents/skills/
 ```
 
 | Skill | What it teaches |
@@ -339,7 +339,8 @@ Windows: run the block above from Git Bash. To copy manually, copy the skill
 directories you need from `node_modules\awwwards-mcp\skills\` (all seven ship:
 `awwwards-setup`, `awwwards-inspiration`, `awwwards-motion-study`,
 `awwwards-doctor`, `awwwards-section-loop`, `recreate`, `motion-authoring`)
-and copy `node_modules\awwwards-mcp\skills\v2-routing.md` beside them — the
+and copy `node_modules\awwwards-mcp\skills\v2-routing.md` and the
+`_memory` directory beside them - the
 skills link to the routing file at `../v2-routing.md`, so it must sit beside
 the skill directories.
 
@@ -562,7 +563,7 @@ open `index.html` directly, no server or build step needed.
 | `lenis` (library, via skill guidance) | smooth scrolling synced to ScrollTrigger on the Fallow Press home page. |
 | `tailwindcss` / plain CSS | All builds are plain hand-rolled CSS — flat 2D, no frameworks needed. |
 
-**The skills self-improve:** every loop pass records what verification caught (`scripts/skill-memory.mjs record`), and a deterministic distiller folds rules seen 2+ times into your installed skill copy — while the shipped copies only change via human PR. A techniques registry (`skills/_memory/techniques.json`) catalogs researched how-tos per domain (video understanding, motion detection, UI structure, micro-interactions, images).
+**The skills self-improve in a repository checkout:** every loop pass records what verification caught (`scripts/skill-memory.mjs record`; the npm package does not ship this dev script), and a deterministic distiller folds rules seen 2+ times into your installed skill copy - while the shipped copies only change via human PR. A techniques registry (`skills/_memory/techniques.json`) catalogs researched how-tos per domain (video understanding, motion detection, UI structure, micro-interactions, images).
 
 Reduced-motion, JS-less visits, and capture tools all get graceful fallbacks
 (vertical stacks; progressive-enhancement reveals).

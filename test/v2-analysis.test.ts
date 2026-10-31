@@ -1089,7 +1089,7 @@ describe("registerAnalyzeMotion", () => {
 });
 
 describe("registerCapturePage", () => {
-  it("registers capture_page with read-only annotations and dispatches", async () => {
+  it("registers capture_page as non-read-only and dispatches", async () => {
     const ctx = fakeCtx(captureHandlers());
 
     registerCapturePage(ctx);
@@ -1101,9 +1101,10 @@ describe("registerCapturePage", () => {
     expect(description).toContain("exactly one");
     expect(description).toContain("Playwright");
     expect(description).toContain("ffmpeg");
+    expect(description).toContain("not read-only");
     expect(schema).toBe(capturePageInputSchema);
     expect(annotations).toEqual({
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
       openWorldHint: true,
