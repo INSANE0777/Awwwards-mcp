@@ -473,6 +473,39 @@ describe("walkChunks (B3: opt-in deep chunk walk)", () => {
     expect(cancelled).toBe(1);
   });
 
+  it("cancels a redirect body when the Location is malformed", async () => {
+    const WALKER_JS = `${pageOrigin}/walker.js`;
+    const BAD_JS = `${pageOrigin}/broken.js`;
+    let cancelled = 0;
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      if (url === PAGE) return new Response(`<script src="/walker.js"></script>`, { status: 200 });
+      if (url === WALKER_JS) return new Response(`var ref = "./broken.js";`, { status: 200 });
+      if (url === BAD_JS) {
+        return init?.redirect === "manual"
+          ? new Response(
+              new ReadableStream({
+                cancel() {
+                  cancelled++;
+                },
+              }),
+              { status: 302, headers: { location: "http://[" } },
+            )
+          : new Response("followed", { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    };
+    const rep = await captureBundleForensics(PAGE, {
+      fetchFn,
+      walkChunks: true,
+      unpackLoader: async () => null,
+    });
+    expect("error" in rep).toBe(false);
+    if ("error" in rep) return;
+    cleanup.push(rep.outDir);
+    expect(cancelled).toBe(1);
+    expect(rep.warnings.join("\n")).toContain("invalid redirect Location");
+  });
+
   it("walkChunks absent → zero extra fetches (pin)", async () => {
     const calls: string[] = [];
     const rep = await captureBundleForensics(PAGE, {

@@ -611,7 +611,13 @@ export async function captureBundleForensics(
               await cancel();
               throw new Error(`redirect without Location for ${current}`);
             }
-            const next = new URL(location, current);
+            let next: URL;
+            try {
+              next = new URL(location, current);
+            } catch {
+              await cancel();
+              throw new Error(`invalid redirect Location for ${current}`);
+            }
             if (next.origin !== pageOrigin) {
               await cancel();
               throw new Error(`redirect left the page origin: ${current} -> ${next.href}`);
