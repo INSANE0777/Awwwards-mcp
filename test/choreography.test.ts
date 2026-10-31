@@ -43,6 +43,7 @@ const census = (over: Partial<ScrollCensus> = {}): ScrollCensus => ({
   svgStrokes: [],
   nativeScrollTimelines: 0,
   gsapTriggers: [],
+  gsapRegistryCount: 0,
   reducedMotion: false,
   ...over,
 });

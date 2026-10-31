@@ -109,12 +109,28 @@ in-page snippet, pure reducer/renderer, injectable loader, DI-fakes-only tests.
 - **FTS skip-query-check.** FTS matches prefix+porter-stem; re-checking the
   query with substring semantics would wrongly drop stem matches
   ("magazines" → Magazine). FTS-sourced rows skip the query check.
+- **Scrapes re-run FTS.** After `upsertSites`, both the empty-window and
+  partial-top-up paths re-run the query over the full fresh cache, so a row
+  that just arrived is judged exactly like a warm row (cold "magazines" finds
+  Magazine on the first call). Rows scraped from a **color** or
+  **winner-category** page are pinned to that page's slugs: those URL filters
+  have no client-checkable marker, so the re-run must not add cached rows from
+  other pages. Substring matching remains only the FTS-unavailable fallback.
+- **Facets are exact.** Requested tags/technology and stored display tags both
+  run through `canonicalFacet` (trim → `slugifyTag` → display-slug alias →
+  technology alias) and compare with equality: `react` no longer matches
+  `React Native`, while `nextjs` / `Next.js` / `next-js` all resolve to
+  `next-js`, and display names meet their URL slugs (`Adobe Illustrator` ↔
+  `illustrator`, `SEO` ↔ `seo-1`). `buildFilterUrl` uses the same path.
+- **Query tokenization.** Punctuation is a token boundary (`next.js` →
+  `next` + `js`); punctuation splits before alias expansion, so `nextjs,` /
+  `(nextjs)` resolve to the same tokens.
 - **Color is never served from cache.** Site rows carry no colors, so a color
   search always scrapes its filter page.
-- **Page-window merge.** An empty requested window → scrape replaces. A
-  *partially* filled window → top-up scrape MERGES: dedupe by slug, verified
-  cache rows win duplicates, bm25 rank order is preserved, scraped-only rows
-  append newest-first.
+- **Page-window scrape.** An empty requested window → scrape and serve the
+  re-queried fresh cache. A *partially* filled window → best-effort top-up
+  scrape, then the same global re-rank (bm25 order preserved). A failed top-up
+  keeps the cached page window.
 - **Top-up scrapes are best-effort.** A failed fetch must not escape to the
   stale-fallback catch, which would silently discard the cached page window.
 - **Never cache an all-empty parse.** `get_site_details` /

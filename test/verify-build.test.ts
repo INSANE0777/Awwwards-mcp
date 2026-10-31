@@ -69,6 +69,9 @@ describe("motionFingerprint", () => {
 
   it("reflects scrub/pin counts and an easing token", () => {
     const fp = motionFingerprint(base({}));
+    // Exact format pin: positional trigger tokens in TRIGGER_KEYS order, then
+    // nat/sc/pin, then the sorted easing list (duplicates preserved).
+    expect(fp).toBe("k1|tr:g3,c0,v0,d0,k2,s0|nat:1|sc:2|pin:1|e:power1.in,power2.out,power2.out");
     expect(fp).toContain("sc:2");
     expect(fp).toContain("pin:1");
     expect(fp).toContain("power1.in");
@@ -221,6 +224,32 @@ describe("compareBands", () => {
     expect(r.matched).toHaveLength(1);
     expect(r.refOnly).toEqual([]);
     expect(r.buildOnly).toEqual([]);
+  });
+
+  it("matches identical >24-char labels and returns the full label", () => {
+    const label = `${"a".repeat(30)}-hero`;
+    const r = compareBands(
+      [{ label, bg: null, tag: "section" }],
+      [{ label, bg: null, tag: "section" }]
+    );
+    expect(r.matched).toEqual([label]);
+    expect(r.refOnly).toEqual([]);
+    expect(r.buildOnly).toEqual([]);
+    expect(r.score).toBe(100);
+  });
+
+  it("does not match distinct labels sharing a >24-char prefix (full labels returned)", () => {
+    const prefix = "a".repeat(30);
+    const refLabel = `${prefix}-hero`;
+    const buildLabel = `${prefix}-footer`;
+    const r = compareBands(
+      [{ label: refLabel, bg: null, tag: "section" }],
+      [{ label: buildLabel, bg: null, tag: "section" }]
+    );
+    expect(r.matched).toEqual([]);
+    expect(r.refOnly).toEqual([refLabel]);
+    expect(r.buildOnly).toEqual([buildLabel]);
+    expect(r.score).toBeLessThan(100);
   });
 
   it("does not let a generic band steal a named build band", () => {
@@ -756,6 +785,7 @@ describe("compact census helpers (C3)", () => {
     gsapTriggers: [
       { selector: "a", scrub: true, pin: false, startPx: 0, endPx: 800, progress: 0.25, vars: { stagger: "0.09" } },
     ],
+    gsapRegistryCount: 1,
     scrubCurves: [{ selector: "a", startPx: 0, endPx: 800, steps: [{ scrollY: 0, progress: 0, transform: null }] }],
     reducedMotion: false,
   });
@@ -763,6 +793,7 @@ describe("compact census helpers (C3)", () => {
   it("scroll diet: numerics/counts/svg strokes/trigger numerics stay, detail drops", () => {
     const c = compactScrollCensus(census());
     expect(c.counts["gsap-scrolltrigger"]).toBe(1);
+    expect(c.gsapRegistryCount).toBe(1);
     expect(c.nativeScrollTimelines).toBe(2);
     expect(c.svgStrokes).toEqual(["#pulse"]);
     expect(c.gsapTriggers).toEqual([

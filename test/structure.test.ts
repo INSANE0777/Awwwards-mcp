@@ -215,6 +215,18 @@ describe("diffBands", () => {
     expect(diffBands(page(many, 650), page([...many].reverse(), 650)).reordered).toHaveLength(60);
   });
 
+  it("does not match distinct labels sharing a >24-char prefix (full labels returned)", () => {
+    const prefix = "a".repeat(30);
+    const base = page([pageBand(`${prefix}-hero`, 500)], 500);
+    const other = page([pageBand(`${prefix}-footer`, 500)], 500);
+    expect(diffBands(base, other)).toEqual({
+      heightDelta: 0,
+      bandsAdded: [`${prefix}-footer`],
+      bandsRemoved: [`${prefix}-hero`],
+      reordered: [],
+    });
+  });
+
   it("matches labels case-insensitively and names unlabeled bands", () => {
     const desktop = page([pageBand("Hero", 500), pageBand("", 500, 500, 1)], 1000);
     const mobile = page([pageBand("hero", 400), pageBand(".extra", 600, 400, 1)], 1000);

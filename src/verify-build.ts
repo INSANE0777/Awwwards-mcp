@@ -123,7 +123,7 @@ export function motionDiffScore(a: string, b: string): number {
   return Math.round(score * 100);
 }
 
-const normLabel = (s: string) => s.trim().toLowerCase().slice(0, 24);
+const normLabel = (s: string) => s.trim().toLowerCase();
 const normBg = (s: string | null) => (s ?? "").trim().toLowerCase();
 
 // Labels the structure scanner emits for anonymous wrappers: they name no
@@ -145,6 +145,7 @@ export function compareBands(
 ): { score: number; matched: string[]; refOnly: string[]; buildOnly: string[] } {
   const pool = build.map((b) => ({
     label: normLabel(b.label),
+    display: b.label.trim(),
     bg: normBg(b.bg),
     tag: b.tag,
     height: heightOf(b),
@@ -190,12 +191,12 @@ export function compareBands(
     }
     if (hit) {
       hit.used = true;
-      matched.push(rl);
+      matched.push(r.label.trim());
     } else {
       refOnly.push(r.label.trim() || "(unlabeled)");
     }
   }
-  const buildOnly = pool.filter((b) => !b.used).map((b) => b.label);
+  const buildOnly = pool.filter((b) => !b.used).map((b) => b.display);
   const total = ref.length + build.length;
   const score = total === 0 ? 100 : Math.round((2 * matched.length) / (total) * 100);
   return { score, matched, refOnly, buildOnly };
@@ -616,6 +617,7 @@ export function compactScrollCensus(c: ScrollCensus): {
   counts: ScrollCensus["counts"];
   nativeScrollTimelines: number;
   svgStrokes: string[];
+  gsapRegistryCount: number;
   gsapTriggers: Array<Omit<ScrollCensus["gsapTriggers"][number], "vars">>;
   animCount: number;
   scrubCount: number;
@@ -629,6 +631,7 @@ export function compactScrollCensus(c: ScrollCensus): {
     counts: c.counts,
     nativeScrollTimelines: c.nativeScrollTimelines,
     svgStrokes: c.svgStrokes,
+    gsapRegistryCount: c.gsapRegistryCount,
     // Registry rows keep their compiled numerics; the bounded (but verbose)
     // tween vars map is the per-trigger detail that gets stripped.
     gsapTriggers: c.gsapTriggers.map((g) => ({
