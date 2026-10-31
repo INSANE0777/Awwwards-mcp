@@ -1,4 +1,4 @@
-# awwwards-mcp
+# <img src="assets/Mint-accented%20folded%20ribbon%20icon.png" alt="awwwards-mcp icon" width="32"> awwwards-mcp
 
 Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
@@ -8,8 +8,8 @@ sourced from the web's best award-winning websites.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/INSANE0777/Awwwards-mcp/main/assets/White%20awwwards-mcp%20logo%20on%20transparent.png">
-    <img src="https://raw.githubusercontent.com/INSANE0777/Awwwards-mcp/main/assets/Awwwards-mcp%20ribbon%20monogram%20with%20mint%20node.png" alt="awwwards-mcp" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/White%20awwwards-mcp%20logo%20on%20transparent.png">
+    <img src="assets/Awwwards-mcp%20ribbon%20monogram%20with%20mint%20node.png" alt="awwwards-mcp" width="420">
   </picture>
 </p>
 

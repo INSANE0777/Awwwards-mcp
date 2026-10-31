@@ -63,7 +63,8 @@ unchanged: `full` still registers all 39 tools.
 - Browser-enabled installs are documented as a global side-by-side layout (`awwwards-mcp`, `playwright`, `ffmpeg-static`); `npx` is core-only.
 - Score sorting batches metadata reads instead of reopening SQLite per candidate. Cache locks are atomic and owner-scoped; SQLite uses a busy timeout and transactional migrations.
 - Cache directories/database and newly written images use private POSIX modes, image writes are atomic, image downloads are capped, attribute-hidden (hidden/inert/aria-hidden) page text is omitted from component evidence, and page-derived text is labeled untrusted.
-- npm publication requests provenance; README logos use absolute repository URLs so npm and GitHub render consistently.
+- npm publication requests provenance.
+- README logo and icon use repository-relative assets so GitHub renders them on the branch and after merge.
 
 ## v1.15.1 - 2026-10-30
 
