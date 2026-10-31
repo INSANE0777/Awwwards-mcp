@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { runBuildProjectCli, type RunBuildProjectCliIo } from "../src/build-project-cli.js";
 import type { BuildProjectResult } from "../src/build-project.js";
 
@@ -91,12 +89,5 @@ describe("runBuildProjectCli (Task 3, offline injected buildFn)", () => {
     });
     expect(code).toBe(0);
     expect(JSON.parse(h.lines[0]).warnings).toEqual(["asset not found: ./assets/gone.png"]);
-  });
-});
-
-describe("build-project-cli main guard (house pattern)", () => {
-  it("guards the entry on the compiled build-project-cli.js filename so imports stay side-effect-free", () => {
-    const src = readFileSync(join(__dirname, "..", "src", "build-project-cli.ts"), "utf8");
-    expect(src).toContain('process.argv[1]?.replace(/\\\\/g, "/").endsWith("build-project-cli.js")');
   });
 });

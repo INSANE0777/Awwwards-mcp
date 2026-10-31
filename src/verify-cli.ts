@@ -1,9 +1,11 @@
+#!/usr/bin/env node
 // awwwards-verify — verdict-only CLI wrapper around verifyBuild (plan Task C4).
 // NOT an MCP tool (it adds nothing to the tool surface): a bin that spawns a real browser via
 // verifyBuild's lazy-default deps. Output is ONE machine-parseable JSON line:
 // the VerifyReport on success, {error} on failure. Exit codes: 0 pass,
 // 1 warn, 2 fail, 3 error, 4 usage (malformed invocation only — an unreachable
 // URL still runs the full check and exits 3 with the {error} verdict).
+import { isCliEntry } from "./cli-entry.js";
 import type { VerifyReport } from "./verify-build.js";
 import type { ViewportName } from "./viewport.js";
 
@@ -69,9 +71,16 @@ export async function runVerifyCli({ args, write, verifyBuildFn }: RunVerifyCliI
   }
 }
 
-// Main guard (house pattern): only run when this compiled file is the entry,
-// so tests can import runVerifyCli without side effects.
-if (process.argv[1]?.replace(/\\/g, "/").endsWith("verify-cli.js")) {
+// Main guard (house pattern): only run when this file is the entry, so tests
+// can import runVerifyCli without side effects. isCliEntry follows npm's
+// extensionless bin symlink and the advertised alias.
+if (
+  isCliEntry(import.meta.url, process.argv[1], [
+    "awwwards-verify",
+    "verify-cli.js",
+    "verify-cli.ts",
+  ])
+) {
   runVerifyCli({
     args: process.argv.slice(2),
     write: (line) => process.stdout.write(line + "\n"),

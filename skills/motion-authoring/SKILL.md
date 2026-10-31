@@ -12,6 +12,17 @@ hints). Authoring is the step where those mounts become real motion and
 the build is proven against the reference. This is the N2 dogfood recipe
 (nesil: one 31.21 s master scrub, exact 25,650 px parity).
 
+> **Profile note:** this skill's tools are `analyze_page_structure`,
+> `analyze_scroll_map`, `build_motion_manifest` and retained `build_project`.
+> Examples below use 1.x names (default `full`). On
+> `AWWWARDS_MCP_PROFILE=v2`, use
+> `inspect_page {request:{kind:"structure", url}}`,
+> `analyze_motion {request:{kind:"scroll", url, compact:false}}` and
+> `build_motion {request:{kind:"manifest", bands, scrollCensus}}`;
+> `build_project` stays flat. The census must be `compact:false` — a compact
+> census has no `anims[]` and cannot feed `build_motion`. Full mapping:
+> [v2-routing.md](../v2-routing.md).
+
 ## 0. Read the reference, not just the census
 
 The census tells you **what** moves and roughly **when**; its selectors are

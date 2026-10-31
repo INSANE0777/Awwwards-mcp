@@ -7,6 +7,29 @@ description: Recreate a website from a link — evidence-driven reconstruction w
 
 Input: one URL (`$ARGUMENTS`). Follow the phases in order; do not skip the evidence steps.
 
+> **Profile note:** this skill's tools are `search_sites`, `get_site_details`,
+> `capture_live_site`, `analyze_page_structure`, `analyze_stack`,
+> `capture_component`, `analyze_scroll_map`, `analyze_hover_census`,
+> `get_motion_dna`, `capture_pose_3d`, `build_pose_stub`,
+> `export_design_tokens`, `analyze_images`, `analyze_bundle` and retained
+> `analyze_network_capture` / `verify_flow`. Examples below use 1.x names
+> (default `full`). On `AWWWARDS_MCP_PROFILE=v2`, use
+> `search_references {request:{kind:"sites", ...}}`,
+> `get_reference {request:{kind:"site_details", slug}}`,
+> `capture_page {request:{kind:"screenshot", url}}`,
+> `inspect_page {request:{kind:"structure", url}}`,
+> `inspect_page {request:{kind:"stack", url}}`,
+> `capture_page {request:{kind:"component", url}}`,
+> `analyze_motion {request:{kind:"scroll", url}}`,
+> `analyze_motion {request:{kind:"hover", url}}`,
+> `analyze_motion {request:{kind:"dna", url}}`,
+> `capture_page {request:{kind:"pose", url}}`,
+> `build_motion {request:{kind:"pose_stub", poseGrid}}`,
+> `inspect_page {request:{kind:"tokens", url}}`,
+> `audit_page {request:{kind:"images", url}}` and
+> `audit_page {request:{kind:"bundle", url}}`; `analyze_network_capture` and
+> `verify_flow` stay flat. Full mapping: [v2-routing.md](../v2-routing.md).
+
 ## Phase 0 — Study-build terms (mandatory, every run)
 
 This is a **local study build**: recreate the reference exactly — layout, text, images, fonts, audio, motion. In exchange, every output MUST ship the disclaimer:

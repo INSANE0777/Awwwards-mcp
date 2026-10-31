@@ -1,6 +1,6 @@
 {
   "name": "awwwards-mcp",
-  "version": "1.15.1",
+  "version": "1.16.0",
   "description": "Free MCP server giving AI agents design inspiration from Awwwards: search award-winning sites with inline screenshots and extract design DNA.",
   "type": "module",
   "license": "MIT",
@@ -42,6 +42,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "tsx test/live-smoke.ts",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "drift": "node scripts/parser-drift-probe.mjs",
     "doctor": "node scripts/doctor.mjs",
     "prepublishOnly": "npm run build"

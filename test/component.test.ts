@@ -87,6 +87,61 @@ describe("COMPONENT_SNIPPET fidelity source contract", () => {
   });
 });
 
+describe("COMPONENT_SNIPPET hidden text", () => {
+  it("omits hidden and CSS-unrendered leaf text but keeps aria-hidden/inert visible text", () => {
+    const el = (over: Record<string, any> = {}): any => ({
+      tagName: "span",
+      classList: [],
+      children: [],
+      parentElement: null,
+      textContent: "",
+      getBoundingClientRect: () => ({ x: 0, y: 0, width: 1, height: 1 }),
+      getAnimations: () => [],
+      hasAttribute: (name: string) => Object.hasOwn(over.attrs ?? {}, name),
+      getAttribute: (name: string) => (over.attrs ?? {})[name] ?? null,
+      ...over,
+    });
+    const leaf = (text: string, parent: any) => el({ textContent: text, parentElement: parent });
+    const visible = el({ textContent: "Visible copy" });
+    const hiddenSection = el({ tagName: "section", attrs: { hidden: "" }, children: [] });
+    hiddenSection.children = [leaf("Hidden child copy", hiddenSection)];
+    const ariaSection = el({ tagName: "section", attrs: { "aria-hidden": "TRUE" }, children: [] });
+    ariaSection.children = [leaf("Aria child copy", ariaSection)];
+    const inertSection = el({ tagName: "section", attrs: { inert: "" }, children: [] });
+    inertSection.children = [leaf("Inert child copy", inertSection)];
+    const cssSection = el({ tagName: "section", display: "none", children: [] });
+    cssSection.children = [leaf("CSS hidden copy", cssSection)];
+    const root = el({
+      tagName: "header",
+      children: [visible, hiddenSection, ariaSection, inertSection, cssSection],
+    });
+
+    const g = globalThis as any;
+    const oldDoc = g.document;
+    const oldStyle = g.getComputedStyle;
+    g.document = { querySelector: () => root };
+    g.getComputedStyle = (node: any) => ({
+      display: node.display ?? "block",
+      visibility: node.visibility ?? "visible",
+    });
+    try {
+      const scan = COMPONENT_SNIPPET({ selector: "header", maxNodes: 50 });
+      const subtreeText = JSON.stringify(scan.root);
+      expect(scan.root!.children).toHaveLength(5); // nodes still captured
+      expect(subtreeText).toContain("Visible copy");
+      expect(subtreeText).toContain("Aria child copy");
+      expect(subtreeText).toContain("Inert child copy");
+      expect(subtreeText).not.toContain("Hidden child copy");
+      expect(subtreeText).not.toContain("CSS hidden copy");
+    } finally {
+      if (oldDoc === undefined) delete g.document;
+      else g.document = oldDoc;
+      if (oldStyle === undefined) delete g.getComputedStyle;
+      else g.getComputedStyle = oldStyle;
+    }
+  });
+});
+
 // --- reducer fixtures -------------------------------------------------------
 
 const n = (children: ComponentNode[] = [], over: Partial<ComponentNode> = {}): ComponentNode => ({

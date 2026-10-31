@@ -10,8 +10,8 @@
 // restart their agent; without the env var, the notice just tells the agent.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
 import { homedir } from "node:os";
 
 const REGISTRY_URL = "https://registry.npmjs.org/awwwards-mcp/latest";
@@ -51,8 +51,8 @@ function readState(): CheckState | null {
 
 function writeState(state: CheckState): void {
   try {
-    mkdirSync(join(stateFile(), ".."), { recursive: true });
-    writeFileSync(stateFile(), JSON.stringify(state));
+    mkdirSync(join(stateFile(), ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(stateFile(), JSON.stringify(state), { mode: 0o600 });
   } catch {
     // notification is best-effort; an unwritable cache dir is fine
   }
@@ -110,12 +110,43 @@ export function checkForUpdate(currentVersion: string): void {
   })();
 }
 
+// npm/npx are .cmd shims on Windows. Spawning npm.cmd with shell:true emits
+// DEP0190 on modern Node, so run the validated install through cmd.exe's /c
+// form with shell:false. The registry-provided version is validated first, so
+// no shell syntax can reach the command line.
+const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+export function selfUpdateCommand(
+  version: string,
+  platform: NodeJS.Platform = process.platform,
+  execPath: string = process.execPath,
+): { cmd: string; args: string[]; shell: boolean } | null {
+  if (!SAFE_VERSION.test(version)) return null;
+  if (platform === "win32") {
+    const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const npmCmd = join(dirname(execPath), "npm.cmd");
+    if (!existsSync(npmCmd)) return null;
+    return {
+      cmd: join(systemRoot, "System32", "cmd.exe"),
+      args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@${version}"`],
+      shell: false,
+    };
+  }
+  return {
+    cmd: "npm",
+    args: ["install", "-g", `awwwards-mcp@${version}`],
+    shell: false,
+  };
+}
+
 function startSelfUpdate(version: string): void {
   try {
+    const command = selfUpdateCommand(version);
+    if (!command) return;
     const child = spawn(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["install", "-g", `awwwards-mcp@${version}`],
-      { detached: true, stdio: "ignore" },
+      command.cmd,
+      command.args,
+      { detached: true, stdio: "ignore", shell: command.shell, windowsHide: true },
     );
     child.on("error", () => {
       console.error(

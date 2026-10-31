@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cache } from "../src/cache.js";
@@ -81,6 +90,37 @@ describe("Cache", () => {
     expect(first.toString()).toContain("jpeg-bytes-1");
   });
 
+  it("dedupes parallel misses for the same image", async () => {
+    const cache = new Cache(tmpDir());
+    let calls = 0;
+    const fetcher = async () => {
+      calls++;
+      return Buffer.from("same-bytes");
+    };
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () => cache.getImage("same.jpg", fetcher)),
+    );
+    expect(calls).toBe(1);
+    expect(results.every((b) => b.toString() === "same-bytes")).toBe(true);
+    expect(readdirSync(cache.imagesDir)).toHaveLength(1); // no temp residue
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "creates private cache dirs and image files with a single atomic rename",
+    async () => {
+      const root = join(tmpDir(), "private-cache");
+      const cache = new Cache(root);
+      expect(statSync(root).mode & 0o777).toBe(0o700);
+      expect(statSync(cache.imagesDir).mode & 0o777).toBe(0o700);
+
+      await cache.getImage("submissions/2026/08/abc.jpg", async () => Buffer.from("img"));
+
+      const files = readdirSync(cache.imagesDir);
+      expect(files).toHaveLength(1); // no .tmp residue
+      expect(statSync(join(cache.imagesDir, files[0]!)).mode & 0o777).toBe(0o600);
+    },
+  );
+
   it("deletes meta keys", () => {
     const cache = new Cache(tmpDir());
     cache.setMeta("index:lock", { startedAt: 1 });
@@ -89,6 +129,66 @@ describe("Cache", () => {
     expect(cache.getMeta("index:lock", 10_000)).toBeNull();
     cache.deleteMeta("index:lock"); // idempotent
     expect(cache.getMeta("index:lock", 10_000)).toBeNull();
+  });
+
+  it("batches many meta reads into one DB open and filters by TTL", () => {
+    let t = 1_000_000;
+    const cache = new Cache(tmpDir(), () => t);
+    for (let i = 0; i < 1_200; i++) cache.setMeta(`bulk:${i}`, i);
+    t += 6_000;
+    cache.setMeta("bulk:fresh", "fresh");
+    const readSpy = vi.spyOn(cache, "withReadDb");
+
+    const values = cache.getMetaMany<number | string>(
+      [...Array.from({ length: 1_200 }, (_, i) => `bulk:${i}`), "bulk:fresh", "bulk:missing"],
+      5_000,
+    );
+
+    expect(readSpy).toHaveBeenCalledTimes(1); // one open, three IN (...) chunks
+    expect(values.size).toBe(1);
+    expect(values.get("bulk:fresh")).toBe("fresh");
+  }, 60_000);
+
+  it("treats malformed meta rows as absent in a batch read", () => {
+    const cache = new Cache(tmpDir());
+    cache.setMeta("good", { score: 8 });
+    cache.withDbForTest((db) => {
+      db.prepare("INSERT INTO meta (key, value, fetchedAt) VALUES ('bad', '{oops', ?)")
+        .run(Date.now());
+    });
+    const values = cache.getMetaMany<{ score: number }>(["good", "bad"], Number.POSITIVE_INFINITY);
+    expect([...values.keys()]).toEqual(["good"]);
+  });
+});
+
+describe("meta locks", () => {
+  it("lets only one contender acquire and never releases another owner's lock", () => {
+    const dir = tmpDir();
+    const first = new Cache(dir);
+    const second = new Cache(dir);
+
+    const held = first.acquireMetaLock("index:lock", 1_000, 10_000);
+    expect(held).not.toBeNull();
+    // A second DB connection on the same file is the same contention path a
+    // second process takes: BEGIN IMMEDIATE serializes them.
+    expect(second.acquireMetaLock("index:lock", 1_000, 10_000)).toBeNull();
+
+    // Simulate a stale takeover by another owner while the first handle lives.
+    second.setMeta("index:lock", { pid: 999, startedAt: 9_000, token: "other" });
+    held!.release();
+    expect(second.getMeta<any>("index:lock", Number.POSITIVE_INFINITY)?.token).toBe("other");
+
+    const taken = second.acquireMetaLock("index:lock", 1_000, 10_001);
+    expect(taken).not.toBeNull();
+    taken!.release();
+    expect(first.getMeta("index:lock", Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("takes over stale locks but not fresh ones", () => {
+    const cache = new Cache(tmpDir());
+    expect(cache.acquireMetaLock("lock", 1_000, 10_000)).not.toBeNull();
+    expect(cache.acquireMetaLock("lock", 1_000, 10_999)).toBeNull(); // still fresh
+    expect(cache.acquireMetaLock("lock", 1_000, 11_000)).not.toBeNull(); // stale boundary
   });
 });
 
@@ -375,6 +475,43 @@ describe("elements cache", () => {
     // drops + recreates it against the current schema, and repopulates.
     const reopened = new Cache(dir);
     expect(reopened.searchElements("countup", 10).map((r) => r.slug))
+      .toEqual(["hero-with-number-countup"]);
+  });
+
+  it("recovers an interrupted FTS migration (partial v1 state) in one reopen", () => {
+    const dir = tmpDir();
+    const old = new Cache(dir);
+    old.upsertElements([elementRecord({ slug: "hero-with-number-countup", title: "Landing Hero" })]);
+    old.withDbForTest((db) => {
+      // Interrupted old migration: v1 table rebuilt but one sync trigger
+      // missing, and the version stamp never written.
+      db.exec(`DROP TABLE elements_fts;
+        CREATE VIRTUAL TABLE elements_fts USING fts5(
+          slug UNINDEXED, title, author, builtWith, category, tokenize='porter unicode61');`);
+      db.exec(`INSERT INTO elements_fts (slug, title, author, builtWith, category)
+        VALUES ('hero-with-number-countup', 'Landing Hero', '', '[]', '')`);
+      db.exec("DROP TRIGGER elements_fts_au");
+      db.prepare("DELETE FROM meta WHERE key = 'elements_fts_version'").run();
+    });
+
+    const reopened = new Cache(dir);
+    expect(reopened.searchElements("countup", 10).map((r) => r.slug))
+      .toEqual(["hero-with-number-countup"]);
+    reopened.withDbForTest((db) => {
+      const triggers = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'elements_fts_%'",
+      ).all() as { name: string }[];
+      expect(triggers.map((t) => t.name).sort())
+        .toEqual(["elements_fts_ad", "elements_fts_ai", "elements_fts_au"]);
+      const { v } = db.prepare("SELECT value AS v FROM meta WHERE key = 'elements_fts_version'")
+        .get() as { v: string };
+      expect(v).toBe("2");
+    });
+    // Restored triggers keep the index in sync after recovery.
+    reopened.upsertElements([elementRecord({
+      slug: "hero-with-number-countup", title: "Landing Hero", author: "Studio Y",
+    })]);
+    expect(reopened.searchElements("studio", 10).map((r) => r.slug))
       .toEqual(["hero-with-number-countup"]);
   });
 

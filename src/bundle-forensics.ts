@@ -28,8 +28,9 @@ const INLINE_CHUNK_CAP = 20;
 const UNPACK_CHUNK_CAP = 10;
 const UNPACK_CHUNK_BYTES = 2 * 1024 * 1024; // 2MB
 
-// Deep-walk bounds: ≤20 walk-discovered chunks per run is the walk's OWN cap,
-// independent of maxChunks (the shared maxTotalBytes still applies). Ref
+// Deep-walk bounds: ≤20 walk fetch ATTEMPTS per run (failed URLs consume the
+// cap too) is the walk's OWN cap, independent of maxChunks (the shared
+// maxTotalBytes still applies). Ref
 // pattern: a quoted body whose final path token — ≥4 chars, no slash, no dot
 // — immediately precedes the terminal ".js". The old ≥4-total-char floor
 // still matched 1-3-char-stem junk ("../b.js", "chunk.a.js") once d087e53
@@ -58,6 +59,64 @@ const UNPACK_NOOP_HINT =
 
 const msg = (err: unknown): string =>
   err instanceof Error ? err.message.replace(/\s+/g, " ").trim() : String(err);
+
+/** Body read hit the shared byte budget — callers stop (first pass) or skip (walk). */
+class BudgetError extends Error {}
+
+/**
+ * Read a response body under a hard byte cap and a deadline that spans body
+ * consumption, not just headers. Stops at the first chunk that crosses the
+ * cap, cancels the stream, and never buffers past the cap. The abort race
+ * keeps the deadline honest even when a DI fetch ignores its signal.
+ */
+async function readCappedBody(
+  res: Response,
+  cap: number,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<string> {
+  const overBudget = () => new BudgetError(`would exceed maxTotalBytes (${cap} bytes)`);
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > cap) {
+    try {
+      await res.body?.cancel();
+    } catch {
+      /* already closed */
+    }
+    throw overBudget();
+  }
+  if (!res.body) {
+    const text = await res.text();
+    if (Buffer.byteLength(text, "utf8") > cap) throw overBudget();
+    return text;
+  }
+  const reader = res.body.getReader();
+  const deadline = new Promise<never>((_, reject) => {
+    const onAbort = () => reject(new Error(`body read timed out after ${timeoutMs}ms`));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), deadline]);
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > cap) throw overBudget();
+      chunks.push(value);
+    }
+  } catch (err) {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
+    throw err;
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -493,6 +552,9 @@ export interface BundleForensicsOpts {
   // Opt-in bundle intelligence (default false → identical report shape, zero
   // extra fetches): routes, vendors, source-map presence and module graph.
   bundleIntel?: boolean;
+  // Per-request deadline covering headers AND body (default 15s; min 10ms).
+  // A DI seam so slow-body tests do not wait the full production deadline.
+  timeoutMs?: number;
 }
 
 export async function captureBundleForensics(
@@ -507,33 +569,39 @@ export async function captureBundleForensics(
     // One shared limiter for the page fetch + all chunk fetches; created up
     // front so the page fetch is rate-limited too.
     const limiter = new RateLimiter(1000);
+    const maxChunks = Math.min(100, Math.max(1, opts.maxChunks ?? MAX_CHUNKS));
+    const maxTotalBytes = opts.maxTotalBytes ?? MAX_TOTAL_BYTES;
+    const timeoutMs = Math.max(10, opts.timeoutMs ?? CHUNK_TIMEOUT_MS);
+    let totalBytes = 0;
 
-    // Page is the hard precondition: without its HTML there is no capture,
-    // so unlike chunk failures this propagates to the { error } contract.
-    // Same 15s AbortController timeout as chunks — undici's ~300s default
-    // would let one hung page stall the whole capture.
-    const pageAc = new AbortController();
-    const pageTimer = setTimeout(() => pageAc.abort(), CHUNK_TIMEOUT_MS);
-    await limiter.acquire();
-    const pageRes = await fetched(pageUrl, { signal: pageAc.signal, headers: { "User-Agent": BUNDLE_UA } })
-      .finally(() => clearTimeout(pageTimer));
-    if (!pageRes.ok) return { error: `HTTP ${pageRes.status} for ${pageUrl}` };
-    const pageText = await pageRes.text();
-
-    // Remote-chunk fetch shared by the first pass and the walk: RateLimiter-
-    // gated, 15s AbortController timeout. Errors are handled per call site.
-    const fetchChunkText = async (chunkUrl: string): Promise<string> => {
+    // RateLimiter-gated request with a deadline that spans body consumption.
+    // The stream cap is checked as bytes arrive, so an oversized body is never
+    // materialized whole; BudgetError means the shared byte budget is spent.
+    const fetchBounded = async (target: string, cap: number, httpLabel: string): Promise<string> => {
       await limiter.acquire();
       const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), CHUNK_TIMEOUT_MS);
+      const timer = setTimeout(() => ac.abort(), timeoutMs);
       try {
-        const res = await fetched(chunkUrl, { signal: ac.signal, headers: { "User-Agent": BUNDLE_UA } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.text();
+        const res = await fetched(target, {
+          signal: ac.signal,
+          headers: { "User-Agent": BUNDLE_UA },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}${httpLabel}`);
+        return await readCappedBody(res, cap, ac.signal, timeoutMs);
       } finally {
         clearTimeout(timer);
       }
     };
+
+    // Page is the hard precondition: without its HTML there is no capture,
+    // so unlike chunk failures this propagates to the { error } contract. The
+    // HTML body is capped at the run's byte budget and held to the deadline.
+    const pageText = await fetchBounded(pageUrl, maxTotalBytes, ` for ${pageUrl}`);
+
+    // Remote-chunk fetch shared by the first pass and the walk. The cap is the
+    // REMAINING budget, so the stream stops before it can overshoot.
+    const fetchChunkText = (chunkUrl: string): Promise<string> =>
+      fetchBounded(chunkUrl, maxTotalBytes - totalBytes, "");
 
     // One pass over <script>/<link> open tags keeps HTML appearance order
     // across the three sources: script srcs, inline scripts, and
@@ -583,15 +651,12 @@ export async function captureBundleForensics(
       if (abs) targets.push({ kind: "remote", url: abs });
     }
 
-    const maxChunks = Math.min(100, Math.max(1, opts.maxChunks ?? MAX_CHUNKS));
-    const maxTotalBytes = opts.maxTotalBytes ?? MAX_TOTAL_BYTES;
     const keywords = opts.keywords ?? [];
     const outDir = opts.outDir ?? mkdtempSync(join(tmpdir(), "awwwards-chunks-"));
 
     const chunks: BundleReport["chunks"] = [];
     const matches: BundleReport["matches"] = [];
     const warnings: string[] = [];
-    let totalBytes = 0;
 
     // One keyword scanner for every text source — raw chunks and webcrack's
     // pretty files alike. `source` records where the hit came from; the
@@ -641,11 +706,16 @@ export async function captureBundleForensics(
 
     let inlineNext = 0;
     let inlineCapWarned = false;
+    let initialRemoteAttempts = 0;
     for (const cand of targets) {
       if (chunks.length >= maxChunks) {
         warnings.push(
           `skipped ${cand.kind === "remote" ? cand.url : "inline script"}: maxChunks budget (${maxChunks}) reached`,
         );
+        continue;
+      }
+      if (cand.kind === "remote" && initialRemoteAttempts >= maxChunks) {
+        warnings.push(`skipped ${cand.url}: maxChunks attempt budget (${maxChunks}) reached`);
         continue;
       }
       const remaining = maxTotalBytes - totalBytes;
@@ -677,10 +747,14 @@ export async function captureBundleForensics(
         label = `inline:${inlineNext++}`;
         base = "inline";
       } else {
+        initialRemoteAttempts++;
         try {
           text = await fetchChunkText(cand.url);
         } catch (err) {
           warnings.push(`skipped ${cand.url}: ${msg(err)}`);
+          // The streamed cap stopped the body: the byte budget is spent, so
+          // this pass stops (the walk skips smaller discoveries instead).
+          if (err instanceof BudgetError) break;
           continue;
         }
         label = cand.url;
@@ -699,8 +773,8 @@ export async function captureBundleForensics(
     // fetched chunk sources point at lazy-loaded chunks the page HTML never
     // advertised. Discovered chunks join `chunks` (keyword-search + unpack-
     // eligible) through the same limiter and byte budget; the shared `seen`
-    // set makes cycles impossible, and ≤20 walk chunks (the walk's own cap,
-    // independent of maxChunks) is the hard limit per run.
+    // set makes cycles impossible, and ≤20 walk FETCH ATTEMPTS (the walk's
+    // own cap, independent of maxChunks) is the hard limit per run.
     let walkCount = 0;
     if (opts.walkChunks === true) {
       const queue: string[] = [];
@@ -728,6 +802,11 @@ export async function captureBundleForensics(
           break;
         }
         const walkUrl = queue.shift() as string;
+        // The cap counts ATTEMPTS, not saved chunks: a failing URL costs the
+        // same politeness budget as a successful one, so the walk can never
+        // exceed 20 outbound requests (a saved chunk is the only path that
+        // discovers more work).
+        walkCount++;
         let text: string;
         try {
           text = await fetchChunkText(walkUrl);
@@ -736,8 +815,7 @@ export async function captureBundleForensics(
           continue;
         }
         if (saveChunk(text, walkUrl, remoteBase(walkUrl)) === "saved") {
-          walkCount++;
-          scanForRefs(text, walkUrl); // refs discovered mid-walk join the queue (seen dedupes)
+          scanForRefs(text, walkUrl); // mid-walk refs join the queue (seen dedupes)
         }
       }
       if (walkCount >= WALK_CHUNK_CAP && queue.length > 0) {

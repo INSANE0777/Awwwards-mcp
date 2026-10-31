@@ -36,7 +36,7 @@ function cliToolNames(): string[] {
 }
 
 describe("tool profile", () => {
-  it("core profile registers only the 12 core tools and skips the rest", () => {
+  it("core profile registers only the 13 core tools and skips the rest", () => {
     const { server, regs } = fakeServer();
     const env = { AWWWARDS_MCP_PROFILE: "core" };
     const handler = async () => ({ content: [] });
@@ -72,9 +72,12 @@ describe("tool profile", () => {
 
   it("core names are a subset of actual cli registrations (no typos)", () => {
     const names = cliToolNames();
-    expect(CORE_TOOL_NAMES).toHaveLength(12);
-    expect(new Set(CORE_TOOL_NAMES).size).toBe(12);
+    expect(CORE_TOOL_NAMES).toHaveLength(13);
+    expect(new Set(CORE_TOOL_NAMES).size).toBe(13);
     for (const name of CORE_TOOL_NAMES) expect(names).toContain(name);
+    // Category discovery is core: the annual tools are unusable without it.
+    expect(CORE_TOOL_NAMES).toContain("get_annual_categories");
+    expect(names).toContain("get_annual_categories");
   });
 
   it("truncates over-budget payloads but preserves isError and other fields", async () => {

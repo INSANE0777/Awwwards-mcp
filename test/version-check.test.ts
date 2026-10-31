@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildUpdateNotice,
   compareVersions,
   parseVersion,
+  selfUpdateCommand,
 } from "../src/version-check.js";
 
 describe("parseVersion", () => {
@@ -23,6 +27,43 @@ describe("compareVersions", () => {
     expect(compareVersions("1.0.1", "1.0.0")).toBe(1);
     expect(compareVersions("1.0.0", "1.0.0")).toBe(0);
     expect(compareVersions("1.0.0", "2.0.0")).toBe(-1);
+  });
+});
+
+describe("selfUpdateCommand", () => {
+  it("uses System32 cmd.exe and the Node-adjacent npm.cmd on Windows without a shell", () => {
+    const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-"));
+    const execPath = join(dir, "node.exe");
+    const npmCmd = join(dir, "npm.cmd");
+    writeFileSync(npmCmd, "");
+    try {
+      expect(selfUpdateCommand("1.2.3", "win32", execPath)).toEqual({
+        cmd: join(root, "System32", "cmd.exe"),
+        args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
+        shell: false,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    expect(selfUpdateCommand("1.2.3", "linux")).toEqual({
+      cmd: "npm",
+      args: ["install", "-g", "awwwards-mcp@1.2.3"],
+      shell: false,
+    });
+  });
+
+  it("fails closed when npm.cmd is not beside the running Node binary", () => {
+    expect(
+      selfUpdateCommand("1.2.3", "win32", join(tmpdir(), "missing-node", "node.exe")),
+    ).toBeNull();
+  });
+
+  it("rejects version strings that could be shell syntax", () => {
+    expect(selfUpdateCommand("1.2.3 && calc", "win32")).toBeNull();
+    expect(selfUpdateCommand("$(id)", "linux")).toBeNull();
+    expect(selfUpdateCommand("1.2.3-beta.1", "linux")).not.toBeNull();
+    expect(selfUpdateCommand("1.2.3+build.5", "linux")).not.toBeNull();
   });
 });
 

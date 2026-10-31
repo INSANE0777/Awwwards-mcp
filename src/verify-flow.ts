@@ -99,7 +99,7 @@ export interface VerifyFlowDeps {
 
 const INSTALL_HINT =
   "verify_flow needs Playwright, which is an optional dependency.\n" +
-  "Install it where this server runs:  npm install -g playwright && npx playwright install chromium\n" +
+  "Install the side-by-side global layout and run the installed awwwards-mcp (not npx):  npm install -g awwwards-mcp playwright ffmpeg-static && npm exec --global -- playwright install chromium\n" +
   "Then retry the flow verification (or restart your agent afterward).";
 
 export const collapseWhitespace = (value: string): string => value.replace(/\s+/g, " ").trim();

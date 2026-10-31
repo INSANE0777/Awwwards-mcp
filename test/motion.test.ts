@@ -458,7 +458,7 @@ describe("recordSiteMotion", () => {
     });
     expect("error" in res).toBe(true);
     if (!("error" in res)) return;
-    expect(res.error).toContain("npx playwright install chromium");
+    expect(res.error).toContain("npm exec --global -- playwright install chromium");
   });
 
   it("isolates the per-call tmp dir: a decoy webm in the shared parent location is never picked up", async () => {

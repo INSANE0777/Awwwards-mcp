@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { POSE_SNIPPET, reducePose, capturePose3d } from "../src/pose3d.js";
+import { POSE_SNIPPET, pngDataUrlBytes, reducePose, capturePose3d } from "../src/pose3d.js";
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_URL = "data:image/png;base64," + Buffer.concat([PNG_MAGIC, Buffer.from([1, 2, 3])]).toString("base64");
 
 describe("POSE_SNIPPET source contract", () => {
   it("is a plain function expression (no arrows)", () => {
@@ -12,10 +15,20 @@ describe("POSE_SNIPPET source contract", () => {
   });
 });
 
+describe("pngDataUrlBytes", () => {
+  it("accepts only data:image/png;base64 payloads with the PNG signature", () => {
+    expect(pngDataUrlBytes(PNG_URL)).toBe(PNG_MAGIC.length + 3);
+    expect(pngDataUrlBytes("data:image/jpeg;base64," + PNG_URL.slice("data:image/png;base64,".length))).toBeNull();
+    expect(pngDataUrlBytes("data:image/png;base64,AA==")).toBeNull(); // too short for the signature
+    expect(pngDataUrlBytes("data:image/png;base64,not base64!!")).toBeNull();
+    expect(pngDataUrlBytes("")).toBeNull();
+  });
+});
+
 describe("reducePose", () => {
   const snap = (scrollY: number, labels: string[]) => ({
     step: scrollY, scrollY,
-    frames: labels.map((label) => ({ label, dataUrlPng: "data:image/png;base64,AA" })),
+    frames: labels.map((label) => ({ label, dataUrlPng: PNG_URL })),
   });
   // totalHeight is the reducer's optional extra input (document scrollHeight,
   // measured in-page by the snippet); 1800 keeps the pinned 900/1800 ratio.
@@ -49,7 +62,7 @@ const raw = (over: Partial<{
   rect: { x: number; y: number; width: number; height: number } | null;
   totalHeight: number; scrollY: number;
 }>) => ({
-  canvasW: 1280, canvasH: 720, dataUrlPng: "data:image/png;base64,AA",
+  canvasW: 1280, canvasH: 720, dataUrlPng: PNG_URL,
   selector: "canvas#stage", rect: null,
   totalHeight: 5400, scrollY: 0,
   ...over,
@@ -67,7 +80,7 @@ function harness(sample: ReturnType<typeof raw>) {
     evaluate: async () => sample,
     screenshot: async (opts: unknown) => {
       screenshots.push(opts);
-      return Buffer.from([0x89, 0x50]);
+      return Buffer.concat([PNG_MAGIC, Buffer.from([0x00])]);
     },
   };
   const fakeBrowser = {
@@ -89,7 +102,7 @@ describe("capturePose3d", () => {
     expect(result.steps).toBe(6); // default
     expect(result.snapshots).toHaveLength(6);
     expect(result.snapshots[0].frames[0].label).toBe("canvas");
-    expect(result.snapshots[0].frames[0].dataUrlPng).toBe("data:image/png;base64,AA");
+    expect(result.snapshots[0].frames[0].dataUrlPng).toBe(PNG_URL);
     expect(result.canvasSelector).toBe("canvas#stage");
     expect(result.canvasW).toBe(1280);
     expect(result.canvasH).toBe(720);
@@ -127,6 +140,36 @@ describe("capturePose3d", () => {
     }
     expect(screenshots).toHaveLength(3);
     expect(screenshots[0]).toEqual({ clip: { x: 0, y: 0, width: 1280, height: 720 } });
+  });
+
+  it("ignores a non-PNG toDataURL and falls back to the screenshot", async () => {
+    const { loader, screenshots } = harness(raw({
+      dataUrlPng: "</script><script>alert(1)</script>",
+      rect: { x: 0, y: 0, width: 1280, height: 720 },
+    }));
+    const result = await capturePose3d("u", { loader, steps: 3 });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    for (const s of result.snapshots) {
+      expect(s.frames[0].label).toBe("viewport");
+      expect(pngDataUrlBytes(s.frames[0].dataUrlPng)).not.toBeNull();
+    }
+    expect(screenshots).toHaveLength(3);
+  });
+
+  it("stops adding frames once the builder's total-bytes budget is spent", async () => {
+    const eightMiB = Buffer.concat([PNG_MAGIC, Buffer.alloc(8 * 1024 * 1024 - PNG_MAGIC.length)]);
+    const huge = "data:image/png;base64," + eightMiB.toString("base64");
+    const { loader } = harness(raw({ dataUrlPng: huge }));
+    const result = await capturePose3d("u", { loader, steps: 5 });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.snapshots).toHaveLength(4); // 4 x 8 MiB fits 32 MiB; the 5th is skipped
+    const total = result.snapshots.reduce(
+      (n, s) => n + s.frames.reduce((m, f) => m + (pngDataUrlBytes(f.dataUrlPng) ?? 0), 0),
+      0,
+    );
+    expect(total).toBeLessThanOrEqual(32 * 1024 * 1024);
   });
 
   it("returns { error } when the browser fails to launch", async () => {

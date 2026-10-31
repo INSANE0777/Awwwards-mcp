@@ -12,8 +12,12 @@ export interface SkeletonFile {
 // SectionNN → "NN" (keeps 3-digit section numbers distinct).
 const sectionNN = (section: SectionMotion): string => section.component.slice("Section".length);
 
+// Embedded literals neutralize "<" so captured selectors can never close a
+// surrounding HTML script tag.
+const jsonLiteral = (value: unknown): string => JSON.stringify(value).replace(/</g, "\\u003c");
+
 const triggerLiteral = (t: MotionTrigger): string =>
-  JSON.stringify({
+  jsonLiteral({
     selector: t.selector,
     start: t.start,
     end: t.end,
@@ -92,7 +96,7 @@ import { prefersReducedMotion } from "./useSectionMotion";
 
 // Page-level census triggers no section owned (page scrubs); ranges are viewport pixels.
 const PAGE_TRIGGERS = ${triggerListOf(manifest.pageTriggers)} as const;
-const PAGE_SELECTORS = ${JSON.stringify(manifest.pageAnimatedSelectors)} as const;
+const PAGE_SELECTORS = ${jsonLiteral(manifest.pageAnimatedSelectors)} as const;
 
 export function usePageMotion(): void {
   useEffect(() => {
@@ -196,7 +200,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 const PAGE_TRIGGERS = ${triggerListOf(manifest.pageTriggers)};
-const PAGE_SELECTORS = ${JSON.stringify(manifest.pageAnimatedSelectors)};
+const PAGE_SELECTORS = ${jsonLiteral(manifest.pageAnimatedSelectors)};
 
 export function initPageMotion() {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};

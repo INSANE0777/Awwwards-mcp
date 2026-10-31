@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -21,35 +22,46 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org/
 
+      - name: Gate - tag matches package.json and package-lock.json
+        run: node scripts/release-version-gate.mjs "$GITHUB_REF_NAME"
+
       - name: Gate - tag matches CHANGELOG section
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          grep -q "^## v${VERSION}" CHANGELOG.md || { echo "CHANGELOG.md has no '## v${VERSION}' section - add release notes before tagging"; exit 1; }
+          node scripts/changelog-gate.mjs "$VERSION" --check
 
       - name: Gate - version already on npm?
         id: npmcheck
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          if npm view "awwwards-mcp@${VERSION}" version >/dev/null 2>&1; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "awwwards-mcp@${VERSION} is already on npm - skipping publish, still creating the GitHub Release"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-          fi
+          node scripts/npm-published-gate.mjs "$VERSION"
 
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm pack --dry-run
+
+      - name: Pack release artifact
+        id: artifact
+        run: |
+          mkdir -p .release-artifact
+          npm pack --json --pack-destination .release-artifact > .release-artifact/pack.json
+          node scripts/release-artifact.mjs .release-artifact/pack.json
+
+      - name: Verify existing artifact matches the registry
+        if: steps.npmcheck.outputs.published == 'true'
+        env:
+          REGISTRY_INTEGRITY: ${{ steps.npmcheck.outputs.integrity }}
+        run: |
+          node scripts/verify-published-artifact.mjs .release-artifact/pack.json "$REGISTRY_INTEGRITY"
 
       - name: Publish (beta tag when prerelease)
         if: steps.npmcheck.outputs.published != 'true'
         run: |
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            npm publish --tag beta
+            npm publish ".release-artifact/${{ steps.artifact.outputs.filename }}" --tag beta --provenance
           else
-            npm publish --tag latest
+            npm publish ".release-artifact/${{ steps.artifact.outputs.filename }}" --tag latest --provenance
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -57,7 +69,7 @@ jobs:
       - name: GitHub Release from CHANGELOG
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          awk "/^## v${VERSION}/{flag=1;next} /^## v/{flag=0} flag" CHANGELOG.md > body.md
+          node scripts/changelog-gate.mjs "$VERSION" --body > body.md
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             FLAGS="--prerelease"
           else

@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   Cdp,
@@ -149,6 +151,88 @@ describe("Cdp (raw CDP over the global WebSocket)", () => {
   });
 });
 
+describe("Cdp deadlines", () => {
+  it("bounds the websocket open and closes the socket on timeout", async () => {
+    let closed = false;
+    class DeadWs {
+      addEventListener() {}
+      send() {}
+      close() {
+        closed = true;
+      }
+    }
+    vi.stubGlobal("WebSocket", DeadWs);
+    try {
+      await expect(
+        Cdp.connect("ws://127.0.0.1:9222/devtools/page/1", 20),
+      ).rejects.toThrow("CDP websocket open timed out after 20ms");
+      expect(closed).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects a CDP command that never answers instead of hanging", async () => {
+    let closed = false;
+    class SilentWs {
+      listeners = new Map<string, Array<(ev: unknown) => void>>();
+      constructor() {
+        queueMicrotask(() => this.fire("open"));
+      }
+      addEventListener(type: string, cb: (ev: unknown) => void) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), cb]);
+      }
+      send() {}
+      close() {
+        closed = true;
+        this.fire("close");
+      }
+      fire(type: string, ev?: unknown) {
+        for (const cb of this.listeners.get(type) ?? []) cb(ev);
+      }
+    }
+    vi.stubGlobal("WebSocket", SilentWs);
+    try {
+      const cdp = await Cdp.connect("ws://127.0.0.1:9222/devtools/page/1", 5000, 20);
+      await expect(cdp.send("Page.enable")).rejects.toThrow(
+        "CDP Page.enable timed out after 20ms",
+      );
+      cdp.close();
+      expect(closed).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects in-flight commands when the socket closes", async () => {
+    class ClosableWs {
+      listeners = new Map<string, Array<(ev: unknown) => void>>();
+      constructor() {
+        queueMicrotask(() => this.fire("open"));
+      }
+      addEventListener(type: string, cb: (ev: unknown) => void) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), cb]);
+      }
+      send() {}
+      close() {
+        this.fire("close");
+      }
+      fire(type: string, ev?: unknown) {
+        for (const cb of this.listeners.get(type) ?? []) cb(ev);
+      }
+    }
+    vi.stubGlobal("WebSocket", ClosableWs);
+    try {
+      const cdp = await Cdp.connect("ws://127.0.0.1:9222/devtools/page/1", 5000);
+      const inflight = cdp.send("Page.enable");
+      cdp.close();
+      await expect(inflight).rejects.toThrow("CDP websocket closed");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("COLLECTOR (structure lock on aegon's instrumentation)", () => {
   it("keeps every instrumentation anchor", () => {
     expect(COLLECTOR).toContain("EventTarget.prototype.addEventListener");
@@ -281,5 +365,29 @@ describe("measureRuntime", () => {
       findBrowserFn: () => BROWSER,
     });
     expect(res).toEqual({ error: "spawn ENOENT" });
+  });
+
+  it("returns the documented error result for a missing executable (real spawn error event)", async () => {
+    const missing = join(tmpdir(), "awwwards-mcp-no-such-browser", "chrome.exe");
+    const res = await measureRuntime("https://build.example/page", {
+      fetchFn: fakeFetch,
+      seconds: 0.05,
+      findBrowserFn: () => missing,
+    });
+    expect("error" in res).toBe(true);
+    if ("error" in res) expect(res.error).toContain("ENOENT");
+  });
+
+  it("bounds the raw CDP list fetch and still kills the child", async () => {
+    const kills: string[] = [];
+    const res = await measureRuntime("https://build.example/page", {
+      ...base,
+      spawnFn: fakeSpawn({ kill: () => kills.push("k") }),
+      fetchFn: () => new Promise<never>(() => {}), // never answers, ignores the signal
+      findBrowserFn: () => BROWSER,
+      cdpTimeoutMs: 20,
+    });
+    expect(res).toEqual({ error: "CDP target list timed out after 20ms" });
+    expect(kills).toEqual(["k"]);
   });
 });

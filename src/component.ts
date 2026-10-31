@@ -213,6 +213,24 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
     return rows;
   }
 
+  // Text inside a hidden or CSS-unrendered subtree is not visible page copy.
+  // aria-hidden/inert remove content from AT or interaction, not from the
+  // rendered page, so they must not suppress visible text. Ancestors count.
+  function hiddenFromAT(el: any): boolean {
+    let cur = el;
+    for (let i = 0; cur && i < 100; i++) {
+      try {
+        if (cur.hasAttribute && cur.hasAttribute("hidden")) return true;
+        const cs = getComputedStyle(cur);
+        if (!cs) return false;
+        if (cs.display === "none") return true;
+        if (cs.visibility === "hidden" || cs.visibility === "collapse") return true;
+      } catch {}
+      cur = cur.parentElement;
+    }
+    return false;
+  }
+
   function ser(el: any): ComponentNode | null {
     if (count >= maxNodes) return null;
     count++;
@@ -237,8 +255,10 @@ export const COMPONENT_SNIPPET = function (arg: { selector: string; maxNodes: nu
     } catch {}
     try {
       if (!el.children || el.children.length === 0) {
-        const t = el.textContent;
-        if (t && t.trim()) node.text = String(t).trim().slice(0, 200);
+        if (!hiddenFromAT(el)) {
+          const t = el.textContent;
+          if (t && t.trim()) node.text = String(t).trim().slice(0, 200);
+        }
       }
     } catch {}
     try {

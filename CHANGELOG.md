@@ -3,19 +3,68 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## v1.15.2 - 2026-10-30
+## v1.16.0 - 2026-10-31
 
-robots.txt compliance: the `/elements/*` gallery crawl is retired.
+Robots compliance, an opt-in consolidated v2 surface, and correctness fixes
+across search, motion evidence and verification. The default surface is
+unchanged: `full` still registers all 39 tools.
 
-### Elements gallery retired
+### Robots compliance: elements gallery retired
 
 - Deleted the gallery indexer; `awwwards-index --elements` now exits 2 with an explanation before any request, and `AwwwardsClient.getHtml` rejects `/elements` and `/elements/*` paths before any request.
 - `search_elements` returns a no-network empty-corpus note instead of indexing; cached gallery records and `source:"site"` records remain searchable. `new_winners` backfills each winner first reported after its baseline poll from that winner's site page when reachable (the seed poll backfills nothing; failed per-winner fetches are not retried).
-- Docs updated: tool table, elements section and robots notes. No tool names, schemas, annotations, or tool-count changes; the `search_elements` description was updated to match.
+- Docs updated: tool table, elements section and robots notes. The `search_elements` description was updated to match.
+
+### Opt-in v2 surface (15 tools)
+
+- `AWWWARDS_MCP_PROFILE=v2` registers 15 tools instead of the 1.x list: ten consolidated tools (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) plus five retained flat tools (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Profiles are exclusive and read once at startup, so the 1.x names are not registered at all in a v2 session; set the variable and restart the server.
+- Every consolidated tool accepts exactly one `request` object with one branch (`kind` or `action`). There is no all-mode and no cross-branch mixing; branch objects are strict. `monitor_awards` is keyed on `action` (`poll_winners`, `add_watch`, `list_watches`, `remove_watch`).
+- `full` remains the default with all 39 tools; `core` registers 13; `v2` registers 15.
+- `skills/v2-routing.md` maps all 34 replaced 1.x names to their v2 calls, lists the five retained flat tools, and records the v2-only rules. The skills carry matching profile notes so an agent does not call 1.x names in a v2 session.
+
+### v2 contract fixes
+
+- Legacy `capture_component` gains `maxDepth` (root = 0, clamped 0-64; 0 or absent means unlimited) and sets `depthCapped: true` when the limit omitted children. The v2 `capture_page` component branch fixes the cap at 12 so packs stay inside Code Mode's depth limit; it is not configurable on that surface.
+- `build_motion` `gsap_stub` and `manifest` reject a compact scroll census (it omits `anims[]` and replaces keyframes/props/durations with counts) with an explicit "rerun with compact=false" error. `pose_stub` validates its optional census the same way and rejects an empty pose grid (no captured frames) instead of rendering a frameless stub.
+- `build_project` docs state that its output is source, not a servable site: run `npm install && npm run build`, then serve the generated output (Vite/Astro `dist/`, Next `.next` with `next start`).
+- The v2 server instructions advertised `AWWARDS_MCP_PROFILE` (two W), one W short of the accepted `AWWWARDS_MCP_PROFILE` (three W); `AWARDS_MCP_PROFILE` (one W) remains the one-release legacy fallback. They now advertise `AWWWARDS_MCP_PROFILE`, and a test extracts the advertised name and switches profiles with it.
+
+### Search and taxonomy
+
+- The FTS index is re-run after a scrape upsert, so a cold search and a warm one return the same rows.
+- Color and winner-category filters stay bound to the fetched filter page: color rows carry no colors and winner cards carry no award marker, so a fresh page is the only membership evidence. A failed top-up preserves the requested cached page window; a successful top-up still scrapes.
+- Facets go through one normalization path (`canonicalFacet`: trim, slugify, display-slug alias, technology alias) and compare exactly. Eleven display/URL aliases (`adobe-illustrator` → `illustrator`, `adobe-photoshop` → `photoshop`, `angular` → `angularjs`, `css` → `css3`, `p5-js` → `p5js`, `sketch` → `sketchapp`, `swiper-js` → `swiper`, `curtains-js` → `curtains`, `matter-js` → `matterjs`, `navigation-menu` → `navigation`, `seo` → `seo-1`) meet their live URL slugs, and `react` no longer matches `react-native`.
+- Free-text tokenization splits punctuation into token boundaries before alias expansion, so `next.js` searches as `next` + `js` rather than a glued `nextjs` that matches nothing; wrapped aliases such as `nextjs,` still canonicalize.
+- The winner-category award set is derived from `AWARD_FILTERS`, so a newly added winner category cannot drift out of the set.
+
+### Verification evidence
+
+- Band labels are compared at full length (the 24-character truncation is gone); `verify_build` reports the original display labels for matched and leftover bands. Anonymous or duplicate rebuild labels (empty/body, or repeated labels) now fall back to same-tag + closest-height matching (≤25% gap), so a rebuild without stable ids/classes still scores.
+- Motion DNA and the scroll census resolve the ScrollTrigger registry the same way (window global first, gsap plugin registry as fallback), so the fingerprint and census cannot read different registries.
+- `ScrollCensus` gains `gsapRegistryCount`, the full pre-cap registry size (detail rows stay capped at 20), and compact output keeps it. `get_motion_dna` reports it in `censusSummary`, separate from `counts["gsap-scrolltrigger"]`, which tallies element animations classified onto a trigger.
+- Motion DNA cache rows without `gsapRegistryCount` are treated as misses and recaptured once.
+
+### Core profile
+
+- `core` now registers 13 tools, adding `get_annual_categories`: annual nominees are unusable without category discovery. `full` (39) remains the default.
 
 ### Dependencies
 
 - Vitest 4.1.12 and `@vitest/mocker` 4.1.12 (dev only), clearing the two moderate advisories; no runtime dependency change.
+
+### Review hardening
+
+- `build_project` now enforces canonical source/output containment for asset, stylesheet, script and generated-file reads/writes, rejecting symlink and junction escapes.
+- Pose evidence is validated as PNG data URLs with frame/total byte and count caps; finite numeric fields are required, and embedded JSON escapes `<`, preventing `</script>` breakout in generated stubs.
+- `audit_url` validates protocol and origin before every asset redirect hop (max 5); CDP discovery refuses redirects instead of following them.
+- Bundle acquisition counts attempted initial and walk fetches against their caps, keeps deadlines through body consumption, and streams HTML/chunk bodies against byte limits.
+- Browser launch subscribes to child `error` and bounds CDP discovery/WebSocket/command waits, returning an error instead of crashing.
+- Advertised Unix bins have shebangs and alias-safe entry guards; `npm run pack:smoke` installs the tarball and exercises every bin on CI.
+- Browser-enabled installs are documented as a global side-by-side layout (`awwwards-mcp`, `playwright`, `ffmpeg-static`); `npx` is core-only.
+- Score sorting batches metadata reads instead of reopening SQLite per candidate. Cache locks are atomic and owner-scoped; SQLite uses a busy timeout and transactional migrations.
+- Cache directories/database and newly written images use private POSIX modes, image writes are atomic, image downloads are capped, non-rendered (hidden/display:none/visibility:hidden) page text is omitted from component evidence, and page-derived text is labeled untrusted.
+- npm publication requests provenance.
+- README logo and icon use repository-relative assets so GitHub renders them on the branch and after merge.
 
 ## v1.15.1 - 2026-10-30
 

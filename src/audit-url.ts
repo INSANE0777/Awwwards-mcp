@@ -4,8 +4,11 @@
  * playwright) plus a static anti-pattern scan (audit-rules.scanAntiPatterns)
  * over the page HTML and up to 8 same-origin CSS/JS assets. The final
  * post-redirect page URL is the asset base; an asset redirect that leaves the
- * final page origin is rejected. Findings are severity-sorted (worst first)
- * before the output cap.
+ * final page origin is rejected. Assets use MANUAL redirects: every hop is
+ * protocol- and origin-checked before its request is sent (max 5 hops), so a
+ * redirect that leaves the origin is rejected without contacting the target
+ * — even when the chain would return. Findings are severity-sorted (worst
+ * first) before the output cap.
  *
  * Evidence only — nothing here grades the page. Every failure degrades:
  * runtime → `perf: { error }`, static fetch → `antiPatterns.error` + note,
@@ -35,6 +38,9 @@ export const MAX_AUDIT_ASSET_BYTES = 2 * 1024 * 1024;
 export const MAX_AUDIT_FINDINGS = 50;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 30_000;
+/** Asset redirects followed per request; the 6th Location is never requested. */
+const MAX_ASSET_REDIRECTS = 5;
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 export interface AuditAntiPatterns {
   /** Total findings before the output cap (findings[] is bounded). */
@@ -119,9 +125,31 @@ interface FetchedText {
   finalUrl: string;
 }
 
+/** http(s) + exact allowed origin, or null. Called BEFORE every asset request. */
+function allowedHref(raw: string, allowedOrigin: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.origin === allowedOrigin ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function originOf(raw: string): string {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "";
+  }
+}
+
 /**
  * One polite text fetch. Returns null on HTTP error, timeout, oversize body,
  * or — when `allowedOrigin` is set — a redirect that leaves that origin.
+ * Asset requests use `redirect: "manual"` and walk the chain here, so each
+ * hop is validated before its request is sent: a chain that leaves and
+ * returns is rejected at the first leave.
  */
 async function fetchText(
   fetchFn: typeof fetch,
@@ -131,61 +159,82 @@ async function fetchText(
   maxBytes: number,
   allowedOrigin?: string,
 ): Promise<FetchedText | null> {
-  await limiter.acquire();
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const res = await fetchFn(url, {
-      signal: ac.signal,
-      headers: { "User-Agent": AUDIT_UA },
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    const finalUrl = res.url || url;
+  let current = url;
+  let hops = 0;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
     if (allowedOrigin !== undefined) {
-      let finalOrigin = "";
-      try {
-        finalOrigin = new URL(finalUrl).origin;
-      } catch {
-        /* unparseable final URL — treated as a different origin */
+      const href = allowedHref(current, allowedOrigin);
+      if (href === null) return null;
+      current = href;
+    }
+    await limiter.acquire();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), remaining);
+    try {
+      const res = await fetchFn(current, {
+        signal: ac.signal,
+        headers: { "User-Agent": AUDIT_UA },
+        redirect: allowedOrigin === undefined ? "follow" : "manual",
+      });
+      if (
+        allowedOrigin !== undefined &&
+        (REDIRECT_STATUS.has(res.status) || res.type === "opaqueredirect")
+      ) {
+        const location = res.headers.get("location");
+        await cancelBody(res);
+        // No Location, or the hop cap is spent: the next target is never requested.
+        if (!location || hops >= MAX_ASSET_REDIRECTS) return null;
+        hops++;
+        current = new URL(location, current).href; // throws on garbage → caught below
+        continue;
       }
-      if (finalOrigin !== allowedOrigin) {
+      if (!res.ok) {
         await cancelBody(res);
         return null;
       }
-    }
-    const declared = Number(res.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > maxBytes) {
-      await cancelBody(res);
-      return null;
-    }
-    const reader = res.body?.getReader();
-    if (!reader) {
-      const text = await res.text();
-      return Buffer.byteLength(text) > maxBytes ? null : { text, finalUrl };
-    }
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        try {
-          await reader.cancel();
-        } catch {
-          /* already closed */
-        }
+      const finalUrl = res.url || current;
+      // Defense in depth: a redirect-capable runtime must not hand back a
+      // response whose URL left the allowed origin.
+      if (allowedOrigin !== undefined && originOf(finalUrl) !== allowedOrigin) {
+        await cancelBody(res);
         return null;
       }
-      chunks.push(value);
+      const declared = Number(res.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        await cancelBody(res);
+        return null;
+      }
+      const reader = res.body?.getReader();
+      if (!reader) {
+        const text = await res.text();
+        return Buffer.byteLength(text) > maxBytes ? null : { text, finalUrl };
+      }
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          try {
+            await reader.cancel();
+          } catch {
+            /* already closed */
+          }
+          return null;
+        }
+        chunks.push(value);
+      }
+      return { text: Buffer.concat(chunks).toString("utf8"), finalUrl };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
-    return { text: Buffer.concat(chunks).toString("utf8"), finalUrl };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

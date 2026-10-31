@@ -49,6 +49,99 @@ export interface CapturePose3dOptions {
   loader?: () => Promise<any>;
 }
 
+// Bounds for a buildable pose grid. Frames ship inline in one HTML stub, so a
+// grid must be a real, finite, PNG-only capture of bounded size.
+export const POSE_LIMITS = {
+  maxFrames: 120,
+  maxFrameBytes: 8 * 1024 * 1024,
+  maxTotalBytes: 32 * 1024 * 1024,
+  maxDimension: 16384,
+  maxSteps: 1000,
+  maxScrollY: 1_000_000_000,
+} as const;
+
+const PNG_PREFIX = "data:image/png;base64,";
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const BASE64_BODY_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+// Decoded size of a `data:image/png;base64,` URL whose bytes start with the
+// PNG signature; null for anything else (empty, other MIME, bad base64).
+export function pngDataUrlBytes(value: unknown): number | null {
+  if (typeof value !== "string" || !value.startsWith(PNG_PREFIX)) return null;
+  const body = value.slice(PNG_PREFIX.length);
+  if (body === "" || body.length % 4 !== 0 || !BASE64_BODY_RE.test(body)) return null;
+  const bytes = Buffer.from(body, "base64");
+  if (bytes.length < PNG_MAGIC.length || !bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) return null;
+  return bytes.length;
+}
+
+// Encoded length above which a body cannot decode within maxBytes; checked
+// before Buffer decoding so a hostile payload cannot force a huge allocation.
+const maxEncodedLength = (maxBytes: number): number => PNG_PREFIX.length + Math.ceil((maxBytes * 4) / 3) + 4;
+
+export const isPngDataUrl = (value: unknown, maxBytes = POSE_LIMITS.maxFrameBytes): boolean => {
+  if (typeof value !== "string" || value.length > maxEncodedLength(maxBytes)) return false;
+  const bytes = pngDataUrlBytes(value);
+  return bytes !== null && bytes <= maxBytes;
+};
+
+const bounded = (value: unknown, min: number, max: number): boolean =>
+  typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+
+// Actionable, surface-neutral reason a grid cannot be rendered, or null.
+// Numbers must be finite and bounded so JSON anchors can never become
+// NaN/Infinity, and every frame must be a bounded PNG data URL.
+export function poseGridInputError(grid: PoseGrid): string | null {
+  if (!grid || typeof grid !== "object") return "poseGrid must be a pose-grid-v1 object.";
+  if (!bounded(grid.steps, 1, POSE_LIMITS.maxSteps))
+    return `poseGrid.steps must be a finite number between 1 and ${POSE_LIMITS.maxSteps} - re-capture the pose grid.`;
+  if (!bounded(grid.canvasW, 0, POSE_LIMITS.maxDimension) || !bounded(grid.canvasH, 0, POSE_LIMITS.maxDimension))
+    return `poseGrid.canvasW/canvasH must be finite sizes between 0 and ${POSE_LIMITS.maxDimension}.`;
+  if (!bounded(grid.capturedAt, 0, Number.MAX_SAFE_INTEGER))
+    return "poseGrid.capturedAt must be a finite timestamp - re-capture the pose grid.";
+  if (!bounded(grid.viewport?.width, 0, POSE_LIMITS.maxDimension) || !bounded(grid.viewport?.height, 0, POSE_LIMITS.maxDimension))
+    return `poseGrid.viewport width/height must be finite sizes between 0 and ${POSE_LIMITS.maxDimension}.`;
+  if (!Array.isArray(grid.snapshots) || grid.snapshots.length === 0)
+    return "poseGrid.snapshots must contain at least one captured step.";
+  let frames = 0;
+  let totalBytes = 0;
+  for (let i = 0; i < grid.snapshots.length; i++) {
+    const snap = grid.snapshots[i] as Partial<PoseSnapshot> | null | undefined;
+    if (!snap || typeof snap !== "object")
+      return `poseGrid.snapshots[${i}] is malformed - re-capture the pose grid.`;
+    if (!bounded(snap.scrollRatio, 0, 1))
+      return `poseGrid.snapshots[${i}].scrollRatio must be a finite number between 0 and 1.`;
+    if (!bounded(snap.scrollY, 0, POSE_LIMITS.maxScrollY))
+      return `poseGrid.snapshots[${i}].scrollY must be a finite non-negative number.`;
+    if (!bounded(snap.step, 0, POSE_LIMITS.maxSteps))
+      return `poseGrid.snapshots[${i}].step must be a finite step index - re-capture the pose grid.`;
+    const stepFrames: unknown = snap.frames;
+    if (!Array.isArray(stepFrames) || stepFrames.length === 0)
+      return `poseGrid.snapshots[${i}].frames must contain at least one captured frame.`;
+    for (let k = 0; k < stepFrames.length; k++) {
+      const frame = stepFrames[k] as Partial<PoseFrame> | null | undefined;
+      const at = `poseGrid.snapshots[${i}].frames[${k}].dataUrlPng`;
+      if (!frame || typeof frame !== "object") return `poseGrid.snapshots[${i}].frames[${k}] is malformed - re-capture the pose grid.`;
+      const payload = frame.dataUrlPng;
+      if (typeof payload !== "string" || !payload.startsWith(PNG_PREFIX))
+        return `${at} must be a PNG data URL (data:image/png;base64,...).`;
+      if (payload.length > maxEncodedLength(POSE_LIMITS.maxFrameBytes))
+        return `${at} exceeds the ${POSE_LIMITS.maxFrameBytes / (1024 * 1024)} MiB per-frame limit.`;
+      const bytes = pngDataUrlBytes(payload);
+      if (bytes === null) return `${at} must be a PNG data URL (data:image/png;base64,...).`;
+      if (bytes > POSE_LIMITS.maxFrameBytes)
+        return `${at} exceeds the ${POSE_LIMITS.maxFrameBytes / (1024 * 1024)} MiB per-frame limit.`;
+      frames += 1;
+      totalBytes += bytes;
+      if (frames > POSE_LIMITS.maxFrames)
+        return `poseGrid has more than ${POSE_LIMITS.maxFrames} frames - reduce steps or frames per step.`;
+      if (totalBytes > POSE_LIMITS.maxTotalBytes)
+        return `poseGrid frames exceed the ${POSE_LIMITS.maxTotalBytes / (1024 * 1024)} MiB total limit.`;
+    }
+  }
+  return null;
+}
+
 // Runs IN THE PAGE via page.evaluate(POSE_SNIPPET, { canvasSelector }) — ONE
 // sample per call; the step loop lives in the orchestrator. Plain `function`
 // expression (no arrow — page.evaluate re-serializes the source) with zero
@@ -205,6 +298,7 @@ export async function capturePose3d(
       let usedSelector = "";
       let canvasW = 0;
       let canvasH = 0;
+      let totalBytes = 0;
       for (let step = 0; step < steps; step++) {
         const raw = (await page.evaluate(POSE_SNIPPET, { canvasSelector })) as {
           canvasW: number;
@@ -220,15 +314,21 @@ export async function capturePose3d(
         canvasW = canvasW || raw.canvasW;
         canvasH = canvasH || raw.canvasH;
         const frames: PoseFrame[] = [];
-        if (raw.dataUrlPng) {
+        const fits = (url: string): boolean => {
+          const bytes = pngDataUrlBytes(url);
+          return bytes !== null && totalBytes + bytes <= POSE_LIMITS.maxTotalBytes;
+        };
+        if (isPngDataUrl(raw.dataUrlPng) && fits(raw.dataUrlPng)) {
+          totalBytes += pngDataUrlBytes(raw.dataUrlPng)!;
           frames.push({ label: "canvas", dataUrlPng: raw.dataUrlPng });
         } else if (raw.rect && raw.rect.width > 0 && raw.rect.height > 0) {
           try {
             const shot = (await page.screenshot({ clip: raw.rect })) as Buffer;
-            frames.push({
-              label: "viewport",
-              dataUrlPng: "data:image/png;base64," + shot.toString("base64"),
-            });
+            const dataUrlPng = "data:image/png;base64," + shot.toString("base64");
+            if (isPngDataUrl(dataUrlPng) && fits(dataUrlPng)) {
+              totalBytes += pngDataUrlBytes(dataUrlPng)!;
+              frames.push({ label: "viewport", dataUrlPng });
+            }
           } catch {}
         }
         snapQueue.push({ step, scrollY: raw.scrollY, frames });
