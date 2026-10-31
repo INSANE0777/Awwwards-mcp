@@ -36,6 +36,7 @@ const scan: ScrollScan = {
   smilSelectors: ["svg#logo"],
   nativeTimelines: [{ selector: "main", kind: "scroll" }],
   gsapTriggers: [],
+  gsapRegistryTotal: 0,
 };
 
 describe("reduceScrollCensus", () => {
@@ -58,6 +59,7 @@ describe("reduceScrollCensus", () => {
       smilSelectors: [],
       nativeTimelines: [],
       gsapTriggers: [],
+      gsapRegistryTotal: 0,
     }, 1);
     expect(c.anims[0].svgStroke).toBe(true);
     expect(c.svgStrokes).toContain("svg path");
@@ -69,6 +71,7 @@ describe("reduceScrollCensus", () => {
       smilSelectors: [],
       nativeTimelines: [],
       gsapTriggers: [],
+      gsapRegistryTotal: 0,
     }, 1);
     expect(c.anims[0].keyframes).toEqual([{ offset: 0, props: { transform: "none" } }]);
   });
@@ -83,8 +86,13 @@ describe("reduceScrollCensus", () => {
       smilSelectors: [],
       nativeTimelines: [],
       gsapTriggers: rows,
+      gsapRegistryTotal: 2,
     }, 1);
     expect(c.gsapTriggers).toEqual(rows);
+    // Registry total is always emitted and stays separate from the animation
+    // tally in counts["gsap-scrolltrigger"].
+    expect(c.gsapRegistryCount).toBe(2);
+    expect(c.counts["gsap-scrolltrigger"]).toBe(0);
   });
 });
 
@@ -213,6 +221,12 @@ describe("gsapTriggers capture (direct snippet run)", () => {
     };
     const scan = withST(fakeST, SCROLL_CENSUS_SNIPPET);
     expect(scan.gsapTriggers.length).toBe(20);
+    // Regression: the detail rows are capped at 20, but the registry total is
+    // the full pre-cap size and must flow through the reducer.
+    expect(scan.gsapRegistryTotal).toBe(25);
+    const census = reduceScrollCensus("u", scan, 1);
+    expect(census.gsapRegistryCount).toBe(25);
+    expect(census.gsapTriggers).toHaveLength(20);
     const row = scan.gsapTriggers[0];
     expect(row.startPx).toBeNull();
     expect(row.endPx).toBeNull();
@@ -224,6 +238,28 @@ describe("gsapTriggers capture (direct snippet run)", () => {
   it("always emits gsapTriggers ([] when no GSAP)", () => {
     const scan = withST(undefined, SCROLL_CENSUS_SNIPPET);
     expect(scan.gsapTriggers).toEqual([]);
+  });
+
+  it("resolves a plugin-only registry (gsap.plugins.ScrollTrigger)", () => {
+    const prevGsap = g.gsap;
+    const prevST = g.ScrollTrigger;
+    const fakeST = {
+      getAll: function () {
+        return [{ animation: { vars: { duration: 0.5, ease: "power1.out" } }, vars: { scrub: true } }];
+      },
+    };
+    g.gsap = { plugins: { ScrollTrigger: fakeST } };
+    delete g.ScrollTrigger;
+    try {
+      const census = reduceScrollCensus("u", SCROLL_CENSUS_SNIPPET(), 1);
+      expect(census.gsapRegistryCount).toBe(1);
+      expect(census.counts["gsap-scrolltrigger"]).toBe(0);
+    } finally {
+      if (prevGsap === undefined) delete g.gsap;
+      else g.gsap = prevGsap;
+      if (prevST === undefined) delete g.ScrollTrigger;
+      else g.ScrollTrigger = prevST;
+    }
   });
 });
 
@@ -260,6 +296,7 @@ describe("captureScrollCensus", () => {
     smilSelectors: [],
     nativeTimelines: [{ selector: "main", kind: "scroll" }],
     gsapTriggers: [],
+    gsapRegistryTotal: 0,
   };
 
   it("captures a census through a fake browser", async () => {

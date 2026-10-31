@@ -632,7 +632,7 @@ export interface BandDiff {
 // absorb only one base band). `heightDelta` is other − base. A label whose
 // rank among greedily matched bands changes is reported once per matched pair.
 export function diffBands(base: PageStructure, other: PageStructure): BandDiff {
-  const norm = (s: string): string => s.trim().toLowerCase().slice(0, 24);
+  const norm = (s: string): string => s.trim().toLowerCase();
   const show = (s: string): string => s.trim() || "(unlabeled)";
   const pool = other.bands.map((b) => ({ key: norm(b.label), label: show(b.label), used: false }));
   const pairs: { label: string; index: number }[] = [];

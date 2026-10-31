@@ -13,6 +13,8 @@ export interface UnifiedMotionDna extends MotionDna {
     /** Census counts object verbatim (reduceScrollCensus's per-source tallies).
      *  Runtime scrub/pin truth lives in dna.scroll; censusSummary.counts is census-time. */
     counts: Record<string, number>;
+    /** Census-time GSAP registry row count (ScrollCensus.gsapRegistryCount). */
+    gsapRegistryCount: number;
   };
 }
 
@@ -52,9 +54,18 @@ export const MOTION_SNIPPET = function (): MotionScan {
     if (!libs.includes(s)) libs.push(s);
   }
 
+  // ScrollTrigger registry, however the site exposed it. Same preference as
+  // SCROLL_CENSUS_SNIPPET: the window global wins when present at all, the
+  // gsap plugin registry is only a fallback — so a stray window.ScrollTrigger
+  // cannot make DNA and census read different registries.
+  let st: any = null;
+  try {
+    st = g.ScrollTrigger || g.gsap?.plugins?.ScrollTrigger || null;
+  } catch {}
+
   try {
     if (g.gsap || g.TweenMax || g.TweenLite) add("gsap");
-    if (g.ScrollTrigger?.getAll) add("scrolltrigger");
+    if (st?.getAll) add("scrolltrigger");
     if (g.lenis || g.document?.documentElement?.classList?.contains("lenis")) add("lenis");
     if (g.LocomotiveScroll || g.document?.querySelector?.("[data-scroll-container]")) add("locomotive");
     if (g.document?.querySelector?.("[data-aos]")) add("aos");
@@ -90,8 +101,8 @@ export const MOTION_SNIPPET = function (): MotionScan {
   const tweenDurations: number[] = [];
   const easeTokens: string[] = [];
   try {
-    if (g.ScrollTrigger?.getAll) {
-      const sts = g.ScrollTrigger.getAll();
+    if (st?.getAll) {
+      const sts = st.getAll();
       scrollTrigger.count = sts.length;
       for (const st of sts) {
         const anim = st.animation;
@@ -303,8 +314,11 @@ export async function captureMotionDnaUnified(
     const censusScan = (await page.evaluate(SCROLL_CENSUS_SNIPPET)) as ScrollScan;
     const dna = reduceScan(url, scan, Date.now());
     const census = reduceScrollCensus(url, censusScan, Date.now(), !!opts.reducedMotion);
-    // Runtime scrub/pin truth lives in dna.scroll; censusSummary.counts is census-time.
-    return { ...dna, censusSummary: { counts: census.counts } };
+    // Runtime scrub/pin truth lives in dna.scroll; censusSummary is census-time.
+    return {
+      ...dna,
+      censusSummary: { counts: census.counts, gsapRegistryCount: census.gsapRegistryCount },
+    };
   } finally {
     try {
       await browser.close();

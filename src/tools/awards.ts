@@ -28,7 +28,7 @@ export function registerSearchSites(ctx: ToolContext): void {
         .enum(["score", "newest"])
         .default("newest")
         .describe(
-          "Sort results: by Awwwards jury score (details previously fetched) or newest first",
+          "Sort results: by Awwwards jury score (details previously fetched) or default order — newest first, or bm25 relevance for a free-text query",
         ),
       responseMode: z.enum(["full", "compact"]).default("full")
         .describe("full (default) returns all inline previews; compact returns concise cards and at most two page previews"),

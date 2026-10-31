@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compactAuditResult, compactSiteDetails, createHandlers, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
+import { canonicalFacet, compactAuditResult, compactSiteDetails, createHandlers, SITE_TTL_MS, slugifyTag, suggestTags, tokenizeQuery } from "../src/server.js";
 import { detailArgsSchema } from "../src/detail-schema.js";
 import type { AuditUrlResult } from "../src/audit-url.js";
 import type { ScrollCensus } from "../src/census.js";
@@ -13,7 +13,7 @@ import { utcDayStart } from "../src/feed.js";
 import { AwwwardsClient, BlockedError, RateLimiter } from "../src/awwwards.js";
 import { Cache } from "../src/cache.js";
 import { INDEX_LOCK_STALE_MS, INDEX_STALE_MS } from "../src/indexer.js";
-import type { ElementRecord, SiteDetails, SiteSummary } from "../src/types.js";
+import type { ElementRecord, MotionDna, SiteDetails, SiteSummary } from "../src/types.js";
 
 const FIXTURES = join(__dirname, "fixtures");
 const listingHtml = readFileSync(join(FIXTURES, "listing.html"), "utf8");
@@ -50,6 +50,36 @@ function fakeClient() {
   return { client, fetchFn };
 }
 
+// One parseable site card per entry: parseListing only reads the
+// data-collectable-model-value JSON blob and the card's /sites/ href, so a
+// trimmed page is enough to exercise the scrape → upsert → re-query path.
+function listingPage(cards: Array<{ slug: string; title: string; tags?: string[] }>): string {
+  return cards.map(({ slug, title, tags = [] }) => {
+    const blob = JSON.stringify({
+      collectableIdentifier: slug,
+      collectableImage: `submissions/${slug}.jpg`,
+      collectableTitle: title,
+      id: 1,
+      images: { thumbnail: `submissions/${slug}.jpg` },
+      slug,
+      title,
+      createdAt: 1789516800,
+      tags,
+      type: "submission",
+    }).replace(/\//g, "\\/").replace(/"/g, "&quot;");
+    return `<li class="col-3 js-collectable" data-controller="collectable" data-collectable-model-value="${blob}">` +
+      `<a href="/sites/${slug}"><span class="figure-rollover__bt" href="https://example.com/${slug}"></span></a></li>`;
+  }).join("\n");
+}
+
+// Client serving a fixed listing page; every page fetch is recorded.
+function clientFor(html: string) {
+  const fetchFn = vi.fn(async () => new Response(html, { status: 200 }));
+  const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+  vi.spyOn(client, "getThumbnail").mockResolvedValue(Buffer.from("jpeg"));
+  return { client, fetchFn };
+}
+
 // Synthetic detail page with n element blobs in the fixture's attribute
 // encoding: JSON with `\/` slashes and double quotes entity-escaped, so the
 // blob ends at the first raw `">` — exactly what parseElements expects.
@@ -75,6 +105,27 @@ describe("slugifyTag", () => {
     expect(slugifyTag("Content architecture")).toBe("content-architecture");
     expect(slugifyTag("3D")).toBe("3d");
     expect(slugifyTag("WebGL")).toBe("webgl");
+  });
+});
+
+describe("canonicalFacet", () => {
+  it("runs requested and stored tags through one normalization path", () => {
+    expect(canonicalFacet(" Next.js ")).toBe("next-js");
+    expect(canonicalFacet("nextjs")).toBe("next-js");
+    expect(canonicalFacet("next-js")).toBe("next-js");
+    expect(canonicalFacet("React")).toBe("react");
+    expect(canonicalFacet("React Native")).toBe("react-native");
+    expect(canonicalFacet("Magazine / Newspaper / Blog")).toBe("magazine-newspaper-blog");
+  });
+});
+
+describe("tokenizeQuery", () => {
+  it("treats punctuation as a token boundary instead of gluing words", () => {
+    expect(tokenizeQuery("next.js")).toEqual(["next", "js"]);
+    expect(tokenizeQuery("editorial, magazine")).toEqual(["editorial", "magazine"]);
+    // Non-ASCII letters stay whole: splitting them would turn "Léo" into
+    // single-letter tokens that match nearly everything.
+    expect(tokenizeQuery("Léo Parpeix")).toEqual(["léo", "parpeix"]);
   });
 });
 
@@ -1288,9 +1339,12 @@ describe("search query tokenization", () => {
   it("drops stem-matched rows that fail a non-query filter (filter composition)", async () => {
     const cache = new Cache(tmpDir());
     // Both rows match the FTS stem ("magazines" → magazin): one via its
-    // Magazine tag, one via its title only. skipQueryCheck must skip ONLY the
-    // query re-check — with no URL filter (pure query + tags search) the tag
-    // is client-checked with honorUrlSource=false, so the untagged stem match
+    // Magazine tag, one via its title only. Facets compare canonical slugs
+    // exactly, so the tag filter asks for the real taxonomy slug
+    // "magazine-newspaper-blog" (a bare "magazine" only worked when substring
+    // matching was accidental). skipQueryCheck must skip ONLY the query
+    // re-check — with no URL filter (pure query + tags search) the tag is
+    // client-checked with honorUrlSource=false, so the untagged stem match
     // must drop instead of riding the FTS path into the results.
     cache.upsertSites([
       site({ slug: "mag-tagged", title: "Paper Journal", tags: ["Magazine / Newspaper / Blog"] }),
@@ -1298,16 +1352,246 @@ describe("search query tokenization", () => {
     ]);
     const { client, fetchFn } = fakeClient();
     const h = createHandlers({ client, cache });
-    const res = await h.search_sites({ query: "magazines", tags: ["magazine"], count: 6 });
+    const res = await h.search_sites({ query: "magazines", tags: ["magazine-newspaper-blog"], count: 6 });
     const text = (res.content[0] as any).text;
-    expect(text).toContain("1 site(s) matched");
+    // The partial-window top-up re-runs FTS over the fresh cache: the fixture
+    // row that genuinely carries the Magazine tag joins the result, but no
+    // untagged row does.
+    expect(text).toContain("2 site(s) matched");
     expect(text).toContain("mag-tagged");
+    expect(text).toContain("ai-in-design-report-2026");
     expect(text).not.toContain("mag-untagged");
-    // The partial-window top-up may scrape (1 row < count 6), but no fixture
-    // card carries the literal token "magazines", so nothing scraped joins
-    // the result either.
     expect(fetchFn.mock.calls.every((c: any[]) => !String(c[0]).includes("/sites/"))).toBe(true);
     expect(text).not.toContain("l-i-s-a");
+  });
+});
+
+describe("search cold/warm consistency", () => {
+  it("re-runs FTS after a scrape so a cold 'magazines' query finds Magazine", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = clientFor(listingPage([
+      { slug: "mag-cold", title: "Magazine Editorial", tags: ["Magazine / Newspaper / Blog"] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const pageCalls = () => fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"));
+    const cold = await h.search_sites({ query: "magazines", count: 1 });
+    expect((cold.content[0] as any).text).toContain("mag-cold");
+    expect(pageCalls()).toHaveLength(1);
+    // The row is cached now; the warm call must return the same match through
+    // FTS with no second fetch (the old substring check dropped it cold).
+    const warm = await h.search_sites({ query: "magazines", count: 1 });
+    expect((warm.content[0] as any).text).toContain("mag-cold");
+    expect(pageCalls()).toHaveLength(1);
+  });
+
+  it("matches a cached Next.js site for next.js, nextjs and next-js queries", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "next-site", title: "Studio", tags: ["Next.js"] })]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    for (const query of ["next.js", "nextjs", "next-js"]) {
+      const res = await h.search_sites({ query, count: 1 });
+      expect((res.content[0] as any).text, query).toContain("next-site");
+    }
+    expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"))).toHaveLength(0);
+  });
+});
+
+describe("partial top-up re-rank", () => {
+  it("rebuilds the page window from the global FTS re-rank after a successful top-up", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 5 }, (_, i) =>
+      site({ slug: `ed-${i}`, title: `Editorial Archive ${i}`, tags: [], createdAt: 1789516800 + i })));
+    const { client, fetchFn } = clientFor(listingPage([
+      // Shortest title of the six, so bm25 ranks it first after upsert.
+      { slug: "ed-fresh", title: "Editorial", tags: [] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "editorial", count: 3, page: 2 });
+    expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"))).toHaveLength(1);
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("6 site(s) matched; showing 4-6");
+
+    // The fresh row outranks every cached row, so page 2 must be exactly the
+    // post-upsert FTS slice at positions 3-5. Append-only would have put the
+    // fresh row last and leaked it into this window.
+    const ranked = cache.searchSites("editorial", SITE_TTL_MS)!;
+    expect(ranked.map((s) => s.slug)[0]).toBe("ed-fresh");
+    const expected = ranked.slice(3, 6).map((s) => s.slug);
+    expect(expected).toHaveLength(3);
+    const returned = [...text.matchAll(/\(slug: ([^)]+)\)/g)].map((match) => match[1]!);
+    expect(returned).toEqual(expected);
+    expect(returned).not.toContain("ed-fresh");
+  });
+
+  it("keeps the requested page window when the top-up fetch fails", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites(Array.from({ length: 4 }, (_, i) =>
+      site({ slug: `ed-${i}`, title: `Editorial Archive ${i}`, tags: [], createdAt: 1789516800 + i })));
+    const fetchFn = vi.fn(async () => { throw new Error("upstream down"); });
+    const client = new AwwwardsClient({ fetchFn: fetchFn as unknown as typeof fetch });
+    const h = createHandlers({ client, cache });
+    // 4 matches < count*page (6) → partial window → top-up scrape, which
+    // fails. The requested page-2 window must survive; the stale fallback
+    // (page 1 only) must not swallow it.
+    const res = await h.search_sites({ query: "editorial", page: 2, count: 3 });
+    expect(fetchFn.mock.calls.some((c: any[]) => String(c[0]).includes("/websites/"))).toBe(true);
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("4 site(s) matched; showing 4-4");
+    expect(text).not.toContain("showing 1-3");
+  });
+});
+
+describe("page-bound URL filters", () => {
+  it("does not let cached rows outside the fetched color page into a query", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "outside", title: "Porcelain Outside", tags: [] })]);
+    const { client, fetchFn } = clientFor(listingPage([
+      { slug: "color-page", title: "Color Page Studio", tags: ["WebGL"] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ color: "#404040", query: "porcelain", count: 1 });
+    // The color filter must actually be in the fetched URL — otherwise the
+    // "no leak" result would pass merely because no filter page was fetched.
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain("/websites/%23404040/");
+    const text = (res.content[0] as any).text;
+    // Color is not client-verifiable: the cached match from another page must
+    // not ride the post-scrape FTS re-run into a color result.
+    expect(text).toContain("No sites matched");
+    expect(text).not.toContain("outside");
+  });
+
+  it("keeps fresh color-page rows and their query matches", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = clientFor(listingPage([
+      { slug: "color-page", title: "Color Page Studio", tags: ["WebGL"] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ color: "#404040", query: "color", count: 1 });
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain("/websites/%23404040/");
+    expect((res.content[0] as any).text).toContain("color-page");
+  });
+
+  it("does not let cached rows outside the fetched winner-category page in", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "winner-outside", title: "Aurora Outside", awards: [] })]);
+    const { client, fetchFn } = clientFor(listingPage([
+      { slug: "winner-page", title: "Winner Page", tags: [] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ award: "portfolio", query: "aurora", count: 1 });
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain("/websites/winner_category_portfolio/");
+    const text = (res.content[0] as any).text;
+    // Winner-category cards carry no marker, so the award filter cannot be
+    // re-checked; membership comes only from the fetched filter page.
+    expect(text).toContain("No sites matched");
+    expect(text).not.toContain("winner-outside");
+  });
+
+  it("serves fresh winner-category rows even though cards carry no marker", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = clientFor(listingPage([
+      { slug: "winner-page", title: "Winner Page", tags: [] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ award: "portfolio", query: "winner", count: 1 });
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain("/websites/winner_category_portfolio/");
+    const text = (res.content[0] as any).text;
+    expect(text).toContain("winner-page");
+    expect(text).not.toContain("No sites matched");
+  });
+});
+
+describe("exact canonical facets", () => {
+  it("does not match React Native for technology react", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([
+      site({ slug: "react-site", title: "React Studio", tags: ["React"] }),
+      site({ slug: "rn-site", title: "React Native Studio", tags: ["React Native"] }),
+    ]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const pageCalls = () => fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"));
+    const react = await h.search_sites({ technology: "react", count: 1 });
+    const reactText = (react.content[0] as any).text;
+    expect(reactText).toContain("1 site(s) matched");
+    expect(reactText).toContain("react-site");
+    expect(reactText).not.toContain("rn-site");
+    expect(pageCalls()).toHaveLength(0);
+
+    const native = await h.search_sites({ technology: "react-native", count: 1 });
+    const nativeText = (native.content[0] as any).text;
+    expect(nativeText).toContain("1 site(s) matched");
+    expect(nativeText).toContain("rn-site");
+    expect(nativeText).not.toContain("react-site");
+    expect(pageCalls()).toHaveLength(0);
+  });
+
+  it("resolves aliases and whitespace variants to the same canonical facet", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "next-site", title: "Next Studio", tags: ["Next.js"] })]);
+    const { client, fetchFn } = fakeClient();
+    const h = createHandlers({ client, cache });
+    for (const technology of ["nextjs", "Next.js", "next-js", " next js "]) {
+      const res = await h.search_sites({ technology, count: 1 });
+      expect((res.content[0] as any).text, technology).toContain("next-site");
+    }
+    for (const tags of [["nextjs"], ["Next.js"], ["next-js"]]) {
+      const res = await h.search_sites({ tags, count: 1 });
+      expect((res.content[0] as any).text, tags.join(",")).toContain("next-site");
+    }
+    expect(fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/"))).toHaveLength(0);
+  });
+
+  it("matches a multi-word display tag by its canonical slug", async () => {
+    const cache = new Cache(tmpDir());
+    cache.upsertSites([site({ slug: "mag", title: "Editorial Mag", tags: ["Magazine / Newspaper / Blog"] })]);
+    const { client } = fakeClient();
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ tags: ["magazine-newspaper-blog"], count: 1 });
+    expect((res.content[0] as any).text).toContain("mag");
+  });
+
+  it("serves cached rows for every live display-tag / URL-slug pair", async () => {
+    const pairs: Array<[display: string, urlSlug: string]> = [
+      ["Adobe Illustrator", "illustrator"],
+      ["Adobe Photoshop", "photoshop"],
+      ["Angular", "angularjs"],
+      ["CSS", "css3"],
+      ["Curtains.js", "curtains"],
+      ["Matter.js", "matterjs"],
+      ["P5.js", "p5js"],
+      ["Sketch", "sketchapp"],
+      ["Swiper.js", "swiper"],
+      ["Navigation Menu", "navigation"],
+      ["SEO", "seo-1"],
+    ];
+    for (const [display, urlSlug] of pairs) {
+      const cache = new Cache(tmpDir());
+      cache.upsertSites([site({ slug: `facet-${urlSlug}`, title: "Facet Studio", tags: [display] })]);
+      const { client, fetchFn } = fakeClient();
+      const h = createHandlers({ client, cache });
+      for (const technology of [display, urlSlug]) {
+        const res = await h.search_sites({ technology, count: 1 });
+        expect((res.content[0] as any).text, `${display} via ${technology}`)
+          .toContain(`facet-${urlSlug}`);
+      }
+      expect(
+        fetchFn.mock.calls.filter((c: any[]) => String(c[0]).includes("/websites/")),
+        display,
+      ).toHaveLength(0);
+    }
+  });
+
+  it("serves a cold query + technology:'illustrator' row from the fetched page", async () => {
+    const cache = new Cache(tmpDir());
+    const { client, fetchFn } = clientFor(listingPage([
+      { slug: "illustrator-site", title: "Illustration Studio", tags: ["Adobe Illustrator"] },
+    ]));
+    const h = createHandlers({ client, cache });
+    const res = await h.search_sites({ query: "studio", technology: "illustrator", count: 1 });
+    expect(String(fetchFn.mock.calls[0]?.[0])).toContain("/websites/illustrator/");
+    expect((res.content[0] as any).text).toContain("illustrator-site");
   });
 });
 
@@ -1968,12 +2252,45 @@ describe("get_motion_dna handler", () => {
   it("serves cached records under 90 days", async () => {
     const { client } = fakeClient();
     const cache = new Cache(tmpDir());
-    cache.upsertMotionDna({ ...dnaFixture, capturedAt: Date.now() });
+    const cached: UnifiedMotionDna = {
+      ...dnaFixture,
+      capturedAt: Date.now(),
+      censusSummary: { counts: {}, gsapRegistryCount: 0 },
+    };
+    cache.upsertMotionDna(cached);
     const captured = vi.fn();
     const h = createHandlers({ client, cache, motionDnaFn: async (u: string) => { captured(u); return dnaFixture; } });
     const res = await h.get_motion_dna({ url: dnaFixture.url });
     expect(JSON.parse((res.content[0] as any).text).url).toBe(dnaFixture.url);
     expect(captured).not.toHaveBeenCalled();
+  });
+
+  it("treats cached rows without censusSummary.gsapRegistryCount as a miss", async () => {
+    const { client } = fakeClient();
+    const cache = new Cache(tmpDir());
+    // Pre-change on-disk shapes: no summary at all (old captureMotionDna) and
+    // the early unified summary that only carried counts.
+    type LegacyRow = MotionDna & { censusSummary?: { counts: Record<string, number> } };
+    const legacyRows: LegacyRow[] = [
+      { ...dnaFixture, capturedAt: Date.now() },
+      { ...dnaFixture, capturedAt: Date.now(), censusSummary: { counts: {} } },
+    ];
+    for (const legacy of legacyRows) {
+      cache.upsertMotionDna(legacy);
+      let captured = 0;
+      const h = createHandlers({
+        client,
+        cache,
+        motionDnaFn: async (): Promise<UnifiedMotionDna> => {
+          captured++;
+          return { ...dnaFixture, censusSummary: { counts: {}, gsapRegistryCount: 2 } };
+        },
+      });
+      const res = await h.get_motion_dna({ url: dnaFixture.url });
+      const parsed = JSON.parse((res.content[0] as any).text);
+      expect(captured).toBe(1);
+      expect(parsed.censusSummary.gsapRegistryCount).toBe(2);
+    }
   });
 
   it("live-captures and upserts on a cache miss, surfacing failure as clean error", async () => {
@@ -1985,21 +2302,25 @@ describe("get_motion_dna handler", () => {
     expect((miss.content[0] as any).text).toContain("boom");
   });
 
-  // F3 (dogfood): the injected unified capture's slimmed censusSummary (counts
-  // only) must reach the response verbatim — no scrubRatio/pinCount doppelgänger
-  // beside dna.scroll, which is the single runtime truth for scrub/pin.
-  it("live-capture passthrough: censusSummary reaches the response as counts only", async () => {
+  // F3 (dogfood): the injected unified capture's slimmed censusSummary
+  // (counts + registry row count) must reach the response verbatim — no
+  // scrubRatio/pinCount doppelgänger beside dna.scroll, which is the single
+  // runtime truth for scrub/pin.
+  it("live-capture passthrough: censusSummary reaches the response verbatim", async () => {
     const { client } = fakeClient();
     const cache = new Cache(tmpDir());
     const unified: UnifiedMotionDna = {
       ...dnaFixture,
-      censusSummary: { counts: { "gsap-scrolltrigger": 3 } },
+      censusSummary: { counts: { "gsap-scrolltrigger": 3 }, gsapRegistryCount: 4 },
     };
     const h = createHandlers({ client, cache, motionDnaFn: async () => unified });
     const res = await h.get_motion_dna({ url: dnaFixture.url });
     const parsed = JSON.parse((res.content[0] as any).text);
-    expect(parsed.censusSummary).toEqual({ counts: { "gsap-scrolltrigger": 3 } });
-    expect(Object.keys(parsed.censusSummary).sort()).toEqual(["counts"]);
+    expect(parsed.censusSummary).toEqual({
+      counts: { "gsap-scrolltrigger": 3 },
+      gsapRegistryCount: 4,
+    });
+    expect(Object.keys(parsed.censusSummary).sort()).toEqual(["counts", "gsapRegistryCount"]);
   });
 });
 
@@ -2374,6 +2695,7 @@ describe("analyze_scroll_map handler", () => {
         vars: { stagger: "0.09" },
       },
     ],
+    gsapRegistryCount: 1,
     reducedMotion: false,
   });
 
@@ -2429,6 +2751,7 @@ describe("C3 compact response modes", () => {
     gsapTriggers: [
       { selector: "main>h1", scrub: false, pin: false, startPx: 0, endPx: 800, progress: 0, vars: { stagger: "0.09" } },
     ],
+    gsapRegistryCount: 1,
     reducedMotion: false,
   });
 
@@ -2445,6 +2768,7 @@ describe("C3 compact response modes", () => {
     expect(body.scrubCurves).toBeUndefined();
     expect(body.scrubCurveCount).toBe(0);
     expect(body.counts["gsap-scrolltrigger"]).toBe(1);
+    expect(body.gsapRegistryCount).toBe(1);
     expect(body.gsapTriggers[0]).toEqual({ selector: "main>h1", scrub: false, pin: false, startPx: 0, endPx: 800, progress: 0 });
     // The handler-composed trigger hints survive the diet.
     expect(body.choreography).toEqual({ hints: [{ selector: "main>h1", value: 0.09, source: "tween-var" }], groups: 1 });

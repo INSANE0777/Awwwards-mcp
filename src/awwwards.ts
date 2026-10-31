@@ -53,20 +53,63 @@ export const TECHNOLOGY_ALIASES: Record<string, string> = {
   sveltejs: "svelte",
 };
 
+// Own-property lookup only: a bare table[key] would resolve inherited keys
+// ("constructor", "__proto__") to Object.prototype members and make callers
+// treat a function/object as an alias. Unknown strings pass through unchanged.
+function lookupAlias(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 export function canonicalizeTechnology(token: string): string {
-  return TECHNOLOGY_ALIASES[token.toLowerCase()] ?? token;
+  return lookupAlias(TECHNOLOGY_ALIASES, token.toLowerCase()) ?? token;
+}
+
+export function slugifyTag(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+// Display-name slug → live URL slug for facets whose visible tag differs from
+// the /websites/ slug. Deliberately separate from TECHNOLOGY_ALIASES: the
+// cache FTS expands queries with canonicalizeTechnology only, so mapping
+// "css" → "css3" there would change free-text search. Both directions meet on
+// the URL slug: canonicalFacet("Adobe Illustrator") and
+// canonicalFacet("illustrator") both return "illustrator".
+const DISPLAY_SLUG_ALIASES: Record<string, string> = {
+  "adobe-illustrator": "illustrator",
+  "adobe-photoshop": "photoshop",
+  angular: "angularjs",
+  css: "css3",
+  "p5-js": "p5js",
+  sketch: "sketchapp",
+  "swiper-js": "swiper",
+  "curtains-js": "curtains",
+  "matter-js": "matterjs",
+  "navigation-menu": "navigation",
+  seo: "seo-1",
+};
+
+// The single facet normalization path: requested tags/technology and stored
+// display tags both go through trim → slugifyTag (lowercases) → display-slug
+// alias → documented technology alias. Compare the results with equality;
+// substring matching conflated "react" with "react-native" and only appeared
+// to work because display tags happen to contain their slug.
+export function canonicalFacet(value: string): string {
+  const slug = slugifyTag(value.trim());
+  return canonicalizeTechnology(lookupAlias(DISPLAY_SLUG_ALIASES, slug) ?? slug);
 }
 
 // Combined filter URLs return 404 on awwwards.com (verified 2026-09-17), so
 // exactly one filter is used in the URL — the most specific one. The caller
-// applies the remaining filters client-side over the parsed results.
+// applies the remaining filters client-side over the parsed results. The URL
+// value runs through canonicalFacet, the same path matchesFilters uses, so a
+// whitespace or alias spelling cannot scrape a different facet than it filters.
 export function buildFilterUrl(filters: SearchFilters): string {
   if (filters.color) {
     return `${BASE_URL}/websites/%23${filters.color.replace("#", "").toUpperCase()}/`;
   }
   if (filters.award) return `${BASE_URL}/${AWARD_FILTERS[filters.award]}/`;
   const tag = filters.technology ?? filters.tags?.[0];
-  if (tag) return `${BASE_URL}/websites/${encodeURIComponent(canonicalizeTechnology(tag).toLowerCase())}/`;
+  if (tag) return `${BASE_URL}/websites/${encodeURIComponent(canonicalFacet(tag))}/`;
   return `${BASE_URL}/websites/`;
 }
 
