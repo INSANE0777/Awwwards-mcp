@@ -540,22 +540,26 @@ export async function search_elements(ctx: HandlerContext, args: {
   query?: string; category?: string; stack?: string[]; limit?: number;
 }): Promise<ToolResponse> {
   try {
-    // Empty corpus → best-effort auto-index (gallery crawl is small and
-    // one-shot; identical UX to the sites index auto-run).
-    if (ctx.cache.countElements() === 0) {
-      const { runElementsIndexer } = await import("../../elements-indexer.js");
-      try {
-        await runElementsIndexer({ client: ctx.client, cache: ctx.cache, maxItems: 48 });
-      } catch (err) {
-        return {
-          content: [
-            text(
-              `Element index is empty and the gallery crawl failed (${err instanceof Error ? err.message : String(err)}). Try again later or run get_index_status.`,
+    // Gallery crawl retired: robots.txt disallows /elements/*. An empty corpus
+    // is reported as-is; new_winners backfills from winners' own site pages.
+    // countElements() counts gallery rows only, so an empty list means the
+    // whole corpus (gallery + site records) is empty.
+    if (ctx.cache.listElements(1).length === 0) {
+      return {
+        content: [
+          text(
+            JSON.stringify(
+              {
+                count: 0,
+                results: [],
+                note: "Element corpus is empty. The Awwwards gallery crawl is retired for robots.txt compliance; elements are indexed from new SOTD winners' own Elements sections by new_winners after its first baseline poll. Cached gallery records remain searchable if present.",
+              },
+              null,
+              1,
             ),
-          ],
-          isError: true,
-        };
-      }
+          ),
+        ],
+      };
     }
     // Tokens exist but no query → no FTS call at all (searchElements with an
     // empty MATCH string would error). No-query searches list recent rows.

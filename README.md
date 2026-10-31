@@ -49,7 +49,7 @@ queries keep AND semantics: every token must hit the same site.
 | `capture_live_site` | Optional: fresh full-page screenshot of any live URL. Waits for `load` + a settle window with a pre-scroll capped at 80 × 450px steps / 8 s (step- and time-capped so a growing page cannot stall it), so heavy sites work (`waitStrategy: "networkidle"` available). After the scroll it waits up to 10 s for a full-screen fixed preloader (≥90% viewport, z-index ≥100) to clear, so the site — not its loader — is captured; `waitForOverlay: false` skips that wait. Pass `viewport: "mobile"` for the 390×844 iPhone-class render (`"desktop"` 1440×900 default). On inner-scroller pages (`body` pinned, an inner container scrolls) it returns `mode: "anchors"` — six ordered viewport screenshots down that container as JSON `anchors[].scrollTop`/`file` paths, with no inline image and no top-level `file`; `scrollCapture: "viewport"` forces one explicit viewport shot instead. Document-scrolling pages keep the single full-page capture. Inline previews are capped at 2.5 MB of base64; `inline: false` keeps only the saved file. (needs [playwright](https://playwright.dev)). |
 | `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Detects the real scroll container when the page pins `body` and scrolls an inner element (`overflow-y: auto/scroll`), reports it as `scrollRoot` (`tag#id.class`), and measures every band and landmark in that scroller's coordinates; the pre-scroll drives the same container. Compare a reference site's structure against your build. Same heavy-site-friendly wait (`waitStrategy: "networkidle"` available); `viewport: "mobile"` analyzes the phone-class layout (`"desktop"` default). `compare: "mobile"` adds a second 390×844 capture and returns `mobileBands` + `diff: {heightDelta, bandsAdded, bandsRemoved, reordered}` (label-matched); if the mobile capture fails you still get the desktop result plus `mobileError`. Absent, the response is unchanged. `cdpEndpoint` instead attaches to a browser you started (loopback only, requires `AWWWARDS_MCP_ATTACH=1`) and scans the already-open matching page — it never navigates, scrolls, clicks or creates tabs, and disconnects without closing yours. (needs [playwright](https://playwright.dev)). |
 | `record_site_motion` | Optional: short motion-through video of a live URL — preloader, scroll-triggered and hover/cursor animations. Returns an inline filmstrip JPEG plus the saved .webm path. `viewport: "mobile"` records at phone size — the filmstrip renders at the selected viewport, no pillarboxing (`"desktop"` default). Every recording also produces a **Motion Evidence Sheet** (`sheet.html` + `motion-sheet.md`): census-directed keyframes, consecutive-frame diff masks, an onion-skin composite, a cursor-trail overlay and a phase timeline — motion video turned into a document a model can actually read. Degrades gracefully: recording never fails because the sheet does. (needs [playwright](https://playwright.dev) + ffmpeg-static). |
-| `search_elements` | Search the inspiration-elements gallery (footer, hero, pricing, 404…) by free text; ranks BM25 over title/author/category. |
+| `search_elements` | Search the element corpus (footer, hero, pricing, 404…) by free text: cached `source:"gallery"` records plus `source:"site"` records backfilled from new winners' own Elements sections; ranks BM25 over title/author/category. It does **not** crawl the robots-disallowed `/elements/*` gallery. |
 | `get_element` | One element record: title, category, author, built-with stack, related elements and its media URL (image or video) pointing at awwwards' CDN. |
 | `get_motion_dna` | Runtime motion fingerprint of a live URL: animation libraries, render engines, ScrollTrigger stats (trigger count, scrub ratio), tween easing/duration vocab and the scroll model. Fresh capture or cached capture with timestamp. |
 | `analyze_scroll_map` | Per-element scroll-motion census of any URL: selector path, trigger source (gsap-scrolltrigger / native css scroll & view timelines / data-attr / css-keyframe / SMIL), animated props, duration, easing, scrub/pin flags and SVG stroke draw-ins — the rebuild recipe an agent can wire straight into GSAP timelines. Optional `scrubProbe` re-drives the page through ≤8 scroll steps and samples each scrubbed trigger's real progress curve (`scrubCurves`); every payload ends with a `choreography` block — `hints[]` (selector/value/source) and `groups` read from `gsapTriggers` tween vars and stepped sibling `delayMs`. (needs [playwright](https://playwright.dev)). |
@@ -70,7 +70,7 @@ queries keep AND semantics: every token must hit the same site.
 | `build_gsap_stub` | Captured motion evidence → runnable single-file GSAP+ScrollTrigger stub: one timeline per scroll-census anim (trigger, `start: "top 80%"`, scrub/pin, census duration, cubic-bezier easing normalized to the nearest GSAP token), plus an optional scroll-driven camera module from pose-grid anchors (synthesized dolly-in over the page's three.js canvas). Always-on `prefers-reduced-motion` guard; lenient — empty inputs still build a valid page. Pure build from provided JSON — no page fetches. |
 | `build_motion_manifest` | Build a `motion.manifest.json` scaffold from measured evidence: an `analyze_page_structure` result (`bands`) + an `analyze_scroll_map` census, with optional `sections: [{label, selector?}]` overrides. Sections map best-effort from each band's tag plus the first `#id`/`.class` token in its label (or the override selector); no markup is available, so DOM initial-state hints are empty while census triggers still attribute by those tokens. Returns `{manifest, measured: false, censusAnims, warnings, note}` (`manifest.measured` stays false when the census has no anims/triggers/curves); never throws (`{error}` on invalid input). Pure/offline — no page fetches. |
 | `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
-| `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds and dumps the listing; later calls report the delta. Each first-seen winner's Elements section is backfilled into the searchable element corpus, so new winners are element-searchable immediately. |
+| `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds the baseline and reports the current listing count (no element backfill); later calls report the delta. Each winner first reported after the baseline poll is backfilled into the searchable element corpus from its site page when reachable; failed per-winner fetches are not retried. |
 | `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
 
 ### Routing
@@ -316,34 +316,25 @@ npm run index
   checkpoints are cleared so each refresh actually revisits the tag pages.
   Run `get_index_status` to inspect progress or the last crawl error.
 
-### Elements index (optional)
+### Elements corpus (gallery crawl retired)
 
-The `search_elements` tool auto-indexes the first gallery page (~48 items)
-on first use. To build a full corpus (~1,500+ items, ~15 pages at 48/page):
+The `/elements/*` gallery is robots-disallowed; it has not been fetched since
+v1.15.2, when the gallery crawl was removed. `npm run index -- --elements`
+(and the published `awwwards-index --elements`) exits 2 with an explanation
+before any request, and `search_elements` returns an empty-corpus note instead
+of indexing. There is no replacement crawler.
 
-```bash
-npm run index -- --elements all     # follow pagination until exhausted
-npm run index -- --elements 10      # first 10 listing pages
-```
-
-Any crawl beyond the first page also runs the **taxonomy pass**: every
-facet page (`/elements/footer/`, `/elements/cta/`, … 46 categories) is
-fetched once and each element under it is stamped with that category, so
-`search_elements`' `category` filter works across the corpus. Element
-pages carry no breadcrumb, so this listing-side pass is the only category
-source; elements seen on no facet page stay `unsorted`.
+Cached gallery records from earlier versions remain searchable. New elements
+come from winners first reported after the baseline poll: `new_winners`
+backfills each one's site page Elements section as `source:"site"` records
+when reachable. Site-derived slugs are namespaced `site-<siteslug>-<title>`,
+so the two sources never collide.
 
 Element rows are searched by title, author, category **and slug tokens**
-(slug is an FTS5-indexed column; a cache opened from an older schema
-version rebuilds its search index automatically on first open). Each
-element also carries the slug of the award-winning site it came from
-(`siteSlug`/`siteUrl` in `search_elements`/`get_element` results). Two
-record sources share this corpus: gallery records (indexed from the public
-elements listing) and `source:"site"` records backfilled from each new
-SOTD winner's own Elements section by `new_winners` — their slugs are
-namespaced `site-<siteslug>-<title>` so the two never collide. The
-elements index has the same 7-day freshness gate as the sites index —
-a re-run inside the window skips itself.
+(slug is an FTS5-indexed column; a cache opened from an older schema version
+rebuilds its search index automatically on first open). Each element also
+carries the slug of the award-winning site it came from (`siteSlug`/`siteUrl`
+in `search_elements`/`get_element` results).
 
 Site details (palettes, tech stacks) are still fetched on demand and cached
 for 7 days. Awwwards page and CDN requests have a 10-second deadline per
@@ -369,7 +360,7 @@ Awwwards publishes agent-facing, read-only resources:
 
 The three `get_annual_*` tools use this official public API (JSON:API) at
 1 request/second with a 7-day local cache. Daily listings (SOTD, developer,
-honorable mentions, tags, colors, elements) still use polite scraping of public
+honorable mentions, tags, colors) still use polite scraping of public
 pages. Media URLs returned by the annual tools are reference-only: full nominee
 payloads carry `mediaNote: "reference-only"`, and nothing is downloaded,
 mirrored, or redistributed.
@@ -566,9 +557,10 @@ indexer uses:
 
 - **Allowed and used**: `/websites/`, `/websites/<filter>/`, `/sites/<slug>`
   (one filter per URL; deep pagination stays un-crawled).
-- **Disallowed and never fetched**: `/tag/`, `/search-websites`,
-  `/websites/?` (query-string pagination), `/elements/*`, `/vote/`,
-  favourites/likes/follows, and the rest of the 33 rules.
+- **Disallowed**: `/tag/`, `/search-websites`,
+  `/websites/?` (query-string pagination), `/elements/*` (not fetched since
+  v1.15.2; the gallery crawl was removed; the client rejects these paths),
+  `/vote/`, favourites/likes/follows, and the rest of the 33 rules.
 - Our client (`src/awwwards.ts` `buildFilterUrl`) constructs **only**
   `/websites/…` paths at 1 request/second — the loop stays inside the
   published rules by construction, not by convention.

@@ -1818,6 +1818,35 @@ const elementFixture2: ElementRecord = {
 };
 
 describe("search_elements handler", () => {
+  it("empty corpus returns count 0 with a retired-crawl note and no fetch", async () => {
+    const { client, fetchFn } = fakeClient();
+    const cache = new Cache(tmpDir());
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "footer" });
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.count).toBe(0);
+    expect(body.results).toEqual([]);
+    expect(body.note).toMatch(/retired.*robots\.txt/);
+    expect(res.isError).toBeUndefined();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("searches a site-only corpus without the empty-corpus note", async () => {
+    const { client, fetchFn } = fakeClient();
+    const cache = new Cache(tmpDir());
+    cache.upsertElements([{
+      ...elementFixture, slug: "site-example-hero", title: "Hero loop",
+      source: "site", siteSlug: "example",
+    }]);
+    const h = createHandlers({ client, cache });
+    const res = await h.search_elements({ query: "hero" });
+    const body = JSON.parse((res.content[0] as any).text);
+    expect(body.results.map((r: any) => r.slug)).toContain("site-example-hero");
+    expect(body.note).toBeUndefined();
+    expect(res.isError).toBeUndefined();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("returns facet-filtered compact payloads with media URLs (no base64)", async () => {
     const { client } = fakeClient();
     const cache = new Cache(tmpDir());

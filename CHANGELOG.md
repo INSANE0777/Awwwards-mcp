@@ -3,6 +3,20 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.15.2 - 2026-10-30
+
+robots.txt compliance: the `/elements/*` gallery crawl is retired.
+
+### Elements gallery retired
+
+- Deleted the gallery indexer; `awwwards-index --elements` now exits 2 with an explanation before any request, and `AwwwardsClient.getHtml` rejects `/elements` and `/elements/*` paths before any request.
+- `search_elements` returns a no-network empty-corpus note instead of indexing; cached gallery records and `source:"site"` records remain searchable. `new_winners` backfills each winner first reported after its baseline poll from that winner's site page when reachable (the seed poll backfills nothing; failed per-winner fetches are not retried).
+- Docs updated: tool table, elements section and robots notes. No tool names, schemas, annotations, or tool-count changes; the `search_elements` description was updated to match.
+
+### Dependencies
+
+- Vitest 4.1.12 and `@vitest/mocker` 4.1.12 (dev only), clearing the two moderate advisories; no runtime dependency change.
+
 ## v1.15.1 - 2026-10-30
 
 Tool-definition clarity: descriptions, parameter semantics and published server
