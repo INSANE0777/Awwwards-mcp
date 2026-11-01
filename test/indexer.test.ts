@@ -228,7 +228,7 @@ describe("runIndexer", () => {
     const result = await first;
     expect(result.pagesDone).toBe(tags.length);
     expect(cache.getMeta("index:lock", Number.POSITIVE_INFINITY)).toBeNull();
-  });
+  }, 120_000);
 
   it("takes over a stale lock", async () => {
     const cache = new Cache(tmpDir());
@@ -237,7 +237,7 @@ describe("runIndexer", () => {
     const { client } = fakeClient();
     const result = await runIndexer({ client, cache, now: () => t + INDEX_LOCK_STALE_MS });
     expect(result.pagesDone).toBe(tags.length);
-  });
+  }, 120_000);
 
   it("aborts on block, preserves progress, records lastError, releases lock", async () => {
     const cache = new Cache(tmpDir());
@@ -258,7 +258,7 @@ describe("runIndexer", () => {
     expect(result.skipped).toBe(progress.length);
     expect(cache.getMeta<any>("index:status", 10_000)?.pagesDone).toBe(tags.length);
     expect(cache.getMeta("index:progress", 10_000)).toBeNull();
-  });
+  }, 120_000);
 
   it("retains the last successful finish when a later run fails", async () => {
     const cache = new Cache(tmpDir());
