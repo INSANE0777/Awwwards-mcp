@@ -1,0 +1,11 @@
+# CodeRabbit is installed as a GitHub App, but this repository uses Codex for
+# review. Keep automatic reviews off; the app must be uninstalled from the
+# repository settings for complete removal.
+reviews:
+  auto_review:
+    enabled: false
+  high_level_summary: false
+  review_status: false
+  review_info: false
+  review_progress: false
+  commit_status: false
