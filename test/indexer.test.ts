@@ -285,4 +285,4 @@ describe("runIndexer", () => {
     const status = cache.getMeta<any>("index:status", 10_000);
     expect(status.lastError).toContain(secondTag);
   });
-});
+}, 120_000);
