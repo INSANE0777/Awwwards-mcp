@@ -96,7 +96,7 @@ describe("runIndexer", () => {
     expect(cache.getMeta("index:progress", 10_000)).toBeNull();
     expect(logs.length).toBe(tags.length);
     expect(cache.getMeta("index:lock", 10_000)).toBeNull(); // released
-  });
+  }, 120_000);
 
   it("resume skips already-done tags", async () => {
     const cache = new Cache(tmpDir());

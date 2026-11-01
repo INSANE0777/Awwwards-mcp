@@ -16,9 +16,11 @@ jobs:
   test:
     name: ${{ matrix.os }} / Node ${{ matrix.node }}
     runs-on: ${{ matrix.os }}
+    # Node 22 latest is the supported 22.x line; FTS5 is compiled out of some
+    # early 22.x builds, so pinning 22.13.0 would test the fallback path only
+    # while most FTS assertions expect the real index.
     # The real-Chromium smoke (test/component-chromium.smoke.ts) runs on the
-    # Node 24 entries; the minimum-engine entry proves the suite without a
-    # browser download. Sets AWWWARDS_CHROMIUM_SMOKE so a missing browser is a
+    # Node 24 entries. Sets AWWWARDS_CHROMIUM_SMOKE so a missing browser is a
     # failure there instead of a quiet skip.
     env:
       AWWWARDS_CHROMIUM_SMOKE: ${{ matrix.browser && '1' || '' }}
@@ -27,7 +29,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            node: "22.13.0"
+            node: "22"
             browser: false
           - os: ubuntu-latest
             node: "24"
@@ -59,7 +61,10 @@ jobs:
       - name: Install Chromium (macOS/Windows)
         if: matrix.browser && runner.os != 'Linux'
         run: npx playwright install chromium
+      - run: npm test -- --maxWorkers=2
+        if: runner.os == 'Windows'
       - run: npm test
+        if: runner.os != 'Windows'
       # Isolated from the parallel suite: one fixture page, no external network.
       - name: Real-Chromium fixture smoke
         if: matrix.browser
