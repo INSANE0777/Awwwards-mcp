@@ -25,12 +25,16 @@
 - The protocol smoke now covers both MCP eras (`2025-06-18` initialize and `2026-07-28` discover) across every profile (`full`, `core`, `v2`, Atlas on and off), asserting negotiated versions, per-profile surface counts, branch and output-schema behavior, `structuredContent`, and typed failures against an isolated seeded cache.
 - Install/distribution audit and doc corrections: the release documentation no longer claims zero egress at startup (the CLI may refresh the index and check npm for updates), and it now documents tarball qualification, `--mode pack`, `--integrity` and the INCOMPLETE `offline-installed` scope.
 
+### Scene verify gate promoted to stable
+
+- `verify_build.scene3d` is stable and opt-in. New regression evidence covers a style-only page shell (canvas comparison ignores surrounding HTML/CSS), three consecutive runs of one build (all comparable, zero changed pixels), and a real WebGL pair (identical build within tolerance, perturbed fragment colour outside tolerance). No thresholds, fields, tool surface or default behavior changed; the Three.js and Spector adapters remain experimental.
+
 ### Known limitations
 
 - The W2 live pilot is **INCOMPLETE**: component-only coverage, 1x1 sr-only sections, and human review still pending.
 - F9 held-out component precision remains **UNMET** pending a qualifying human corpus that passes `--require-pass`.
 - Atlas remains experimental and off by default (`AWWWARDS_MCP_ATLAS=1` to enable).
-- The Three.js and Spector adapters and the `verify_build.scene3d` gate keep their existing status; no status change in this release.
+- The Three.js and Spector adapters remain experimental; `verify_build.scene3d` is stable as of this release.
 - The last full test run excluded the Chromium browser tests (`*.chromium.test.ts`).
 
 ## v1.19.0 - 2026-11-11
