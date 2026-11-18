@@ -557,39 +557,32 @@ exercised (`qualificationScope: "full"`). An offline or `--no-browser` run is
 `qualificationScope: "offline-installed"` and is never PASS: with no failures
 it is INCOMPLETE (exit 2), and real failures still exit 1.
 
-A full-scope run also needs a **positive Atlas capture**. The one compiled-in
-approved fixture, `https://awwwards-mcp.vercel.app/`, is a fixed-shell desktop
-app: its capture ends in `NO_SECTION_REGIONS` with component evidence and no
-published sections. The release workflow's `browser.atlas_capture` check
-expects published sections, so on this fixture it exits **FAIL (1)**, not
-INCOMPLETE; INCOMPLETE (exit 2) applies only to offline or `--no-browser` runs.
-**Full qualification for 1.21 is therefore BLOCKED and currently FAILS** on
-this fixture, not passed. A positive qualification requires a newly approved,
-permitted document-flow fixture; until one exists, do not treat
-`.qualification/installed-report.json` from an earlier run as release evidence.
-Only a report produced by the current harness against the exact tarball bytes
-counts.
-
-The approved fixture still exercises the installed browser path, but the run
-ends in FAIL at `browser.atlas_capture`:
+A full-scope run also needs a **positive Atlas capture**. The compiled-in
+approved fixture is
+`https://awwwards-mcp.vercel.app/qualification-fixture/`: an owned, public,
+robots-allowed document-flow page with visible sections and ordinary controls,
+no authentication and no personal data. Against that fixture the
+`browser.atlas_capture` check can publish sections, so `qualificationScope`
+becomes `full` and exit 0 is possible when every required check passes. Only a
+report produced by the current harness against the exact tarball bytes is
+release evidence; a stale `.qualification/installed-report.json` is not.
 
 ```bash
-npm run qualify:installed -- --fixture-url https://awwwards-mcp.vercel.app/
+npm run qualify:installed -- \
+  --fixture-url https://awwwards-mcp.vercel.app/qualification-fixture/
 ```
 
 The URL is validated against the compiled-in approved fixture; any other URL is
 refused before any browser launch. The equivalent environment variable is
-`AWWWARDS_QUALIFY_FIXTURE_URL`. With a positive document-flow fixture accepted
-by the harness, `qualificationScope` becomes `full` and exit 0 is possible;
-the current fixture does not provide one. `--skip-build` refuses a `dist` older
-than `src` and reports INCOMPLETE (exit 2), so an existing build cannot qualify
-stale code.
+`AWWWARDS_QUALIFY_FIXTURE_URL`. `--skip-build` refuses a `dist` older than `src`
+and reports INCOMPLETE (exit 2), so an existing build cannot qualify stale
+code.
 
 To qualify a tarball that already exists, without rebuilding or repacking:
 
 ```bash
 npm run qualify:installed -- --tarball <packed.tgz> \
-  --fixture-url https://awwwards-mcp.vercel.app/
+  --fixture-url https://awwwards-mcp.vercel.app/qualification-fixture/
 ```
 
 The tarball is hashed with its npm SHA-512 integrity, installed from that exact

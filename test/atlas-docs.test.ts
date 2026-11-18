@@ -42,10 +42,11 @@ describe("Atlas documentation", () => {
     }
   });
 
-  it("keeps the blocked qualification claim and disclaims stale reports", () => {
-    expect(ATLAS_DOC).toContain("**Full qualification for 1.21 is BLOCKED and currently FAILS**");
-    expect(ATLAS_DOC).toContain("`browser.atlas_capture` check expects published sections");
-    expect(ATLAS_DOC).toContain("**FAIL (1)**, not INCOMPLETE");
+  it("documents the approved document-flow fixture and disclaims stale reports", () => {
+    expect(ATLAS_DOC).toContain(
+      "https://awwwards-mcp.vercel.app/qualification-fixture/",
+    );
+    expect(ATLAS_DOC).toContain("owned, public, robots-allowed document-flow fixture");
     expect(ATLAS_DOC).toContain(
       "stale `.qualification/installed-report.json` is not release evidence",
     );

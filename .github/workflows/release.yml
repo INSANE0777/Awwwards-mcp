@@ -102,7 +102,7 @@ jobs:
         run: |
           npm run qualify:installed -- \
             --tarball ".release-artifact/${{ steps.artifact.outputs.filename }}" \
-            --fixture-url https://awwwards-mcp.vercel.app/ \
+            --fixture-url https://awwwards-mcp.vercel.app/qualification-fixture/ \
             --report .release-artifact/qualification-report.json
 
       - name: Gate - qualification evidence matches the release artifact

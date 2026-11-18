@@ -209,6 +209,11 @@ describe("installed artifact allowlist", () => {
     expect(source).toContain("report.package = installed;");
     expect(source).not.toMatch(/report\.package\s*=\s*\{[^}]*PKG/);
   });
+
+  it("captures the approved fixture path in both the CLI and browser checks", () => {
+    const source = readFileSync(join(repo, "scripts", "qualify-installed.mjs"), "utf8");
+    expect(source.match(/fixturePath\(options\.fixtureUrl\)/g)).toHaveLength(2);
+  });
 });
 
 describe("release qualification inventory", () => {

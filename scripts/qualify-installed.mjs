@@ -32,7 +32,7 @@ import { GUARD_MARKER } from "./egress-guard-marker.cjs";
 import { buildChildEnv, cacheFingerprint, sameCacheFingerprint } from "./qualify/child-env.mjs";
 import { ATLAS_ACTIONS, classifyFlagOffProbe, classifyFlagOnProbe } from "./qualify/cli-probe.mjs";
 import { describeArtifactFile, assertInstalledTree, installedPackageDir, readInstalledIdentity, unsafeArtifactPath } from "./qualify/artifact.mjs";
-import { APPROVED_FIXTURE_URL, normalizeFixtureUrl } from "./qualify/fixture.mjs";
+import { APPROVED_FIXTURE_URL, fixturePath, normalizeFixtureUrl } from "./qualify/fixture.mjs";
 import { requiredCheckInventory } from "./qualify/gate.mjs";
 import {
   ATLAS_FULL_TOOLS,
@@ -870,7 +870,7 @@ async function runCli() {
           "--slug",
           "qualify-fixture",
           "--path",
-          "/",
+          fixturePath(options.fixtureUrl),
           "--viewport",
           "desktop",
         ],
@@ -1136,7 +1136,7 @@ async function runBrowser() {
         await initializeLegacy(client);
         const envelope = await toolJson(client, "capture_atlas", {
           slug: "qualify-fixture",
-          path: "/",
+          path: fixturePath(options.fixtureUrl),
           viewport: "desktop",
           components: true,
           refresh: true,
