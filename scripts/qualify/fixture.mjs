@@ -1,7 +1,13 @@
 // The one owned, public fixture approved for positive Atlas qualification.
 // Keeping it compiled in means a typo or a third-party URL cannot silently
 // turn the release gate into an arbitrary live-capture test.
-export const APPROVED_FIXTURE_URL = "https://awwwards-mcp.vercel.app/";
+export const APPROVED_FIXTURE_URL = "https://awwwards-mcp.vercel.app/qualification-fixture/";
+
+// Atlas resolves an explicit path against the cached site origin, so the
+// harness must pass the fixture's own path rather than "/" (the site root).
+export function fixturePath(url = APPROVED_FIXTURE_URL) {
+  return new URL(normalizeFixtureUrl(url)).pathname;
+}
 
 export function normalizeFixtureUrl(raw) {
   let parsed;

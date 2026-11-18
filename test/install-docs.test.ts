@@ -56,14 +56,14 @@ describe("install documentation", () => {
     expect(text).toContain("manual post-release admin step");
   });
 
-  it("README marks 1.21 qualification blocked and failing on the fixed-shell fixture", () => {
+  it("README points qualification at the approved document-flow fixture", () => {
     const text = flatten(README);
     expect(text).toContain(
-      "Full qualification for 1.21 is therefore BLOCKED and currently FAILS",
+      "approved fixture is `https://awwwards-mcp.vercel.app/qualification-fixture/`",
     );
-    expect(text).toContain("`browser.atlas_capture` check");
-    expect(text).toContain("**FAIL (1)**");
-    expect(text).toContain("INCOMPLETE (exit 2) applies only to offline");
+    expect(text).toContain("document-flow page with visible sections");
+    expect(text).toContain("`browser.atlas_capture` check can publish sections");
+    expect(text).toContain("`qualificationScope` becomes `full`");
   });
 
   it("README qualifies a supplied tarball against the approved fixture", () => {
@@ -73,7 +73,9 @@ describe("install documentation", () => {
       text.indexOf("### Resource limits and diagnostics"),
     );
     expect(section).toContain("--tarball <packed.tgz>");
-    expect(section).toContain("--fixture-url https://awwwards-mcp.vercel.app/");
+    expect(section).toContain(
+      "--fixture-url https://awwwards-mcp.vercel.app/qualification-fixture/",
+    );
     expect(section).toContain('qualificationScope: "offline-installed"');
     expect(section).toContain("INCOMPLETE (exit 2)");
     expect(section).toContain("node scripts/qualify/gate.mjs");
