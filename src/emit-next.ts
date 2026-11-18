@@ -12,16 +12,21 @@
 // that dependency behind it. Import cycle with build-project.ts is
 // intentional and call-time-only (house precedent: capture.ts/structure.ts).
 
+import { decodeHTMLAttribute } from "entities/decode";
 import {
   attributeBlocks,
   authoredScriptWarnings,
   bodyBounds,
   cssTo,
+  escapeDocumentAttr,
+  escapeTitleTag,
   keepAuthoredBodyScript,
   keepAuthoredHeadScript,
   keepAuthoredHeadTag,
   nn,
   packageName,
+  readDocumentAttrs,
+  stripCssComments,
   scriptFile,
   stripExecutableScripts,
 } from "./build-project.js";
@@ -128,27 +133,88 @@ const cssKeyToJsx = (k: string): string => {
 // React CSSProperties rejects "!important" suffixes; live inline styles carry them.
 const stripImportant = (v: string): string => v.replace(/\s*!important\s*$/i, "");
 
+// A declaration name is emitted into a JS object literal, so only plain CSS
+// property names are allowed: a single optional vendor prefix plus a letter,
+// or a custom property. Anything else (`[globalThis.x=1]`, `*zoom`, `{color`,
+// `'foo bar`) is dropped instead of becoming a computed key. Custom properties
+// are a CSS ident after `--` and may be non-ASCII (`--色`), which is safe
+// because every key is JSON-quoted.
+const CUSTOM_PROPERTY = /^--[^\s:;{}()"']+$/;
+const PLAIN_PROPERTY = /^-?[a-zA-Z][\w-]*$/;
+
+// Declarations split on a `;` OUTSIDE quotes and parens: url("a;b.png"),
+// content: "x;y" and data URIs are one declaration each.
+const splitCssDeclarations = (css: string): string[] => {
+  const parts: string[] = [];
+  let quote = "";
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i] ?? "";
+    if (quote !== "") {
+      if (ch === "\\") i += 1;
+      else if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(") depth += 1;
+    else if (ch === ")" && depth > 0) depth -= 1;
+    else if (ch === ";" && depth === 0) {
+      parts.push(css.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(css.slice(start));
+  return parts.map((d) => d.trim()).filter(Boolean);
+};
+
 // style="a: 1; b: 2" → object-literal body (split ; then FIRST : — url values
-// contain colons); convertAttr wraps it in {{ }}. Custom properties (--x) need
-// quoted keys, and their object then needs a CSSProperties cast for TSX.
+// contain colons); convertAttr wraps it in {{ }}. Every key is JSON-quoted (a
+// bare name is also a JS expression), and custom properties additionally need
+// the CSSProperties cast. Attribute values are HTML, so entities are decoded
+// before parsing; a fragment without a property name, or a name that is not a
+// plain CSS property, is dropped rather than emitted.
 const styleToObject = (css: string): { body: string; custom: boolean } => {
   let custom = false;
-  const body = css
-    .split(";")
-    .map((d) => d.trim())
-    .filter(Boolean)
-    .map((d) => {
+  const body = splitCssDeclarations(stripCssComments(decodeAttr(css)))
+    .flatMap((d) => {
       const i = d.indexOf(":");
-      const key = d.slice(0, i).trim();
-      if (key.startsWith("--")) {
-        custom = true;
-        return `${JSON.stringify(key)}: ${JSON.stringify(stripImportant(d.slice(i + 1).trim()))}`;
-      }
-      return `${cssKeyToJsx(key)}: ${JSON.stringify(stripImportant(d.slice(i + 1).trim()))}`;
+      const key = i <= 0 ? "" : d.slice(0, i).trim();
+      const isCustom = CUSTOM_PROPERTY.test(key);
+      if (!isCustom && !PLAIN_PROPERTY.test(key)) return [];
+      if (isCustom) custom = true;
+      const name = isCustom ? key : cssKeyToJsx(key);
+      return [`${JSON.stringify(name)}: ${JSON.stringify(stripImportant(d.slice(i + 1).trim()))}`];
     })
     .join(", ");
   return { body, custom };
 };
+
+// A JSX attribute name is a bare identifier-like name: letters, digits, `_`,
+// `$` and `-` (`data-slot`, `aria-label`, `className`) all parse. HTML names may
+// also contain `.` or `:` (`data-foo.bar` is legal HTML but a TS parse error as
+// JSX, and `a:b` is an unsupported React namespace), so only those carry through
+// a quoted, spread object instead.
+const JSX_PROP_NAME = /^[A-Za-z_$][\w$-]*$/;
+// A raw attribute is newline-normalized by the HTML parser *before* entities
+// are decoded, so a literal CR/CRLF is LF; only `&#13;`/`&#xD;` yields U+000D.
+const normalizeNewlines = (text: string): string => text.replace(/\r\n?/g, "\n");
+const decodeAttr = (raw: string): string => decodeHTMLAttribute(normalizeNewlines(raw));
+
+// Spread values are JS, not JSX: a JSX string literal decodes HTML entities and
+// keeps backslashes/newlines verbatim, a JS one does neither. So decode the
+// captured attribute text with the browser-equivalent HTML attribute decoder
+// (`&copy;`, `&nbsp;`, `&#x80;` → `€`, case-sensitive `&Amp;` stays literal)
+// and re-emit it as a JSON literal.
+const jsString = (raw: string): string => {
+  const text = normalizeNewlines(raw);
+  return JSON.stringify(text.includes("&") ? decodeHTMLAttribute(text) : text);
+};
+
+// Every spread value is a string: an empty or valueless HTML attribute is ""
+// in the DOM, and React would render `true` as the text "true".
+const spreadAttr = (name: string, raw: string): string =>
+  `{...{${JSON.stringify(name)}: ${jsString(raw)}}}`;
 
 // One attribute: rename per table; style's value becomes an object literal;
 // className / data-* / aria-* / unknown attrs pass through unchanged.
@@ -157,7 +223,8 @@ const convertAttr = (attr: string): string => {
   if (!m) {
     // Bare HTML crossorigin means "anonymous"; React types it as a string.
     if (attr.toLowerCase() === "crossorigin") return 'crossOrigin="anonymous"';
-    return ATTR_MAP.get(attr.toLowerCase()) ?? attr; // bare attr (`defer`, `playsinline`)
+    const name = ATTR_MAP.get(attr.toLowerCase()) ?? attr;
+    return JSX_PROP_NAME.test(name) ? name : spreadAttr(name, "");
   }
   const key = (m[1] ?? "").toLowerCase();
   const eq = m[2] ?? "";
@@ -169,10 +236,21 @@ const convertAttr = (attr: string): string => {
   }
   if (key === "style") {
     const style = styleToObject(value.slice(1, -1));
+    // Nothing parseable left: an empty style object is noise, so drop the attr.
+    if (style.body === "") return "";
     return `style={{ ${style.body} }${style.custom ? " as React.CSSProperties" : ""}}`;
   }
   const name = ATTR_MAP.get(key) ?? NAMESPACED.get(key) ?? m[1];
-  return `${name}${eq}${value}`;
+  const original = value.slice(1, -1);
+  const raw = normalizeNewlines(original);
+  if (!JSX_PROP_NAME.test(name)) return spreadAttr(name, raw);
+  // JSX string literals decode entities with JSX rules, not HTML attribute
+  // rules (`&#128;` becomes U+0080, not `€`). When the browser decoder (or the
+  // parser's newline normalization) changes the text, hand React the decoded
+  // plain JS string (once — JSX is bypassed); otherwise keep the bare literal
+  // shape. `style` has its own decoder above.
+  const decoded = raw.includes("&") ? decodeHTMLAttribute(raw) : raw;
+  return decoded === original ? `${name}${eq}${value}` : `${name}={${JSON.stringify(decoded)}}`;
 };
 
 // Escapes JSX-expression braces in TEXT spans only — tag spans (open, close,
@@ -200,17 +278,63 @@ export function htmlToJsx(html: string): string {
   // comments first so their contents can never look like markup
   const noComments = String(html ?? "").replace(/<!--[\s\S]*?-->/g, "");
   const braced = escapeJsxBraces(noComments);
-  // rewrite attrs + tag names on open AND close tags, preserving original spacing
-  return braced.replace(/<(\/?)([a-zA-Z][^>\s]*)([^>]*?)(\/?)>/g, (tag, slash, name, body, selfSlash) => {
-    const selfClosed = Boolean(selfSlash);
-    const converted = String(body)
-      .replace(/[^\s=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/g, convertAttr)
-      .replace(/ {2,}/g, " ")
-      .trim();
-    const fixed = SVG_TAG_FIXES.get(String(name).toLowerCase()) ?? name;
-    if (slash) return VOID_TAGS.has(String(fixed).toLowerCase()) ? "" : `</${fixed}>`;
-    return `<${fixed}${converted ? " " + converted : ""}${selfClosed || VOID_TAGS.has(String(fixed).toLowerCase()) ? "/>" : ">"}`;
-  });
+  // Rewrite attrs + tag names on open AND close tags. The scan is quote-aware:
+  // `<div title="a>b">` ends at the real `>`, not inside the value.
+  let out = "";
+  let i = 0;
+  while (i < braced.length) {
+    const lt = braced.indexOf("<", i);
+    if (lt === -1) {
+      out += braced.slice(i);
+      break;
+    }
+    out += braced.slice(i, lt);
+    let j = lt + 1;
+    const slash = braced[j] === "/";
+    if (slash) j += 1;
+    if (!/[a-zA-Z]/.test(braced[j] ?? "")) {
+      // Not a tag (`<` in text): keep the character and keep scanning.
+      out += "<";
+      i = lt + 1;
+      continue;
+    }
+    const nameStart = j;
+    while (j < braced.length && !/[\s>/]/.test(braced[j]!)) j += 1;
+    const name = braced.slice(nameStart, j);
+    // Quote-aware end: `>` closes the tag only outside a quoted value.
+    let q = j;
+    let quote = "";
+    for (; q < braced.length; q += 1) {
+      const ch = braced[q]!;
+      if (quote) {
+        if (ch === quote) quote = "";
+      } else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === ">") break;
+    }
+    if (q >= braced.length) {
+      // Unterminated tag: emit the rest untouched.
+      out += braced.slice(lt);
+      break;
+    }
+    let body = braced.slice(j, q);
+    const trimmed = body.replace(/\s+$/, "");
+    const selfClosed = trimmed.endsWith("/");
+    if (selfClosed) body = trimmed.slice(0, -1);
+    // Only the whitespace *between* attributes normalizes; anything inside a
+    // quoted value is data (a browser keeps "one  two" verbatim).
+    const converted = (body.match(/[^\s=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/g) ?? [])
+      .map(convertAttr)
+      .filter(Boolean)
+      .join(" ");
+    const fixed = SVG_TAG_FIXES.get(name.toLowerCase()) ?? name;
+    if (slash) {
+      out += VOID_TAGS.has(fixed.toLowerCase()) ? "" : `</${fixed}>`;
+    } else {
+      out += `<${fixed}${converted ? " " + converted : ""}${selfClosed || VOID_TAGS.has(fixed.toLowerCase()) ? "/>" : ">"}`;
+    }
+    i = q + 1;
+  }
+  return out;
 }
 
 const j = (obj: object): string => JSON.stringify(obj, null, 2) + "\n";
@@ -315,7 +439,7 @@ const rehostHeadLines = (rehost: RehostSplit, name: string, authored: boolean): 
     const tag = m[0];
     if (/^<title/i.test(tag)) {
       hasTitle = true;
-      lines.push(htmlToJsx(tag));
+      lines.push(htmlToJsx(escapeTitleTag(tag)));
       continue;
     }
     if (/^<meta/i.test(tag)) {
@@ -356,20 +480,65 @@ const headScriptJsx = (entry: LoaderScript): string => {
 
 // Rehost layout: document head metadata + head scripts in captured order, one
 // client loader for body scripts (see SiteScripts).
-// shortcut: <html lang> and <body> attributes are not carried (hardcoded en /
-// bare body) — Next-only gap; vite/astro keep them. Wire document attrs when a
-// non-en or themed rehost shows up.
-const rehostLayout = (headLines: string[], cssImports: string[], components: string[]): string => {
+interface DocumentTags {
+  html: string; // JSX opening tag, converted through htmlToJsx
+  body: string;
+  react: boolean; // an inline document style needed the CSSProperties cast
+  // U+000D cannot survive markup: a CR in the attribute text is newline-
+  // normalized to LF by the HTML parser, and React has no character-reference
+  // escape for attributes. Only when a document attribute actually holds a CR,
+  // the layout restores it with one inline script (JSON-escaped, `<` as
+  // \u003c). Empty string when nothing needs it.
+  headScript: string;
+  bodyScript: string;
+}
+
+// CR restore: static markup stays safe and correct without JS (CR simply reads
+// as LF); with JS the exact parsed value is written back before first paint —
+// head script for <html> attributes, first body child for <body> attributes.
+const crRestoreScript = (target: "document.documentElement" | "document.body", pairs: Array<[string, string]>): string => {
+  const entries = pairs
+    .map(([name, raw]) => [name, decodeAttr(raw)] as const)
+    .filter(([, value]) => value.includes("\r"));
+  if (entries.length === 0) return "";
+  const map = JSON.stringify(Object.fromEntries(entries)).replace(/</g, "\\u003c");
+  const js = `(()=>{const e=${target};if(!e)return;const a=${map};for(const k in a)e.setAttribute(k,a[k])})()`;
+  return `<script dangerouslySetInnerHTML={{ __html: ${JSON.stringify(js)} }} />`;
+};
+
+// The document's own opening tags as JSX. htmlToJsx does the class→className /
+// style→object conversion; the attribute allowlist and escaping live in
+// build-project's readDocumentAttrs.
+const documentTags = (split: Split): DocumentTags => {
+  const attrs = readDocumentAttrs(split.html);
+  const jsx = (tag: "html" | "body"): string => {
+    const pairs = attrs[tag];
+    if (tag === "html" && !pairs.some(([name]) => name === "lang")) pairs.unshift(["lang", "en"]);
+    if (pairs.length === 0) return `<${tag}>`;
+    return htmlToJsx(`<${tag} ${pairs.map(([name, value]) => `${name}="${escapeDocumentAttr(value)}"`).join(" ")}>`);
+  };
+  const html = jsx("html");
+  const body = jsx("body");
+  return {
+    html,
+    body,
+    react: `${html}${body}`.includes(REACT_STYLE_CAST),
+    headScript: crRestoreScript("document.documentElement", attrs.html),
+    bodyScript: crRestoreScript("document.body", attrs.body),
+  };
+};
+
+const rehostLayout = (headLines: string[], cssImports: string[], components: string[], doc: DocumentTags): string => {
   const componentImport = components.map((c) => `import ${c} from "../components/${c}";`).join("\n");
   const componentTag = components.map((c) => `\n        <${c} />`).join("");
-  return `${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
+  return `${doc.react ? 'import type React from "react";\n' : ""}${cssImports.map((line) => `${line}\n`).join("")}import type { ReactNode } from "react";
 ${componentImport ? `${componentImport}\n\n` : ""}export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
-      <head>${layoutHeadTags(headLines)}</head>
-      <body>
+    ${doc.html}
+      <head>${doc.headScript}${layoutHeadTags(headLines)}</head>
+      ${doc.body}${doc.bodyScript}
         {children}${componentTag}
       </body>
     </html>
@@ -512,8 +681,8 @@ const layoutBodyScripts = (scripts: BodyScript[]): string =>
         .join("\n      ")}`
     : "";
 
-const layout = (name: string, headTags: string[], bodyScripts: BodyScript[], motion = false): string =>
-  `import type { Metadata } from "next";
+const layout = (name: string, headTags: string[], bodyScripts: BodyScript[], doc: DocumentTags, motion = false): string =>
+  `${doc.react ? 'import type React from "react";\n' : ""}import type { Metadata } from "next";
 import "./globals.css";${motion ? '\nimport MotionRoot from "../components/MotionRoot";' : ""}
 
 export const metadata: Metadata = {
@@ -524,9 +693,9 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <head>${layoutHeadTags(headTags)}</head>
-      <body>{children}${layoutBodyScripts(bodyScripts)}${motion ? "\n        <MotionRoot />" : ""}</body>
+    ${doc.html}
+      <head>${doc.headScript}${layoutHeadTags(headTags)}</head>
+      ${doc.body}${doc.bodyScript}{children}${layoutBodyScripts(bodyScripts)}${motion ? "\n        <MotionRoot />" : ""}</body>
     </html>
   );
 }
@@ -748,7 +917,7 @@ export function emitNext(split: Split, outDir: string, name: string, motion?: Mo
     const components = authored
       ? [...(authoredBody.length > 0 ? ["SiteScripts"] : []), ...(motionRoot ? ["MotionRoot"] : [])]
       : ["SiteScripts"];
-    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name, authored), cssImports, components));
+    add("app/layout.tsx", rehostLayout(rehostHeadLines(rehost, name, authored), cssImports, components, documentTags(split)));
     add("app/page.tsx", rehostPage(rehost));
     rehost.sections.forEach((s, i) => {
       const section = rehostSection(s, i, authored);
@@ -759,7 +928,7 @@ export function emitNext(split: Split, outDir: string, name: string, motion?: Mo
     return { files, warnings };
   }
 
-  add("app/layout.tsx", layout(name, headTags, bodyScripts, authored && motionRoot));
+  add("app/layout.tsx", layout(name, headTags, bodyScripts, documentTags(split), authored && motionRoot));
   add("app/globals.css", globalsCss(split));
   add("app/page.tsx", page(split, attributed, authored));
   sections.forEach((s, i) => add(`components/${nn(i)}.tsx`, section(s, i, attributed, hasCdns, generic, authored)));

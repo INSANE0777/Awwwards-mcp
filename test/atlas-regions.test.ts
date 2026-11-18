@@ -58,6 +58,31 @@ describe("Atlas section segmentation", () => {
     expect(first.every((region) => region.rect.width > 0 && region.rect.height > 0)).toBe(true);
   });
 
+  it("leaves fixed-only pages unsupported", () => {
+    const regions = segmentRegions(
+      scan([
+        section({
+          nodeKey: "shell",
+          selector: "body > main.shell",
+          tag: "main",
+          heading: null,
+          fixed: true,
+          rect: { x: 0, y: 0, width: 1400, height: 800 },
+        }),
+        section({
+          nodeKey: "win",
+          selector: "body > section.win",
+          heading: "About the studio",
+          fixed: true,
+          rect: { x: 200, y: 80, width: 720, height: 600 },
+        }),
+      ]),
+    );
+    // Fixed-overlay exclusion is strict by design (spec 1.21): a page whose
+    // sections are all fixed has no document-flow region to capture.
+    expect(regions).toEqual([]);
+  });
+
   it("drops fixed overlays and duplicate nested shells", () => {
     const base = section({ selector: "main > section.a" });
     const regions = segmentRegions(
@@ -388,6 +413,31 @@ describe("Atlas section segmentation", () => {
     );
     expect(regions).toHaveLength(2);
     expect(new Set(regions.map((region) => region.key)).size).toBe(2);
+  });
+
+  it("excludes sections whose visual eligibility failed and keeps below-fold and tiny ones", () => {
+    const result = segmentRegionsWithStats(
+      scan([
+        section({
+          nodeKey: "clipped",
+          selector: "main > div.sr-only > section",
+          visible: false,
+        }),
+        section({
+          nodeKey: "below",
+          selector: "main > section.below",
+          rect: { x: 0, y: 2400, width: 1200, height: 600 },
+        }),
+        section({
+          nodeKey: "tiny",
+          selector: "main > section.tiny",
+          rect: { x: 0, y: 200, width: 24, height: 24 },
+        }),
+      ]),
+    );
+    // No size threshold and no viewport test: the scan's visual flag decides.
+    expect(result.regions.map((region) => region.nodeKey)).toEqual(["tiny", "below"]);
+    expect(result.filtered).toBe(1);
   });
 
   it("links parents only when the retained candidate exists", () => {

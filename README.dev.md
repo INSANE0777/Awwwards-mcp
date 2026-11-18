@@ -188,10 +188,25 @@ When a drift issue lands, the fresh HTML snapshot becomes the new fixture.
 ## Tests
 
 ```bash
+npm run build   # once before npm test: protocol-catalog spawns dist/cli.js
 npm test        # offline, vitest, fixtures only — no network
 npm run smoke   # manual live smoke test (test/live-smoke.ts)
-npm run build   # tsc → dist/
+npm run protocol:smoke  # needs Chromium: core validates one real verify_build
 ```
+
+`protocol:smoke` accepts an explicit candidate CLI (`node scripts/protocol-smoke.mjs dist/cli.js`)
+and compares both protocol eras for all profiles with Atlas off and on. Its pinned baseline
+catalog is `scripts/fixtures/protocol-catalog.json`; regenerate it from a clean 1.20 **build**
+using **this checkout's** script:
+
+```bash
+node scripts/protocol-smoke.mjs <clean-1.20>/dist/cli.js \
+  --dump-catalog scripts/fixtures/protocol-catalog.json
+```
+
+The script must be the current one: a clean 1.20 checkout's own copy reads `argv[2]` only and
+ignores `--dump-catalog`. Run it once with and once without `AWWWARDS_MCP_ATLAS=1`. Dumps are
+written atomically and record the candidate's package identity.
 
 Run via `npm run build` + `node dist/cli.js`, not tsx: tsx's esbuild
 `keepNames` injects `__name` into page.evaluate-serialized snippets, which
@@ -224,10 +239,14 @@ called from `server-instance.ts`, once per `serveStdio` factory invocation.
   [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills));
   the skills carry matching profile notes so an agent never calls a 1.x name
   in a v2 session.
-- `AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default `32000000`) - text + inline image
-  base64 bytes per response; over-budget calls keep `isError` and other result
-  fields but replace `content` with a
-  `{truncated:true,tool,bytes,limit,note}` JSON block.
+- `AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default `32000000`) - full serialized
+  result bytes (text, inline images, `structuredContent`, `_meta`). Every
+  over-budget result is replaced by `isError: true` with only the
+  `{truncated:true,tool,bytes,limit,note}` text notice; no
+  `structuredContent`, payload or `_meta` survives. The notice is a fixed
+  recovery envelope (about 200 bytes; at most 1 KiB for every registered tool
+  name), so a configured limit below it still returns a slightly larger error
+  envelope.
 - `AWWWARDS_MCP_DEBUG_MEMORY=1` - one JSON line per tool call (duration +
   `process.memoryUsage()`) on stderr; stdout stays JSON-RPC-only.
 - `AWWWARDS_MCP_IMAGE_RETENTION_DAYS=N` - prune cached images older than N days

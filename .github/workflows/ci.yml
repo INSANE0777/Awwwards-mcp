@@ -21,9 +21,9 @@ jobs:
     # Node 22 latest is the supported 22.x line; FTS5 is compiled out of some
     # early 22.x builds, so pinning 22.13.0 would test the fallback path only
     # while most FTS assertions expect the real index.
-    # The real-Chromium smoke (test/component-chromium.smoke.ts) runs on the
-    # Node 24 entries. Sets AWWWARDS_CHROMIUM_SMOKE so a missing browser is a
-    # failure there instead of a quiet skip.
+    # Every row runs the required browser suites (both env spellings), so
+    # ubuntu-22.04 installs Chromium too: protocol:smoke drives verify_build
+    # through a real browser, and a missing browser must fail, never skip.
     env:
       AWWWARDS_CHROMIUM_SMOKE: ${{ matrix.browser && '1' || '' }}
       AWWARDS_CHROMIUM_SMOKE: ${{ matrix.browser && '1' || '' }}
@@ -33,7 +33,7 @@ jobs:
         include:
           - os: ubuntu-22.04
             node: "22"
-            browser: false
+            browser: true
             label: "22"
           - os: ubuntu-24.04
             node: "24"
@@ -75,6 +75,9 @@ jobs:
           echo "npm ci failed after 3 attempts"
           exit 1
       - run: npm run typecheck
+      # Build before tests: protocol-catalog spawns dist/cli.js, and the
+      # release workflow tests the same compiled candidate it ships.
+      - run: npm run build
       # Chromium only where the browser smoke runs. Ubuntu runners already
       # carry the distro libraries Playwright's bundled build links against;
       # installing them again with --with-deps makes CI depend on apt mirror
@@ -121,7 +124,6 @@ jobs:
       - name: Real-Chromium fixture smoke
         if: matrix.browser
         run: npm run test:browser
-      - run: npm run build
       - run: npm run registry:gate
       - run: npm run protocol:smoke
       - run: npm pack --dry-run

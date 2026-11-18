@@ -10,6 +10,7 @@ import { collectAtlasPage } from "../src/atlas/collector.js";
 import { ATLAS_COMPONENT_HINTS, ATLAS_SECTION_SCAN } from "../src/atlas/scan.js";
 import { publishCapture } from "../src/atlas/publish.js";
 import { atlasSearchStore, searchAtlas } from "../src/atlas/search.js";
+import { runAtlasRegion } from "../src/atlas/tool-read.js";
 import type { AtlasPageScan } from "../src/atlas/live-types.js";
 import type { SiteSummary } from "../src/types.js";
 
@@ -47,6 +48,28 @@ afterEach(async () => {
     ),
   );
 });
+
+/**
+ * Capture a fixture, retrying once with a shorter budget when the capture
+ * fails before any viewport exists (browser launch, budget or lease on a
+ * loaded machine).
+ */
+const captureAttempt = async (
+  capture: (totalBudgetMs: number) => Promise<Awaited<ReturnType<typeof collectAtlasPage>>>,
+) => {
+  const first = await capture(45_000);
+  return first.viewports.length === 0 ? capture(30_000) : first;
+};
+
+/** The single desktop viewport, failing with the real limitations if absent. */
+const requireViewport = (attempt: Awaited<ReturnType<typeof collectAtlasPage>>) => {
+  expect(
+    attempt.viewports.length,
+    `capture returned no viewport: ${attempt.limitations.join(", ") || "no limitations"}` +
+      (attempt.error ? ` (${attempt.error})` : ""),
+  ).toBe(1);
+  return attempt.viewports[0]!;
+};
 
 const site = (liveUrl: string): SiteSummary => ({
   id: 1,
@@ -1416,6 +1439,822 @@ suite("Atlas collector with real Chromium", () => {
     expect(
       attempt.viewports[0]!.regions.some((region) => region.heading === "Page"),
     ).toBe(true);
+  }, 60_000);
+
+  it("excludes proven nonvisual sections and keeps below-fold and tiny ones", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(`
+          <style>
+            html, body { margin: 0; }
+            section { box-sizing: border-box; }
+            /* Classic visually-hidden wrapper: a positive 1x1 rect that paints nothing. */
+            .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+              overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+          </style>
+          <main>
+            <section id="hero"><h1>Contact us</h1><a id="hero-action" href="/contact">Talk to us</a></section>
+            <section id="tiny" style="width:24px;height:24px"><a href="/tiny">Open</a></section>
+            <!-- Class name alone is never evidence: no styles match this rule. -->
+            <section id="class-only" class="sr-only"><h2>Class only section</h2><p>Class name copy</p></section>
+            <!-- content-visibility:hidden skips the section's contents, but its
+                 own box, background and border still paint. -->
+            <section id="self-content-hidden" style="height:100px;width:200px;background:#c00;content-visibility:hidden">
+              <h2>Self content hidden</h2><p>Self content copy</p>
+            </section>
+            <!-- A transformed ancestor still paints: clip-path lengths resolve
+                 against the untransformed 200x200 layout box, not the 100x100
+                 scaled rect. -->
+            <div style="position:relative;width:200px;height:200px;transform:scale(.5);clip-path:inset(60px)">
+              <section id="transformed-inset" style="position:absolute;left:60px;top:60px;width:80px;height:80px"><h2>Transformed inset</h2><p>Scaled copy</p></section>
+            </div>
+            <!-- A real 1px-tall drawn section: no threshold may drop it. -->
+            <section id="hairline" style="height:1px;width:400px;background:#000"></section>
+            <!-- A visibility:visible descendant still paints inside a hidden box. -->
+            <section id="hidden-with-visible-child" style="visibility:hidden">
+              <h2 style="visibility:visible">Visible badge</h2>
+              <p>Hidden copy</p>
+            </section>
+            <!-- Scrollable overflow is not proof: its content can scroll into view. -->
+            <div style="height:120px;width:400px;overflow:auto">
+              <section id="scrollable-below" style="height:600px;margin-top:200px"><h2>Scrollable section</h2><p>Scroll copy</p></section>
+            </div>
+            <div class="visually-hidden">
+              <section id="legacy-clip"><h2>Legacy clip wrapper</h2><p>Legacy hidden copy</p></section>
+            </div>
+            <div style="position:absolute;width:2px;height:2px;clip-path:inset(100%)">
+              <section id="clip-path"><h2>Clip path wrapper</h2><p>Clip path hidden copy</p></section>
+            </div>
+            <div style="position:absolute;width:2px;height:2px;clip-path:circle(0)">
+              <section id="circle-zero"><h2>Circle zero</h2><p>Circle copy</p></section>
+            </div>
+            <div style="position:absolute;width:2px;height:2px;clip-path:ellipse(0 0)">
+              <section id="ellipse-zero"><h2>Ellipse zero</h2><p>Ellipse copy</p></section>
+            </div>
+            <div style="position:absolute;width:2px;height:2px;clip-path:inset(50% round 10px)">
+              <section id="inset-round"><h2>Inset round</h2><p>Inset copy</p></section>
+            </div>
+            <!-- Individual transform properties scale geometry too, so the
+                 chain must resolve them; a px inset then stays unproven. -->
+            <div style="position:relative;width:200px;height:200px;scale:.5;transform-origin:0 0;clip-path:inset(60px)">
+              <section id="individual-scale-inset" style="position:absolute;left:60px;top:60px;width:80px;height:80px"><h2>Individual scale</h2><p>Scale copy</p></section>
+            </div>
+            <!-- A 200.4px box: offsetWidth rounds to 200, which would fake an
+                 empty inset(100.1px); the fractional layout box decides. -->
+            <div style="position:absolute;width:200.4px;height:200.4px;clip-path:inset(100.1px)">
+              <section id="fractional-inset" style="width:100%;height:100%"><h2>Fractional inset</h2><p>Fractional copy</p></section>
+            </div>
+            <!-- A scroll container moves content through its clip box, so the
+                 section's initial position inside inset(0) is no proof. -->
+            <div style="width:200px;height:120px;overflow:auto;clip-path:inset(0)">
+              <section id="scroll-clip-below" style="height:600px;margin-top:300px"><h2>Scroll clip</h2><p>Scroll clip copy</p></section>
+            </div>
+            <!-- The 400-descendant bound is a documented shortcut: past it the
+                 subtree is unexamined, so the section is retained, not excluded. -->
+            <section id="hidden-cap-miss" style="visibility:hidden">${'<span style="display:none">x</span>'.repeat(420)}<a href="/cap" style="visibility:visible">Deep</a></section>
+            <section id="hidden-cap-hit" style="visibility:hidden"><a href="/cap" style="visibility:visible">Shallow</a>${'<span style="display:none">x</span>'.repeat(420)}</section>
+            <div style="opacity:0"><section id="zero-opacity"><h2>Zero opacity</h2><p>Opacity copy</p></section></div>
+            <div style="visibility:hidden"><section id="hidden-ancestor"><h2>Hidden ancestor</h2><p>Ancestor copy</p></section></div>
+            <div style="display:none"><section id="display-none"><h2>Display none</h2><p>Display copy</p></section></div>
+            <div style="height:0;overflow:clip"><section id="zero-area"><h2>Zero area</h2><p>Zero copy</p></section></div>
+            <!-- overflow:clip never scrolls, so the clip is permanent. A
+                 relative offset moves the section without a collapsible
+                 margin (clip does not establish a formatting context). -->
+            <div style="height:120px;width:400px;overflow:clip">
+              <section id="clipped-away" style="position:relative;top:400px"><h2>Clipped away</h2><p>Clip copy</p></section>
+            </div>
+            <!-- Per axis: x scrolls; y:hidden then scrolls too, so neither axis
+                 proves permanent clipping (see the overflow:clip control). -->
+            <div style="height:120px;width:400px;overflow-x:auto;overflow-y:hidden">
+              <section id="clipped-y-scroll-x" style="margin-top:300px;height:600px"><h2>Clipped y</h2><p>Axis copy</p></section>
+            </div>
+            <!-- overflow:hidden is scroll-reachable when its content overflows. -->
+            <div style="height:120px;width:400px;overflow:hidden">
+              <section id="hidden-overflow-below" style="height:600px;margin-top:300px"><h2>Hidden overflow</h2><p>Hidden overflow copy</p></section>
+            </div>
+            <!-- clip never scrolls, so the same layout stays nonvisual. -->
+            <div style="height:120px;width:400px;overflow:clip">
+              <section id="clip-overflow-below" style="position:relative;top:300px;height:600px"><h2>Clip overflow</h2><p>Clip overflow copy</p></section>
+            </div>
+            <!-- Scale-invariant empty shapes survive the transform guard. -->
+            <div style="position:relative;width:200px;height:200px;scale:.5;transform-origin:0 0;clip-path:inset(50% 0)">
+              <section id="scaled-inset-zero"><h2>Scaled inset zero</h2><p>Scaled inset copy</p></section>
+            </div>
+            <div style="position:relative;width:200px;height:200px;scale:.5;transform-origin:0 0;clip-path:circle(0 at center)">
+              <section id="scaled-circle-at"><h2>Scaled circle</h2><p>Scaled circle copy</p></section>
+            </div>
+            <div style="position:relative;width:200px;height:200px;scale:.5;transform-origin:0 0;clip-path:ellipse(0 0 at center)">
+              <section id="scaled-ellipse-at"><h2>Scaled ellipse</h2><p>Scaled ellipse copy</p></section>
+            </div>
+            <div style="position:relative;height:200px;width:400px;clip-path:inset(0 0 20% 0)">
+              <section id="partial-clip-visible" style="position:absolute;top:40px"><h2>Partial clip visible</h2><p>Visible clip copy</p></section>
+              <section id="partial-clip-away" style="position:absolute;top:170px"><h2>Partial clip away</h2><p>Clipped clip copy</p></section>
+            </div>
+            <div style="position:relative;height:220px;width:400px">
+              <div style="height:100px;overflow:hidden">
+                <section id="absolute-escapes" style="position:absolute;top:160px"><h2>Absolute escapes</h2><p>Escape copy</p></section>
+              </div>
+            </div>
+            <div style="position:relative;height:100px;width:400px;overflow:clip">
+              <section id="absolute-clipped" style="position:absolute;top:160px"><h2>Absolute clipped</h2><p>Contained copy</p></section>
+            </div>
+            <section id="below" style="height:600px;margin-top:1200px">
+              <h2>About the studio</h2>
+              <p>We build careful interfaces for people who read code and screens at the same time.</p>
+            </section>
+            <div style="position:fixed;bottom:0;left:0;width:120px;height:60px;background:white">
+              <section id="fixed-overlay"><h2>Fixed overlay</h2><p>Fixed copy</p></section>
+            </div>
+          </main>`),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    // Premise check: Chromium still paints the section's own box when only its
+    // contents are hidden, so keeping it visual is the correct decision.
+    const probeBrowser = await chromium.launch();
+    try {
+      const probePage = await probeBrowser.newPage({ viewport: { width: 1440, height: 900 } });
+      await probePage.goto(`${origin}/`);
+      const painted = await probePage.evaluate(() => {
+        const contentsHidden = document.querySelector("#self-content-hidden") as HTMLElement;
+        const hiddenRect = contentsHidden.getBoundingClientRect();
+        const hiddenHit = document.elementFromPoint(hiddenRect.left + 50, hiddenRect.top + 50);
+        const scaled = document.querySelector("#transformed-inset") as HTMLElement;
+        const scaledRect = scaled.getBoundingClientRect();
+        const scaledHit = document.elementFromPoint(
+          scaledRect.left + scaledRect.width / 2,
+          scaledRect.top + scaledRect.height / 2,
+        );
+        return {
+          contentsWidth: hiddenRect.width,
+          contentsHeight: hiddenRect.height,
+          contentsHitSelf: Boolean(
+            hiddenHit && (hiddenHit === contentsHidden || contentsHidden.contains(hiddenHit)),
+          ),
+          scaledWidth: scaledRect.width,
+          scaledHeight: scaledRect.height,
+          scaledHitSelf: Boolean(scaledHit && (scaledHit === scaled || scaled.contains(scaledHit))),
+        };
+      });
+      // Both keep painting: hidden contents only skip the subtree, and a
+      // scale(.5) wrapper's 60px inset leaves an 80x80 local window (40x40 on
+      // screen) that the section fills.
+      expect(painted).toEqual({
+        contentsWidth: 200,
+        contentsHeight: 100,
+        contentsHitSelf: true,
+        scaledWidth: 40,
+        scaledHeight: 40,
+        scaledHitSelf: true,
+      });
+    } finally {
+      await probeBrowser.close();
+    }
+    const attempt = await captureAttempt((totalBudgetMs) =>
+      collectAtlasPage(
+        { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+        { cache, allowPrivateOrigins: [origin], totalBudgetMs },
+      ),
+    );
+
+    expect(attempt.status, attempt.limitations.join(", ")).toBe("partial");
+    const viewport = requireViewport(attempt);
+    expect(viewport.limitations).toContain("SECTION_EXCLUDED");
+    const sectionFor = (id: string) =>
+      viewport.scan.sections.find((item) => item.selector.includes(`#${id}`));
+    const nonvisual = [
+      "legacy-clip",
+      "clip-path",
+      "circle-zero",
+      "ellipse-zero",
+      "inset-round",
+      "zero-opacity",
+      "hidden-ancestor",
+      "zero-area",
+      "clipped-away",
+      "partial-clip-away",
+      "absolute-clipped",
+      "clip-overflow-below",
+      "scaled-inset-zero",
+      "scaled-circle-at",
+      "scaled-ellipse-at",
+    ];
+    for (const id of nonvisual) {
+      const scanned = sectionFor(id);
+      expect(scanned, id).toBeTruthy();
+      expect(scanned!.visible, id).toBe(false);
+    }
+    // display:none removes the box itself, so it never reaches the scan.
+    expect(sectionFor("display-none")).toBeUndefined();
+    // Visual eligibility is separate from text accessibility: clipping does
+    // not hide readable copy, so the scan still records it.
+    for (const id of [
+      "legacy-clip",
+      "clip-path",
+      "circle-zero",
+      "ellipse-zero",
+      "inset-round",
+      "zero-area",
+      "clipped-away",
+      "clipped-y-scroll-x",
+      "partial-clip-away",
+      "absolute-clipped",
+    ]) {
+      expect(sectionFor(id)!.text.length).toBeGreaterThan(0);
+    }
+    expect(sectionFor("absolute-clipped")!.text.length).toBeGreaterThan(0);
+    expect(sectionFor("legacy-clip")!.text).toContain("Legacy hidden copy");
+
+    const selectors = viewport.regions.map((region) => region.selector);
+    for (const id of nonvisual) {
+      expect(selectors.some((selector) => selector.includes(`#${id}`)), id).toBe(false);
+    }
+    expect(selectors.some((selector) => selector.includes("#fixed-overlay"))).toBe(false);
+    expect(selectors.some((selector) => selector.includes("#hero"))).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#below"))).toBe(true);
+    // A partially clipped ancestor keeps the part that still paints.
+    expect(selectors.some((selector) => selector.includes("#partial-clip-visible"))).toBe(true);
+    // An out-of-flow section escapes clipping below its containing block.
+    expect(selectors.some((selector) => selector.includes("#absolute-escapes"))).toBe(true);
+    // No minimum size: a 24x24 section with a real link is still a region.
+    const tiny = viewport.regions.find((region) => region.selector.includes("#tiny"));
+    expect(tiny).toBeTruthy();
+    expect(tiny!.rect).toMatchObject({ width: 24, height: 24 });
+    // No class heuristic and no pixel threshold: a class named sr-only and a
+    // genuinely drawn 1px-tall section survive.
+    expect(selectors.some((selector) => selector.includes("#class-only"))).toBe(true);
+    const hairline = viewport.regions.find((region) => region.selector.includes("#hairline"));
+    expect(hairline?.rect.height).toBe(1);
+    // content-visibility:hidden on the section only skips its contents; its
+    // own box, background and border still paint.
+    expect(sectionFor("self-content-hidden")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#self-content-hidden"))).toBe(true);
+    // A transformed ancestor still paints: px clip-path lengths resolve
+    // against the untransformed layout box, so 200x200 inset(60px) stays open.
+    expect(sectionFor("transformed-inset")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#transformed-inset"))).toBe(true);
+    // A visibility:visible descendant paints inside a hidden box.
+    expect(sectionFor("hidden-with-visible-child")!.visible).toBe(true);
+    expect(
+      selectors.some((selector) => selector.includes("#hidden-with-visible-child")),
+    ).toBe(true);
+    // Inside the descendant bound the visible override is found; past it the
+    // subtree is unexamined, so the section is retained rather than excluded.
+    expect(sectionFor("hidden-cap-hit")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#hidden-cap-hit"))).toBe(true);
+    expect(sectionFor("hidden-cap-miss")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#hidden-cap-miss"))).toBe(true);
+    // The individual `scale` property transforms geometry too; a px inset is
+    // then unproven and the section is retained.
+    expect(sectionFor("individual-scale-inset")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#individual-scale-inset"))).toBe(true);
+    // 200.4px box with inset(100.1px): the fractional box keeps a 0.2px
+    // sliver, while rounded 200px would read as empty.
+    expect(sectionFor("fractional-inset")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#fractional-inset"))).toBe(true);
+    // A scroll container can move this section into its inset(0) clip.
+    expect(sectionFor("scroll-clip-below")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#scroll-clip-below"))).toBe(true);
+    // overflow:hidden with overflowing content can be scrolled to it, so it is
+    // not permanent clipping; overflow:clip is.
+    expect(sectionFor("hidden-overflow-below")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#hidden-overflow-below"))).toBe(true);
+    // A y:hidden scroll container is reachable on that axis too.
+    expect(sectionFor("clipped-y-scroll-x")!.visible).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#clipped-y-scroll-x"))).toBe(true);
+    // Scale-invariant empty shapes are still proven empty under a transform.
+    for (const id of ["scaled-inset-zero", "scaled-circle-at", "scaled-ellipse-at"]) {
+      expect(sectionFor(id)!.visible, id).toBe(false);
+      expect(selectors.some((selector) => selector.includes(`#${id}`)), id).toBe(false);
+    }
+    // Scrollable overflow can scroll into view, so it is not proof.
+    expect(selectors.some((selector) => selector.includes("#scrollable-below"))).toBe(true);
+    // Checkpoints disclose the exclusion rather than silently dropping it.
+    expect(viewport.limitations).toContain("CHECKPOINT_SECTION_EXCLUDED");
+
+    // A normal below-fold section survives discovery and is only observable
+    // at a real checkpoint, never by assuming the initial viewport.
+    const belowSamples = (viewport.observations ?? []).flatMap((observation) =>
+      observation.regions
+        .filter((region) => region.selector.includes("#below"))
+        .map((region) => ({ checkpoint: observation.checkpoint, visible: region.visible })),
+    );
+    expect(belowSamples[0]).toEqual({ checkpoint: 0, visible: false });
+    expect(belowSamples.some((sample) => sample.checkpoint > 0 && sample.visible)).toBe(true);
+    const belowYs = (viewport.observations ?? []).flatMap((observation) =>
+      observation.regions
+        .filter((region) => region.selector.includes("#below"))
+        .map((region) => region.rect.y),
+    );
+    expect(new Set(belowYs).size).toBe(1);
+
+    // Component accessibility semantics are untouched by the section decision.
+    const components = viewport.components ?? [];
+    expect(components.find((component) => component.label === "Open")?.typeDecision).toBe(
+      "accepted",
+    );
+    expect(components.find((component) => component.label === "Talk to us")).toBeTruthy();
+
+    const retained = new Set(viewport.regions.map((region) => region.key));
+    expect(viewport.claims.length).toBeGreaterThan(0);
+    expect(
+      viewport.claims
+        .filter((claim) => claim.field === "section.purpose")
+        .every((claim) => retained.has(claim.regionKey)),
+    ).toBe(true);
+    expect(viewport.claims.some((claim) => claim.value === "contact")).toBe(true);
+    const about = viewport.claims.find((claim) => claim.value === "about");
+    expect(about).toBeTruthy();
+    expect(about!.checkpointKeys?.length).toBe(1);
+
+    const published = await publishCapture(attempt);
+    expect(published.published, published.code).toBe(true);
+    const rows = cache.withAtlasDb(
+      (db) =>
+        db
+          .prepare("SELECT id, heading, locator_json FROM atlas_regions WHERE kind = 'section'")
+          .all() as Array<{ id: string; heading: string | null; locator_json: string }>,
+    );
+    const selectorById = new Map(
+      rows.map((row) => [
+        row.id,
+        String((JSON.parse(row.locator_json) as { selector?: string }).selector ?? ""),
+      ]),
+    );
+    const publishedSelectors = [...selectorById.values()];
+    const publishedHeadings = rows.map((row) => row.heading ?? "");
+    expect(publishedHeadings).toEqual(
+      expect.arrayContaining(["Contact us", "About the studio"]),
+    );
+    for (const id of [
+      "hero",
+      "below",
+      "tiny",
+      "class-only",
+      "hairline",
+      "self-content-hidden",
+      "transformed-inset",
+      "hidden-with-visible-child",
+      "hidden-cap-hit",
+      "hidden-cap-miss",
+      "individual-scale-inset",
+      "fractional-inset",
+      "scroll-clip-below",
+      "hidden-overflow-below",
+      "clipped-y-scroll-x",
+      "scrollable-below",
+      "partial-clip-visible",
+      "absolute-escapes",
+    ]) {
+      expect(publishedSelectors.some((selector) => selector.includes(`#${id}`)), id).toBe(true);
+    }
+    for (const heading of [
+      "Legacy clip wrapper",
+      "Clip path wrapper",
+      "Zero opacity",
+      "Hidden ancestor",
+      "Zero area",
+      "Clipped away",
+      "Partial clip away",
+      "Absolute clipped",
+      "Clip overflow",
+      "Scaled inset zero",
+      "Scaled circle",
+      "Scaled ellipse",
+      "Fixed overlay",
+    ]) {
+      expect(publishedHeadings, heading).not.toContain(heading);
+    }
+    for (const id of [
+      "legacy-clip",
+      "clip-path",
+      "circle-zero",
+      "ellipse-zero",
+      "inset-round",
+      "zero-opacity",
+      "hidden-ancestor",
+      "zero-area",
+      "clipped-away",
+      "partial-clip-away",
+      "absolute-clipped",
+      "clip-overflow-below",
+      "scaled-inset-zero",
+      "scaled-circle-at",
+      "scaled-ellipse-at",
+      "fixed-overlay",
+    ]) {
+      expect(publishedSelectors.some((selector) => selector.includes(`#${id}`)), id).toBe(false);
+    }
+
+    const collected: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const search = searchAtlas(
+        {
+          kind: "sections",
+          predicates: [{ field: "region.tag", values: ["section"] }],
+          limit: 20,
+          ...(cursor ? { cursor } : {}),
+        },
+        atlasSearchStore(cache),
+        Date.now(),
+      );
+      if (!search.ok) throw new Error(search.error.code);
+      for (const hit of search.data.results) {
+        collected.push(selectorById.get(hit.regionId) ?? "");
+      }
+      cursor = search.data.nextCursor;
+      if (!cursor) break;
+    }
+    const searchSelectors = [...new Set(collected)].sort();
+    // Exactly the retained sections: the below-fold one appears because a
+    // checkpoint observed it, and no clipped wrapper is ever searchable.
+    expect(searchSelectors).toEqual([
+      "html > body > main > div > div > section#absolute-escapes",
+      "html > body > main > div > section#clipped-y-scroll-x",
+      "html > body > main > div > section#fractional-inset",
+      "html > body > main > div > section#hidden-overflow-below",
+      "html > body > main > div > section#individual-scale-inset",
+      "html > body > main > div > section#partial-clip-visible",
+      "html > body > main > div > section#scroll-clip-below",
+      "html > body > main > div > section#scrollable-below",
+      "html > body > main > div > section#transformed-inset",
+      "html > body > main > section#below",
+      "html > body > main > section#class-only.sr-only",
+      "html > body > main > section#hairline",
+      "html > body > main > section#hero",
+      "html > body > main > section#hidden-cap-hit",
+      "html > body > main > section#hidden-cap-miss",
+      "html > body > main > section#hidden-with-visible-child",
+      "html > body > main > section#self-content-hidden",
+      "html > body > main > section#tiny",
+    ]);
+
+    // Read-tool roundtrip: the published section snapshot matches the scan.
+    const heroId = [...selectorById.entries()].find(([, selector]) =>
+      selector.includes("#hero"),
+    )?.[0];
+    expect(heroId).toBeTruthy();
+    const regionRead = runAtlasRegion(cache, heroId!);
+    expect(regionRead.status).toBe("ok");
+    expect(regionRead.data?.region.heading).toBe("Contact us");
+  }, 120_000);
+
+  it("retains an app-shell section scrollable inside main", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(`
+          <style>
+            html, body { height: 100%; margin: 0; overflow: hidden; }
+            main { height: 100%; overflow: auto; }
+          </style>
+          <main>
+            <section id="shell-hero" style="height:300px"><h1>Contact us</h1></section>
+            <section id="shell-deep" style="margin-top:1200px;height:600px">
+              <h2>About the app</h2>
+              <p>Deep app-shell copy that paints once main scrolls, and only then.</p>
+            </section>
+          </main>`),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await captureAttempt((totalBudgetMs) =>
+      collectAtlasPage(
+        { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+        { cache, allowPrivateOrigins: [origin], totalBudgetMs },
+      ),
+    );
+    const viewport = requireViewport(attempt);
+    // main is the nearest scroll container, so the body/html overflow:hidden
+    // shell must not prove the deep section nonvisual.
+    expect(viewport.scan.scrollRoot).toBeTruthy();
+    expect(
+      viewport.scan.sections.find((item) => item.selector.includes("#shell-deep"))!.visible,
+    ).toBe(true);
+    expect(viewport.regions.some((region) => region.selector.includes("#shell-deep"))).toBe(true);
+    expect(viewport.limitations).not.toContain("SECTION_EXCLUDED");
+    expect(viewport.limitations).not.toContain("CHECKPOINT_SECTION_EXCLUDED");
+    const deepSamples = (viewport.observations ?? []).flatMap((observation) =>
+      observation.regions
+        .filter((region) => region.selector.includes("#shell-deep"))
+        .map((region) => ({ checkpoint: observation.checkpoint, visible: region.visible })),
+    );
+    expect(deepSamples[0]).toEqual({ checkpoint: 0, visible: false });
+    expect(deepSamples.some((sample) => sample.checkpoint > 0 && sample.visible)).toBe(true);
+  }, 120_000);
+
+  it("keeps a section painted inside a transformed bordered shell", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(`
+          <style>
+            section { width: 200px; height: 200px; background: #0a0; }
+            .shell { width: 200px; height: 200px; border: 100px solid #000;
+              overflow: hidden; }
+            .scaled { transform: scale(.5); transform-origin: 0 0; }
+            /* clip never scrolls, so the escaped section stays unprovable. */
+            .permanent { overflow: clip; }
+          </style>
+          <div class="shell"><section id="plain"><h2>Plain border</h2></section></div>
+          <div class="shell scaled"><section id="scaled"><h2>Scaled border</h2></section></div>
+          <div class="shell scaled permanent">
+            <section id="scaled-escape" style="margin-left:600px"><h2>Escaped</h2></section>
+          </div>`),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    // Premise: Chromium paints the section inside the scaled shell and clips
+    // the escaped one, so the two expectations below are real, not assumed.
+    const probeBrowser = await chromium.launch();
+    try {
+      const probePage = await probeBrowser.newPage({ viewport: { width: 1440, height: 900 } });
+      await probePage.goto(`${origin}/`);
+      const hits = await probePage.evaluate(() => {
+        const hit = (id: string) => {
+          const el = document.querySelector(`#${id}`) as HTMLElement;
+          const rect = el.getBoundingClientRect();
+          const found = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          return {
+            width: Math.round(rect.width),
+            hitSelf: Boolean(found && (found === el || el.contains(found))),
+          };
+        };
+        return { scaled: hit("scaled"), escaped: hit("scaled-escape") };
+      });
+      expect(hits).toEqual({
+        scaled: { width: 100, hitSelf: true },
+        escaped: { width: 100, hitSelf: false },
+      });
+    } finally {
+      await probeBrowser.close();
+    }
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const viewport = attempt.viewports[0]!;
+    const sectionFor = (id: string) =>
+      viewport.scan.sections.find((item) => item.selector.includes(`#${id}`));
+    expect(sectionFor("plain")?.visible).toBe(true);
+    // Borders are scaled to 50px in client space; subtracting 100 would empty
+    // a box that really paints.
+    expect(sectionFor("scaled")?.visible).toBe(true);
+    // The over-approximation still excludes a section the shell clips away.
+    expect(sectionFor("scaled-escape")?.visible).toBe(false);
+    const selectors = viewport.regions.map((region) => region.selector);
+    expect(selectors.some((selector) => selector.includes("#plain"))).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#scaled"))).toBe(true);
+    expect(selectors.some((selector) => selector.includes("#scaled-escape"))).toBe(false);
+  }, 60_000);
+
+  it("keeps scroll-reachable, zoomed and clip-margin sections", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(`
+          <style>
+            section { height: 20px; background: #0a0; }
+            .hidden-box { height: 100px; width: 200px; overflow: hidden; }
+            .clip-box { position: relative; width: 100px; height: 100px;
+              overflow: clip; margin-bottom: 120px; }
+            .clip-margin { overflow-clip-margin: 50px; }
+            .zoom-box { position: relative; width: 200px; height: 200px;
+              zoom: .5; clip-path: inset(60px); }
+          </style>
+          <main>
+            <!-- One pixel of overflow is enough for scrollTop=1 to expose it. -->
+            <div class="hidden-box"><section id="ov-1px" style="height:1px;margin-top:100px"></section></div>
+            <div class="hidden-box"><div style="width:201px"><section id="ov-1px-x" style="width:1px;margin-left:200px"></section></div></div>
+            <!-- Two pixels overflow too; the boundary is only the 1px case. -->
+            <div class="hidden-box"><section id="ov-2px" style="height:2px;margin-top:100px"></section></div>
+            <div class="hidden-box"><div style="width:202px"><section id="ov-2px-x" style="width:2px;margin-left:200px"></section></div></div>
+            <!-- zoom scales layout px, so a px inset is unproven and retained. -->
+            <div class="zoom-box"><section id="zoom-inset" style="position:absolute;left:60px;top:60px;width:80px;height:80px"><h2>Zoom inset</h2><p>Zoom copy</p></section></div>
+            <!-- overflow-clip-margin paints 50px outside the clip box. -->
+            <div class="clip-box clip-margin"><section id="clip-margin" style="position:relative;top:140px"></section></div>
+            <!-- Beyond the margin is still clipped. -->
+            <div class="clip-box clip-margin"><section id="clip-margin-away" style="position:relative;top:200px"></section></div>
+            <!-- No margin: the same offset is clipped. -->
+            <div class="clip-box"><section id="clip-static" style="position:relative;top:140px"></section></div>
+          </main>`),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    // Premise: Chromium paints the zoomed section and the clip-margin one,
+    // and not the ones beyond the margin or the unexpanded clip.
+    const probeBrowser = await chromium.launch();
+    try {
+      const probePage = await probeBrowser.newPage({ viewport: { width: 1440, height: 900 } });
+      await probePage.goto(`${origin}/`);
+      const hits = await probePage.evaluate(() => {
+        const hit = (id: string, fromTop?: number) => {
+          const el = document.querySelector(`#${id}`) as HTMLElement;
+          el.scrollIntoView({ block: "center" });
+          const rect = el.getBoundingClientRect();
+          const found = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            fromTop === undefined ? rect.top + rect.height / 2 : rect.top + fromTop,
+          );
+          return Boolean(found && (found === el || el.contains(found)));
+        };
+        return {
+          zoom: hit("zoom-inset"),
+          // The margin only keeps the first 10px of this 20px section painted.
+          margin: hit("clip-margin", 5),
+          marginAway: hit("clip-margin-away", 5),
+          clipStatic: hit("clip-static", 5),
+        };
+      });
+      expect(hits).toEqual({ zoom: true, margin: true, marginAway: false, clipStatic: false });
+    } finally {
+      await probeBrowser.close();
+    }
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const viewport = attempt.viewports[0]!;
+    const sectionFor = (id: string) =>
+      viewport.scan.sections.find((item) => item.selector.includes(`#${id}`));
+    const selectors = viewport.regions.map((region) => region.selector);
+    for (const id of ["ov-1px", "ov-1px-x", "ov-2px", "ov-2px-x", "zoom-inset", "clip-margin"]) {
+      expect(sectionFor(id)?.visible, id).toBe(true);
+      expect(selectors.some((selector) => selector.includes(`#${id}`)), id).toBe(true);
+    }
+    for (const id of ["clip-margin-away", "clip-static"]) {
+      expect(sectionFor(id)?.visible, id).toBe(false);
+      expect(selectors.some((selector) => selector.includes(`#${id}`)), id).toBe(false);
+    }
+  }, 60_000);
+
+  it("keeps clipped sections under an ancestor transform", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(`
+          <style>
+            section { width: 600px; height: 600px; background: #0a0; }
+            .half { transform: scale(.5); transform-origin: 0 0; }
+            .quarter { transform: scale(.25); transform-origin: 0 0; }
+            .clip { width: 600px; height: 600px; clip-path: inset(180px); }
+            .clip-half { width: 600px; height: 600px; clip-path: inset(50%); }
+            .clip-poly { width: 600px; height: 600px;
+              clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+            .bordered { width: 600px; height: 600px; border: 100px solid #000;
+              overflow: hidden; }
+          </style>
+          <div class="half">
+            <div class="clip"><section id="ancestor-inset"><h2>Ancestor inset</h2></section></div>
+            <div class="clip-half"><section id="ancestor-half"><h2>Half</h2></section></div>
+            <div class="clip-poly"><section id="ancestor-poly"><h2>Poly</h2></section></div>
+          </div>
+          <div class="quarter">
+            <div class="bordered"><section id="ancestor-border"><h2>Border</h2></section></div>
+          </div>
+          <div class="clip"><section id="plain-inset"><h2>Plain inset</h2></section></div>
+          <div class="bordered"><section id="plain-border"><h2>Border</h2></section></div>`),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const probeBrowser = await chromium.launch();
+    try {
+      const probePage = await probeBrowser.newPage({ viewport: { width: 1440, height: 900 } });
+      await probePage.goto(`${origin}/`);
+      const hits = await probePage.evaluate(() => {
+        const hit = (id: string) => {
+          const el = document.querySelector(`#${id}`) as HTMLElement;
+          el.scrollIntoView({ block: "center" });
+          const rect = el.getBoundingClientRect();
+          const found = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          return Boolean(found && (found === el || el.contains(found)));
+        };
+        return {
+          inset: hit("ancestor-inset"),
+          half: hit("ancestor-half"),
+          poly: hit("ancestor-poly"),
+          border: hit("ancestor-border"),
+        };
+      });
+      // Premise: the inset section really paints inside the scaled clip box,
+      // while inset(50%) leaves nothing to hit.
+      expect(hits).toEqual({ inset: true, half: false, poly: true, border: true });
+    } finally {
+      await probeBrowser.close();
+    }
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const viewport = attempt.viewports[0]!;
+    const sectionFor = (id: string) =>
+      viewport.scan.sections.find((item) => item.selector.includes(`#${id}`));
+    // Inset lengths are local px against a 600px box inside a scale(.5)
+    // ancestor; intersecting the 300px client rect with 180px would empty it.
+    expect(sectionFor("ancestor-inset")?.visible).toBe(true);
+    expect(sectionFor("ancestor-poly")?.visible).toBe(true);
+    // The border box is 200px in client space; its 100px borders scale too.
+    expect(sectionFor("ancestor-border")?.visible).toBe(true);
+    // Layout-box emptiness is still proof under a transform.
+    expect(sectionFor("ancestor-half")?.visible).toBe(false);
+    // Untransformed controls keep working as before.
+    expect(sectionFor("plain-inset")?.visible).toBe(true);
+    expect(sectionFor("plain-border")?.visible).toBe(true);
+    const selectors = viewport.regions.map((region) => region.selector);
+    for (const id of ["ancestor-inset", "ancestor-poly", "ancestor-border"]) {
+      expect(selectors.some((selector) => selector.includes(`#${id}`))).toBe(true);
+    }
+    expect(selectors.some((selector) => selector.includes("#ancestor-half"))).toBe(false);
+  }, 60_000);
+
+  it("refuses a fixed-only app shell instead of fabricating sections", async () => {
+    const origin = await start((path, res) => {
+      if (path === "/robots.txt") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("User-agent: *\nAllow: /\n");
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html>" +
+          shell(`
+          <style>
+            html, body { height: 100%; margin: 0; overflow: hidden; }
+            main { position: fixed; inset: 0; }
+            .win { position: fixed; top: 80px; left: 200px; width: 720px; height: 600px;
+              background: #fff; }
+          </style>
+          <main>
+            <h1>Contact us</h1>
+            <p>Design evidence for agents that need to read real sites.</p>
+          </main>
+          <section id="win" class="win"><h2>About the studio</h2><a href="/contact">Talk to us</a></section>`),
+      );
+    });
+    const cache = new Cache(tmpDir(), () => Date.now(), { atlas: true });
+    cache.upsertSites([site(`${origin}/`)]);
+    const attempt = await collectAtlasPage(
+      { siteSlug: "chromium-fixture", viewports: ["desktop"] },
+      { cache, allowPrivateOrigins: [origin], totalBudgetMs: 45_000 },
+    );
+    const viewport = attempt.viewports[0]!;
+    // Fixed sections do paint, so M4 reports them visual...
+    expect(viewport.scan.sections.find((item) => item.selector.includes("#win"))!.visible).toBe(
+      true,
+    );
+    // ...but fixed-overlay exclusion is strict: a fixed-only page has no
+    // document-flow region, and the capture says so instead of publishing.
+    expect(viewport.regions).toEqual([]);
+    expect(viewport.limitations).toEqual(
+      expect.arrayContaining(["NO_SECTIONS", "SECTION_EXCLUDED"]),
+    );
+    expect((viewport.components ?? []).length).toBeGreaterThan(0);
+    const published = await publishCapture(attempt);
+    expect(published.published).toBe(false);
+    expect(published.code).toBe("NO_SECTION_REGIONS");
   }, 60_000);
 
   it("reports a DOM node budget limitation", async () => {

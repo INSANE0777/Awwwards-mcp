@@ -14,6 +14,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Required browser suites fail instead of skipping when Chromium is
+    # missing. Suites use both historical spellings.
+    env:
+      AWWWARDS_CHROMIUM_SMOKE: "1"
+      AWWARDS_CHROMIUM_SMOKE: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -22,7 +27,7 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org/
 
-      - name: Gate - tag matches package.json and package-lock.json
+      - name: Gate - tag matches package.json, package-lock.json and server.json
         run: node scripts/release-version-gate.mjs "$GITHUB_REF_NAME"
 
       - name: Gate - tag matches CHANGELOG section
@@ -38,9 +43,46 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+
+      # Chromium must exist before any required suite. `npm test` includes the
+      # six *.chromium.test.ts suites; test:browser separately runs the
+      # *.smoke.ts suite. Running only one is insufficient.
+      - name: Install Chromium for required browser suites
+        run: npx playwright install chromium
+
+      - name: Assert Chromium launches
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ headless: true, timeout: 30_000 });
+          try {
+            const page = await browser.newPage();
+            await page.setContent('<h1>ready</h1>');
+            if (await page.locator('h1').innerText() !== 'ready') {
+              throw new Error('Chromium page verification failed');
+            }
+            console.log(`Chromium ${browser.version()} launched successfully`);
+          } finally {
+            await browser.close();
+          }
+          NODE
+
+      # Build once before tests: protocol-catalog spawns dist/cli.js, and the
+      # protocol smoke below must test the compiled candidate that is packed.
       - run: npm run build
+      - run: npm test
+      - name: Real-Chromium fixture smoke
+        run: npm run test:browser
       - run: npm run registry:gate
+
+      - name: Protocol smoke (Atlas off)
+        run: npm run protocol:smoke
+
+      - name: Protocol smoke (Atlas on)
+        env:
+          AWWWARDS_MCP_ATLAS: "1"
+        run: npm run protocol:smoke
 
       - name: Pack release artifact
         id: artifact
@@ -55,9 +97,6 @@ jobs:
           REGISTRY_INTEGRITY: ${{ steps.npmcheck.outputs.integrity }}
         run: |
           node scripts/verify-published-artifact.mjs .release-artifact/pack.json "$REGISTRY_INTEGRITY"
-
-      - name: Install Chromium for installed qualification
-        run: npx playwright install chromium
 
       - name: Qualify the exact packed artifact
         run: |

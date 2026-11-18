@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import ts from "typescript";
 import {
   FULL_BODY_WARNING,
+  headBounds,
   buildProject,
+  bodyBounds,
   copyAssets,
   emitAstro,
   emitVite,
@@ -12,9 +15,12 @@ import {
   isLocalRef,
   parseBuildArgs,
   parseRebuildSections,
+  readDocumentAttrs,
   splitBuild,
   splitStyles,
 } from "../src/build-project.js";
+import { emitNext } from "../src/emit-next.js";
+import { buildMotionManifest } from "../src/motion-manifest.js";
 
 const FIXTURES = join(__dirname, "fixtures", "build-project");
 const sample = () => readFileSync(join(FIXTURES, "sample.html"), "utf8");
@@ -718,6 +724,322 @@ if (!REDUCED) {
     const f3 = byPath(astroByName(orphan));
     expect(f3["src/pages/index.astro"]).toContain('.from(".c-999"');
     expect(f3["src/components/Section01.astro"]).not.toContain(".from(");
+  });
+});
+
+describe("document attributes survive conversion (M3)", () => {
+  // Rebuild shape (top-level c-N roots) on a non-English, RTL, themed document.
+  // Single-quoted html attrs prove the scan is quote-aware; the inline style
+  // carries a custom property so the Next path needs its CSSProperties cast.
+  const docPage = `<!doctype html>
+<html lang='ar' dir='rtl' class="theme-night" id="doc" data-theme="night" style="--ink: rgb(1, 2, 3); background-color: rgb(9, 8, 7)">
+<head>
+<style>:root { --ink: rgb(1, 2, 3); }</style>
+</head>
+<body dir="rtl" class="page" id="top" data-page="home" aria-label="Home page" style="color: rgb(4, 5, 6)">
+<section class="c-0"><p class="c-1">stage</p></section>
+</body>
+</html>`;
+  const htmlOpen =
+    '<html lang="ar" dir="rtl" class="theme-night" id="doc" data-theme="night" style="--ink: rgb(1, 2, 3); background-color: rgb(9, 8, 7)">';
+  const bodyOpen =
+    '<body dir="rtl" class="page" id="top" data-page="home" aria-label="Home page" style="color: rgb(4, 5, 6)">';
+
+  it("vite + astro rebuilt layout keeps lang/dir/class/id/style/data-*/aria-*", () => {
+    const vite = byPath(viteByName(docPage))["index.html"] ?? "";
+    expect(vite).toContain(htmlOpen);
+    expect(vite).toContain(bodyOpen);
+    const astro = byPath(astroByName(docPage))["src/pages/index.astro"] ?? "";
+    expect(astro).toContain(htmlOpen);
+    expect(astro).toContain(bodyOpen);
+  });
+
+  it("next rebuilt layout converts the same attributes to JSX props", () => {
+    const layout = byPath(emitNext(splitBuild(docPage), "unused", "Doc").files)["app/layout.tsx"] ?? "";
+    expect(layout).toContain(
+      '<html lang="ar" dir="rtl" className="theme-night" id="doc" data-theme="night" style={{ "--ink": "rgb(1, 2, 3)", "backgroundColor": "rgb(9, 8, 7)" } as React.CSSProperties}>',
+    );
+    expect(layout).toContain(
+      '<body dir="rtl" className="page" id="top" data-page="home" aria-label="Home page" style={{ "color": "rgb(4, 5, 6)" }}>',
+    );
+    expect(layout).toContain('import type React from "react";');
+  });
+
+  it("full-body fallback keeps the document attributes too", () => {
+    const page = `<!doctype html><html lang="ar" dir="rtl" class="theme"><body dir="rtl" class="page"><h1>Hi</h1><p>Copy</p></body></html>`;
+    const split = splitBuild(page);
+    expect(split.rehost).toBeNull();
+    expect(split.warnings).toEqual([FULL_BODY_WARNING]);
+    expect(byPath(viteByName(page))["index.html"]).toContain('<html lang="ar" dir="rtl" class="theme">');
+    expect(byPath(astroByName(page))["src/pages/index.astro"]).toContain('<body dir="rtl" class="page">');
+    const layout = byPath(emitNext(split, "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(layout).toContain('<html lang="ar" dir="rtl" className="theme">');
+    expect(layout).toContain('<body dir="rtl" className="page">');
+  });
+
+  it("absent lang keeps the en fallback", () => {
+    const bare = `<!doctype html><html><body><section class="c-0"><p class="c-1">x</p></section></body></html>`;
+    expect(byPath(viteByName(bare))["index.html"]).toContain('<html lang="en">');
+    expect(byPath(astroByName(bare))["src/pages/index.astro"]).toContain('<html lang="en">');
+    expect(byPath(emitNext(splitBuild(bare), "unused", "x").files)["app/layout.tsx"]).toContain('<html lang="en">');
+  });
+
+  it("drops on* handlers and executable styles; keeps the allowlisted safe attrs", () => {    // Quote/closing-tag-like text in values must not break the generated syntax;
+    // duplicate attributes follow the browser's first-wins rule.
+    const hostile = `<!doctype html>
+<html lang="en" lang="ar" onclick="window.__pwned=1" style="width: expression(alert(1))" data-q="a&quot;b" data-json='{"a":1}' data-tag="</html>" data-lt="a<b>c">
+<head><title>x</title></head>
+<body onload="window.__pwned=2" style="background: url(javascript:alert(1))" data-keep="1">
+<section class="c-0"><p class="c-1">x</p></section>
+</body></html>`;
+    const safeHtml =
+      '<html lang="en" data-q="a&quot;b" data-json="{&quot;a&quot;:1}" data-tag="&lt;/html&gt;" data-lt="a&lt;b&gt;c">';
+    const safeBody = '<body data-keep="1">';
+    const viteIndex = byPath(viteByName(hostile))["index.html"] ?? "";
+    expect(viteIndex).toContain(safeHtml);
+    expect(viteIndex).toContain(safeBody);
+    const astroIndex = byPath(astroByName(hostile))["src/pages/index.astro"] ?? "";
+    expect(astroIndex).toContain(safeHtml);
+    expect(astroIndex).toContain(safeBody);
+    const nextLayout = byPath(emitNext(splitBuild(hostile), "unused", "x").files)["app/layout.tsx"] ?? "";
+    // Next hands React decoded JS strings (JSX would decode entities with JSX
+    // rules), so the document tag is the decoded value, still free of on*/expr.
+    expect(nextLayout).toContain(
+      '<html lang="en" data-q={"a\\"b"} data-json={"{\\"a\\":1}"} data-tag={"</html>"} data-lt={"a<b>c"}>',
+    );
+    expect(nextLayout).toContain(safeBody);
+    for (const text of [viteIndex, astroIndex, nextLayout]) {
+      for (const bad of ["onclick", "onload", "expression(", "javascript:", "__pwned"]) {
+        expect(text).not.toContain(bad);
+      }
+    }
+    // Hostile attribute text still has to be valid JSX, not just a substring.
+    const transpiled = ts.transpileModule(nextLayout, {
+      compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext },
+      fileName: "layout.tsx",
+      reportDiagnostics: true,
+    });
+    expect((transpiled.diagnostics ?? []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  });
+
+  it("entity-encoded or comment-split executable styles never reach any target", () => {
+    const styles = [
+      "width: expression&#40;alert(1)&#41;",
+      "background: url(javascript&colon;alert(1))",
+      "background: url(javascript&#58;alert(1))",
+      "background: url(javascript&#x3a;alert(1))",
+      "background: url(java/**/script:alert(1))",
+      // Numeric character references without their terminating semicolon.
+      "width: expression&#40alert(1&#41",
+      "background: url(javascript&#58alert(1))",
+      "background: url(javascript&#x3a alert(1))",
+    ];
+    for (const style of styles) {
+      const html = `<!doctype html><html lang="en" style="${style}"><head><title>x</title></head><body style="${style}"><section class="c-1"><p class="c-2">x</p></section></body></html>`;
+      const vite = byPath(viteByName(html))["index.html"] ?? "";
+      const astro = byPath(astroByName(html))["src/pages/index.astro"] ?? "";
+      const next = byPath(emitNext(splitBuild(html), "unused", "x").files)["app/layout.tsx"] ?? "";
+      for (const text of [vite, astro, next]) {
+        expect(text).toContain('<html lang="en">');
+        expect(text).toContain("<body>");
+        expect(text).not.toMatch(/style=/i);
+      }
+    }
+  });
+
+  it("document tag scan ignores comments and script bodies", () => {
+    const html = `<!-- <html lang="fr" dir="ltr" class="decoy"> -->
+<!doctype html>
+<html lang="ar" dir="rtl" class="theme">
+<head>
+<script>const decoy = "<body class='fake' dir='ltr'>";</script>
+<title>x</title>
+</head>
+<!-- <body class="commented"> -->
+<body class="real" dir="rtl">
+<section class="c-1"><p class="c-2">x</p></section>
+</body></html>`;
+    const vite = byPath(viteByName(html))["index.html"] ?? "";
+    const astro = byPath(astroByName(html))["src/pages/index.astro"] ?? "";
+    const next = byPath(emitNext(splitBuild(html), "unused", "x").files)["app/layout.tsx"] ?? "";
+    // The scan itself: only the real tags' attributes survive.
+    expect(readDocumentAttrs(html)).toEqual({
+      html: [
+        ["lang", "ar"],
+        ["dir", "rtl"],
+        ["class", "theme"],
+      ],
+      body: [
+        ["class", "real"],
+        ["dir", "rtl"],
+      ],
+    });
+    for (const text of [vite, astro, next]) {
+      expect(text).toContain(text === next ? '<html lang="ar" dir="rtl" className="theme">' : '<html lang="ar" dir="rtl" class="theme">');
+      expect(text).toContain(text === next ? '<body className="real" dir="rtl">' : '<body class="real" dir="rtl">');
+      expect(text).not.toContain('<html lang="fr"');
+      expect(text).not.toMatch(/<body[^>]*class="fake"/);
+    }
+  });
+
+  it("document tag scan ignores raw-text element bodies", () => {
+    const html = `<!doctype html>
+<html lang="ar" dir="rtl" class="theme">
+<head>
+<title><html lang="fr"></title>
+<style>.a::before { content: "<body class='fake'>"; }</style>
+<textarea><body class="fake2"></body></textarea>
+</head>
+<body class="real" dir="rtl">
+<section class="c-1"><p class="c-2">x</p></section>
+</body></html>`;
+    expect(readDocumentAttrs(html)).toEqual({
+      html: [
+        ["lang", "ar"],
+        ["dir", "rtl"],
+        ["class", "theme"],
+      ],
+      body: [
+        ["class", "real"],
+        ["dir", "rtl"],
+      ],
+    });
+    const vite = byPath(viteByName(html))["index.html"] ?? "";
+    expect(vite).toContain('<html lang="ar" dir="rtl" class="theme">');
+    expect(vite).toContain('<body class="real" dir="rtl">');
+    const next = byPath(emitNext(splitBuild(html), "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(next).toContain('<html lang="ar" dir="rtl" className="theme">');
+    expect(next).toContain('<body className="real" dir="rtl">');
+  });
+
+  it("document tags are never read from attribute values or nested text", () => {
+    const html = `<!doctype html>
+<html lang="ar" dir="rtl" data-x="<body class='attr-fake' dir='ltr'>">
+<head>
+<meta name="x" content="The <body> element">
+<img alt="<body class='img-fake'>">
+<noscript><body class="ns-fake" dir="ltr"></noscript>
+<template><body class="tpl-fake" dir="ltr"></body></template>
+</head>
+<body class="real" dir="rtl">
+<section class="c-1"><p class="c-2">x</p></section>
+</body></html>`;
+    expect(readDocumentAttrs(html)).toEqual({
+      html: [
+        ["lang", "ar"],
+        ["dir", "rtl"],
+        ["data-x", "<body class='attr-fake' dir='ltr'>"],
+      ],
+      body: [
+        ["class", "real"],
+        ["dir", "rtl"],
+      ],
+    });
+    for (const [name, text] of [
+      ["vite", byPath(viteByName(html))["index.html"] ?? ""],
+      ["astro", byPath(astroByName(html))["src/pages/index.astro"] ?? ""],
+      ["next", byPath(emitNext(splitBuild(html), "unused", "x").files)["app/layout.tsx"] ?? ""],
+    ] as const) {
+      expect(text, name).toMatch(/<body[^>]*class(?:Name)?="real"/);
+      expect(text, name).not.toMatch(/(?:class|className)="(?:attr|img|ns|tpl)-fake"/);
+    }
+  });
+
+  it("body and head bounds are found by the same walk", () => {
+    const html = `<html><head><meta content="<body class='fake'>"><title>t</title></head><body class="real"><section class="c-0"><p>X</p></section></body></html>`;
+    const open = '<body class="real">';
+    expect(bodyBounds(html)).toEqual({ start: html.indexOf(open) + open.length, end: html.indexOf("</body>") });
+    const split = splitBuild(html);
+    expect(split.sections.sections?.[0]?.className).toBe("c-0");
+    for (const target of ["vite", "astro", "next"] as const) {
+      const files = byPath(
+        target === "vite" ? emitVite(split, "unused", "x").files : target === "astro" ? emitAstro(split, "unused", "x").files : emitNext(split, "unused", "x").files,
+      );
+      const path = target === "vite" ? "index.html" : target === "astro" ? "src/pages/index.astro" : "app/page.tsx";
+      expect(files[path], target).not.toContain("class='fake'");
+    }
+  });
+
+  it("body lang survives the allowlist", () => {
+    const html = `<!doctype html><html lang="ar"><head><title>x</title></head><body lang="fr" dir="rtl"><section class="c-1"><p class="c-2">x</p></section></body></html>`;
+    expect(readDocumentAttrs(html).body).toEqual([
+      ["lang", "fr"],
+      ["dir", "rtl"],
+    ]);
+    const next = byPath(emitNext(splitBuild(html), "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(next).toContain('<body lang="fr" dir="rtl">');
+  });
+
+  it("a duplicate <body> in body text does not extend the body", () => {
+    const html = `<!doctype html><html lang="en"><head><title>t</title></head><body class="real"><section class="c-0"><p>x</p></section><p>text <body class="dup" dir="ltr"> more</p></body></html>`;
+    const open = '<body class="real">';
+    expect(bodyBounds(html)).toEqual({ start: html.indexOf(open) + open.length, end: html.indexOf("</body>") });
+
+    const split = splitBuild(html);
+    // The duplicate start tag is page text: content after it is still content,
+    // but nothing past the real </body> may be.
+    expect(split.sections.sections?.length).toBe(1);
+
+    const vite = byPath(viteByName(html))["index.html"] ?? "";
+    // The body ends where the document says it does: no stray </body></html>.
+    expect(vite.split("</body>")).toHaveLength(2);
+    expect(vite.split("</html>")).toHaveLength(2);
+    expect(vite.trimEnd().endsWith("</html>")).toBe(true);
+
+    const astro = byPath(astroByName(html))["src/pages/index.astro"] ?? "";
+    expect(astro.trimEnd().endsWith("</html>")).toBe(true);
+    expect(astro.split("</html>")).toHaveLength(2);
+    const next = byPath(emitNext(split, "unused", "x").files)["app/page.tsx"] ?? "";
+    expect(next).not.toContain("class=\"dup\"");
+  });
+
+  it("a head script carrying a document shell never becomes document structure", () => {
+    const html = `<!doctype html><html lang="en"><head><title>t</title><script type="text/template"><html><head></head><body class="fake" dir="ltr"></body></html></script></head><body class="real"><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`;
+    // The real </head> is the last one; the decoy sits inside the script.
+    expect(headBounds(html)).toEqual({ start: html.indexOf("<head>") + 6, end: html.lastIndexOf("</head>") });
+
+    const split = splitBuild(html);
+    expect(split.rehost).not.toBeNull();
+    const vite = byPath(viteByName(html))["index.html"] ?? "";
+    // The template stays inert data, and the loader lands in the real body.
+    expect(vite).toContain('<script type="text/template"><html><head></head><body class="fake" dir="ltr"></body></html></script>');
+    expect(vite).toContain('<body class="real">');
+    expect(vite.indexOf("/src/main.js")).toBeGreaterThan(vite.indexOf('<body class="real">'));
+    expect(vite.split("<body").length - 1).toBe(2);
+
+    const astro = byPath(astroByName(html))["src/pages/index.astro"] ?? "";
+    expect(astro).toContain('<script type="text/template"><html><head></head><body class="fake" dir="ltr"></body></html></script>');
+    expect(astro).toContain('<body class="real">');
+    expect(astro.indexOf("<body class=\"fake\"")).toBeLessThan(astro.indexOf("</script>"));
+
+    const nextFiles = byPath(emitNext(split, "unused", "x").files);
+    expect(nextFiles["app/layout.tsx"] ?? "").toContain('<body className="real">');
+    expect(nextFiles["app/layout.tsx"] ?? "").not.toContain('className="fake"');
+    expect(nextFiles["app/page.tsx"] ?? "").not.toContain("fake");
+  });
+
+  it("authored mode keeps document attributes and still drops page scripts", () => {
+    const html = `<!doctype html>
+<html lang="ar" dir="rtl" class="theme-night"><head><title>x</title>
+<link rel="stylesheet" href="https://fonts.test/x.css"></head>
+<body dir="rtl" class="page">
+<section class="c-0"><p class="c-1">x</p></section>
+<script src="https://analytics.test/a.js"></script>
+<script>window.__pageLogic = 1;</script>
+</body></html>`;
+    const split = splitBuild(html);
+    const motion = { manifest: buildMotionManifest(split), authored: true };
+    const vite = byPath(emitVite(split, "unused", "x", motion).files)["index.html"] ?? "";
+    const astro = byPath(emitAstro(split, "unused", "x", motion).files)["src/pages/index.astro"] ?? "";
+    const next = byPath(emitNext(split, "unused", "x", motion).files)["app/layout.tsx"] ?? "";
+    expect(vite).toContain('<html lang="ar" dir="rtl" class="theme-night">');
+    expect(astro).toContain('<body dir="rtl" class="page">');
+    expect(next).toContain('<html lang="ar" dir="rtl" className="theme-night">');
+    expect(next).toContain('<body dir="rtl" className="page">');
+    for (const text of [vite, astro, next]) {
+      expect(text).not.toContain("analytics.test");
+      expect(text).not.toContain("__pageLogic");
+    }
   });
 });
 

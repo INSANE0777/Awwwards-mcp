@@ -1761,6 +1761,29 @@ describe("analyze_page_structure", () => {
     expect("diff" in parsed).toBe(false);
   });
 
+  it("passes additive scroll-mode diagnostics through the JSON block", async () => {
+    const cache = new Cache(tmpDir());
+    const { client } = fakeClient();
+    const structure = {
+      url: "https://example.com",
+      title: "Virtual",
+      totalHeight: 9000,
+      bands: [
+        { index: 0, tag: "main", label: "#smooth", background: "rgb(0, 0, 0)", offsetTop: 0, height: 9000, textStart: "" },
+      ],
+      scrollMode: "virtual" as const,
+      virtualRoot: "div#smooth",
+      note: "diagnostic only",
+    };
+    const h = createHandlers({ client, cache, analyzeFn: async () => structure });
+    const res = await h.analyze_page_structure({ url: "https://example.com" });
+    expect(res.isError).toBeUndefined();
+    const parsed = JSON.parse((res.content[0] as any).text);
+    expect(parsed.scrollMode).toBe("virtual");
+    expect(parsed.virtualRoot).toBe("div#smooth");
+    expect(parsed.note).toBe("diagnostic only");
+  });
+
   it("surfaces the install hint as isError when playwright is missing", async () => {
     const cache = new Cache(tmpDir());
     const { client } = fakeClient();
@@ -1826,6 +1849,13 @@ describe("analyze_page_structure", () => {
                 { index: 0, tag: "section", label: ".a", background: "rgb(0, 0, 0)", offsetTop: 0, height: 500, textStart: "" },
                 { index: 1, tag: "section", label: ".c", background: "rgb(0, 0, 0)", offsetTop: 500, height: 500, textStart: "" },
               ],
+          ...(mobile
+            ? {
+                scrollMode: "virtual" as const,
+                virtualRoot: "div#smooth",
+                note: "mobile virtual wrapper",
+              }
+            : {}),
         };
       },
     });
@@ -1836,6 +1866,12 @@ describe("analyze_page_structure", () => {
     expect(parsed.totalHeight).toBe(1000); // desktop stays the base
     expect(parsed.bands.map((b: any) => b.label)).toEqual([".a", ".c"]);
     expect(parsed.mobileBands.map((b: any) => b.label)).toEqual([".a", ".b"]);
+    // The mobile capture's own diagnosis travels beside mobileBands/diff; the
+    // desktop diagnosis stays authoritative at the top level.
+    expect("scrollMode" in parsed).toBe(false);
+    expect(parsed.mobileScrollMode).toBe("virtual");
+    expect(parsed.mobileVirtualRoot).toBe("div#smooth");
+    expect(parsed.mobileNote).toBe("mobile virtual wrapper");
     expect(parsed.diff).toEqual({
       heightDelta: -200,
       bandsAdded: [".b"],

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -11,11 +11,19 @@ const root = mkdtempSync(join(tmpdir(), "release-version-gate-"));
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-type Versions = { pkg: string; lockRoot: string; lockEntry: string };
+type Versions = {
+  pkg: string;
+  lockRoot: string;
+  lockEntry: string;
+  server: string;
+  serverEntry: string;
+};
 const agree = (version: string): Versions => ({
   pkg: version,
   lockRoot: version,
   lockEntry: version,
+  server: version,
+  serverEntry: version,
 });
 
 function run(versions: Versions, tag: string) {
@@ -28,6 +36,14 @@ function run(versions: Versions, tag: string) {
       version: versions.lockRoot,
       lockfileVersion: 3,
       packages: { "": { name: "x", version: versions.lockEntry } },
+    }),
+  );
+  writeFileSync(
+    join(dir, "server.json"),
+    JSON.stringify({
+      name: "io.github.insane0777/x",
+      version: versions.server,
+      packages: [{ registryType: "npm", identifier: "x", version: versions.serverEntry, transport: { type: "stdio" } }],
     }),
   );
   return spawnSync(process.execPath, [script, tag], { cwd: dir, encoding: "utf8" });
@@ -54,5 +70,34 @@ describe("release version gate", () => {
 
   it("rejects a package-lock.json packages entry that disagrees with the rest", () => {
     expect(run({ ...agree("1.16.0"), lockEntry: "1.15.1" }, "v1.16.0").status).toBe(1);
+  });
+
+  it("rejects a server.json version that disagrees with the rest", () => {
+    const result = run({ ...agree("1.16.0"), server: "1.15.1" }, "v1.16.0");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("server.json version=1.15.1");
+  });
+
+  it("rejects a server.json packages entry that disagrees with the rest", () => {
+    const result = run({ ...agree("1.16.0"), serverEntry: "1.15.1" }, "v1.16.0");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('server.json packages[0] version=1.15.1');
+  });
+
+  it("keeps this checkout's package, lock, server and changelog identities aligned", () => {
+    const repo = join(import.meta.dirname, "..");
+    const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { version: string };
+    const version = spawnSync(process.execPath, [script, `v${pkg.version}`], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+    expect(version.stderr).toBe("");
+    expect(version.status).toBe(0);
+    const changelog = spawnSync(
+      process.execPath,
+      [join(repo, "scripts", "changelog-gate.mjs"), pkg.version, "--check"],
+      { cwd: repo, encoding: "utf8" },
+    );
+    expect(changelog.status).toBe(0);
   });
 });

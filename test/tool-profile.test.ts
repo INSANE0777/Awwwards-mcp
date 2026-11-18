@@ -6,6 +6,7 @@ import {
   registerGuarded,
 } from "../src/tool-profile.js";
 import { registerAllTools } from "../src/tools/index.js";
+import { v2ToolNames } from "../src/v2/register.js";
 
 type Registration = { name: string; handler?: (...args: any[]) => any };
 
@@ -25,13 +26,13 @@ function fakeServer() {
 
 // cli.ts connects to stdio on import, so the registration contract is checked
 // against the tool modules directly: registerAllTools on a fake server.
-function cliToolNames(): string[] {
+function cliToolNames(atlas = false): string[] {
   const { server, regs } = fakeServer();
   registerAllTools({
     handlers: {} as any,
     tool: server.tool as any,
     registerTool: server.registerTool as any,
-  }, { atlas: false });
+  }, { atlas });
   return regs.map((r) => r.name);
 }
 
@@ -150,7 +151,133 @@ describe("tool profile", () => {
     );
     const result = await regs[0].handler!();
     expect(result._meta).toBeUndefined();
+    expect(Object.keys(result).sort()).toEqual(["content", "isError"]);
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(1000);
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      truncated: true,
+      bytes: Buffer.byteLength(JSON.stringify(payload), "utf8"),
+    });
+  });
+
+  it("marks an unstructured successful overflow as an error with no evidence", async () => {
+    for (const isError of [undefined, false]) {
+      const payload: Record<string, unknown> = {
+        content: [
+          { type: "text", text: `text-evidence-${String(isError)} ` + "x".repeat(1200) },
+          { type: "image", data: "image-evidence", mimeType: "image/png" },
+        ],
+      };
+      if (isError === false) payload.isError = false;
+
+      const { server, regs } = fakeServer();
+      registerGuarded(
+        server as any,
+        "registerTool",
+        v2Args("text_tool", async () => payload),
+        { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "1000" },
+      );
+      const result = await regs[0].handler!();
+
+      expect(result.isError).toBe(true);
+      expect(Object.keys(result).sort()).toEqual(["content", "isError"]);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        truncated: true,
+        tool: "text_tool",
+        bytes: Buffer.byteLength(JSON.stringify(payload), "utf8"),
+        limit: 1000,
+        note: "Response exceeded AWWWARDS_MCP_MAX_RESPONSE_BYTES; narrow the request or raise the limit.",
+      });
+      expect(result.content[0].text).not.toContain("text-evidence");
+      expect(result.content[0].text).not.toContain("image-evidence");
+    }
+  });
+
+  it("counts UTF-8 bytes rather than characters when measuring overflow", async () => {
+    const payload = { content: [{ type: "text", text: "é".repeat(60) }] };
+    const chars = JSON.stringify(payload).length;
+    const bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+    expect(chars).toBeLessThan(100);
+    expect(bytes).toBeGreaterThan(100);
+
+    const { server, regs } = fakeServer();
+    registerGuarded(
+      server as any,
+      "registerTool",
+      v2Args("utf8_tool", async () => payload),
+      { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "100" },
+    );
+    const result = await regs[0].handler!();
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toMatchObject({ truncated: true, tool: "utf8_tool", bytes, limit: 100 });
+  });
+
+  it("passes an exact-limit result unchanged and truncates one byte below", async () => {
+    const payload = { content: [{ type: "text", text: "ok" }] };
+    const bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+
+    const exact = fakeServer();
+    registerGuarded(
+      exact.server as any,
+      "registerTool",
+      v2Args("exact_tool", async () => payload),
+      { AWWWARDS_MCP_MAX_RESPONSE_BYTES: String(bytes) },
+    );
+    expect(await exact.regs[0].handler!()).toBe(payload);
+
+    const below = fakeServer();
+    registerGuarded(
+      below.server as any,
+      "registerTool",
+      v2Args("exact_tool", async () => payload),
+      { AWWWARDS_MCP_MAX_RESPONSE_BYTES: String(bytes - 1) },
+    );
+    const result = await below.regs[0].handler!();
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toMatchObject({ truncated: true, bytes, limit: bytes - 1 });
+  });
+
+  it("keeps the truncation recovery envelope at or under 1 KiB for every registered name", async () => {
+    const names = [...new Set([...cliToolNames(), ...cliToolNames(true), ...v2ToolNames(true)])];
+    for (const name of names) {
+      const { server, regs } = fakeServer();
+      registerGuarded(
+        server as any,
+        "registerTool",
+        v2Args(name, async () => ({ content: [{ type: "text", text: "x".repeat(64) }] })),
+        { AWWWARDS_MCP_MAX_RESPONSE_BYTES: "10" },
+      );
+      const result = await regs[0].handler!();
+      expect(result.isError).toBe(true);
+      // The notice is a fixed recovery envelope, not payload: a 10-byte limit
+      // cannot fit any JSON-RPC result. The docs give the floor (~200 bytes)
+      // and cap the envelope at 1 KiB for every registered tool name.
+      expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(1024);
+      expect(JSON.parse(result.content[0].text)).toMatchObject({ truncated: true, tool: name, limit: 10 });
+    }
+  });
+
+  it("rejects unserializable results instead of measuring zero bytes", async () => {
+    const circular: Record<string, unknown> = { content: [{ type: "text", text: "circular-evidence" }] };
+    circular.self = circular;
+    const bigint = { content: [{ type: "text", text: "bigint-evidence" }], count: 1n };
+
+    for (const payload of [circular, bigint, undefined]) {
+      const { server, regs } = fakeServer();
+      registerGuarded(server as any, "registerTool", v2Args("broken_tool", async () => payload), {});
+      const error = await regs[0].handler!().then(
+        () => {
+          throw new Error("expected the guarded handler to reject");
+        },
+        (reason: unknown) => reason as Error,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe("Tool result could not be serialized.");
+      expect(error.cause).toBeUndefined();
+      expect(error.message).not.toMatch(/circular-evidence|bigint-evidence/);
+    }
   });
 
   it("drops structuredContent from isError results even under the limit", async () => {
