@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildProject, emitAstro, emitVite, splitBuild, splitRehost } from "../src/build-project.js";
 import { emitNext } from "../src/emit-next.js";
+import { buildMotionManifest } from "../src/motion-manifest.js";
 
 const FIXTURES = join(__dirname, "fixtures", "build-project");
 const sample4 = () => readFileSync(join(FIXTURES, "sample4.html"), "utf8");
@@ -882,7 +883,7 @@ describe("JSX fallback: template braces keep a raw path + warning", () => {
     const f = byPath(emitted.files);
     const s1 = f["components/Section01.tsx"] ?? "";
     expect(s1).not.toContain("dangerouslySetInnerHTML");
-    expect(s1).toContain('style={{ "--x": "9%", "--y": "21%", color: "red" } as React.CSSProperties}');
+    expect(s1).toContain('style={{ "--x": "9%", "--y": "21%", "color": "red" } as React.CSSProperties}');
     expect(s1.startsWith('// Section01')).toBe(true);
     expect(s1).toContain('import type React from "react";');
     expect(f["components/Section02.tsx"]).not.toContain("dangerouslySetInnerHTML");
@@ -901,5 +902,157 @@ describe("JSX fallback: template braces keep a raw path + warning", () => {
     expect(f["app/page.tsx"]).toContain('"--brand": "2px"');
     expect(f["app/page.tsx"]).toContain('as React.CSSProperties');
     expect(f["app/page.tsx"]).toContain('import type React from "react";');
+  });
+});
+
+describe("native rehost: document attributes (M3)", () => {
+  const themed = `<!doctype html>
+<html lang="ar" dir="rtl" class="theme-night" id="doc" data-theme="night" style="--ink: rgb(1, 2, 3)">
+<head><title>RTL</title></head>
+<body dir="rtl" class="page" id="top" data-page="home" aria-label="Home page" style="color: rgb(4, 5, 6)">
+<main id="main"><section id="a">A</section><section id="b">B</section></main>
+</body></html>`;
+  const split = splitBuild(themed);
+  const f = byPath(emitNext(split, "unused", "RTL").files);
+  const htmlOpen =
+    '<html lang="ar" dir="rtl" class="theme-night" id="doc" data-theme="night" style="--ink: rgb(1, 2, 3)">';
+  const bodyOpen =
+    '<body dir="rtl" class="page" id="top" data-page="home" aria-label="Home page" style="color: rgb(4, 5, 6)">';
+
+  it("next rehost layout no longer hardcodes en / a bare body", () => {
+    const layout = f["app/layout.tsx"] ?? "";
+    expect(layout).toContain(
+      '<html lang="ar" dir="rtl" className="theme-night" id="doc" data-theme="night" style={{ "--ink": "rgb(1, 2, 3)" } as React.CSSProperties}>',
+    );
+    expect(layout).toContain(
+      '<body dir="rtl" className="page" id="top" data-page="home" aria-label="Home page" style={{ "color": "rgb(4, 5, 6)" }}>',
+    );
+    expect(layout).toContain('import type React from "react";');
+    expect(layout).not.toContain('<html lang="en">');
+  });
+
+  it("next authored rehost keeps the attributes and still filters scripts", () => {
+    const authored = byPath(emitNext(split, "unused", "RTL", { manifest: buildMotionManifest(split), authored: true }).files);
+    const layout = authored["app/layout.tsx"] ?? "";
+    expect(layout).toContain('lang="ar"');
+    expect(layout).toContain('dir="rtl"');
+    expect(layout).toContain('className="theme-night"');
+    expect(layout).toContain('className="page"');
+    expect(layout).not.toContain("SiteScripts");
+  });
+
+  it("next rehost strips hostile document attributes; vite/astro keep their verbatim shell", () => {
+    const hostile = `<!doctype html><html lang="ar" onclick="window.__pwned=1" style="width: expression(alert(1))"><head><title>x</title></head><body onload="window.__pwned=2" style="background: url(javascript:alert(1))" data-keep="1"><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`;
+    const hsplit = splitBuild(hostile);
+    const hLayout = byPath(emitNext(hsplit, "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(hLayout).toContain('<html lang="ar">');
+    expect(hLayout).toContain('<body data-keep="1">');
+    for (const bad of ["onclick", "onload", "expression(", "javascript:", "__pwned"]) {
+      expect(hLayout).not.toContain(bad);
+    }
+    // A native rehost ships the captured shell itself: nothing is transferred,
+    // so its document tags stay byte-verbatim (no filtering regression).
+    const hVite = byPath(emitVite(hsplit, "unused", "x").files)["index.html"] ?? "";
+    expect(hVite).toContain('<html lang="ar" onclick="window.__pwned=1" style="width: expression(alert(1))">');
+  });
+
+  it("comment, script and raw-text decoys before the real document tags are ignored", () => {
+    const decoy = `<!-- <html lang="fr"><body class="fake"> -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><script>const s = "</body><body class='fake'>";</script>
+<style>.a::before { content: "<body class='style-fake'>"; }</style>
+<title>RTL</title></head>
+<body class="real" dir="rtl">
+<main id="main"><section id="a">A</section><section id="b">B</section></main>
+</body></html>`;
+    const layout = byPath(emitNext(splitBuild(decoy), "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(layout).toContain('<html lang="ar" dir="rtl">');
+    expect(layout).toContain('<body className="real" dir="rtl">');
+    expect(layout).not.toContain('className="fake"');
+    expect(layout).not.toContain("style-fake");
+    expect(layout).not.toContain('<html lang="fr"');
+  });
+
+  it("a title with >, < and tag-like text stays valid JSX and valid astro", () => {
+    const html = `<!doctype html><html lang="en"><head><title>Home > About &amp; A < B <body>end</title></head><body><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`;
+    const split = splitBuild(html);
+    const layout = byPath(emitNext(split, "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(layout).toContain("<title>Home &gt; About &amp; A &lt; B &lt;body&gt;end</title>");
+    const transpiled = ts.transpileModule(layout, {
+      compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext },
+      fileName: "layout.tsx",
+      reportDiagnostics: true,
+    });
+    expect((transpiled.diagnostics ?? []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+
+    const astro = byPath(emitAstro(split, "unused", "x").files)["src/pages/index.astro"] ?? "";
+    expect(astro).toContain("<title>Home &gt; About &amp; A &lt; B &lt;body&gt;end</title>");
+    expect(astro).not.toContain("<title>Home > About");
+  });
+
+  it("braces and entities in a title stay text in both templates", () => {
+    const html = `<!doctype html><html lang="en"><head><title>Home {curly} &amp; &lt;tag&gt;</title></head><body><main id="main"><section id="a">A</section></main></body></html>`;
+    const split = splitBuild(html);
+    const astro = byPath(emitAstro(split, "unused", "x").files)["src/pages/index.astro"] ?? "";
+    // Astro parses `{` as an expression start; entities stay as captured.
+    expect(astro).toContain("<title>Home &#123;curly&#125; &amp; &lt;tag&gt;</title>");
+    expect(astro).not.toContain("<title>Home {curly}");
+    const layout = byPath(emitNext(split, "unused", "x").files)["app/layout.tsx"] ?? "";
+    expect(layout).toContain("<title>Home &#123;curly&#125; &amp; &lt;tag&gt;</title>");
+    const transpiled = ts.transpileModule(layout, {
+      compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext },
+      fileName: "layout.tsx",
+      reportDiagnostics: true,
+    });
+    expect((transpiled.diagnostics ?? []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  });
+
+  it("rehost page body starts at the real body even when an attribute carries <body>", () => {
+    const html = `<!doctype html><html lang="ar"><head><meta content="<body class='fake'>"><title>x</title></head><body class="real"><main id="main"><section id="a">A</section><section id="b">B</section></main></body></html>`;
+    const files = byPath(emitNext(splitBuild(html), "unused", "x").files);
+    const page = files["app/page.tsx"] ?? "";
+    expect(page).not.toContain("class='fake'");
+    expect(page).not.toContain('markup">');
+    expect(page).toContain("<Section01 />");
+    const transpiled = ts.transpileModule(page, {
+      compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext },
+      fileName: "page.tsx",
+      reportDiagnostics: true,
+    });
+    expect((transpiled.diagnostics ?? []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  });
+
+  it("vite + astro rehost keep the shell's document tags verbatim", () => {
+    expect(byPath(emitVite(split, "unused", "RTL").files)["index.html"]).toContain(htmlOpen);
+    expect(byPath(emitVite(split, "unused", "RTL").files)["index.html"]).toContain(bodyOpen);
+    const astro = byPath(emitAstro(split, "unused", "RTL").files)["src/pages/index.astro"] ?? "";
+    expect(astro).toContain(htmlOpen);
+    expect(astro).toContain(bodyOpen);
+  });
+
+  it("buildProject carries the attributes to disk for every target", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-bp-doc-"));
+    try {
+      writeFileSync(join(dir, "index.html"), themed);
+      for (const target of ["vite", "astro", "next"] as const) {
+        const out = join(dir, target);
+        const res = await buildProject({ html: join(dir, "index.html"), target, out });
+        if ("error" in res) throw new Error(res.error);
+        const pagePath =
+          target === "next"
+            ? join(out, "app", "layout.tsx")
+            : target === "vite"
+              ? join(out, "index.html")
+              : join(out, "src", "pages", "index.astro");
+        const text = readFileSync(pagePath, "utf8");
+        expect(text).toContain('lang="ar"');
+        expect(text).toContain('dir="rtl"');
+        expect(text).toContain(target === "next" ? 'className="page"' : 'class="page"');
+        expect(text).toContain('aria-label="Home page"');
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

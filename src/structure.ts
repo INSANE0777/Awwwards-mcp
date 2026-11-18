@@ -21,14 +21,23 @@ export interface PageBand {
   textStart: string;
 }
 
+/** How the page scrolls; inferred from layout, never a replay guarantee. */
+export type ScrollMode = "document" | "element" | "virtual" | "canvas";
+
 export interface PageStructure {
   url: string;
   finalUrl?: string;
   title: string;
   totalHeight: number;
   bands: PageBand[];
-  /** Detected inner scroll container (`tag#id.class`); absent when the page scrolls on the document root. */
+  /** Detected inner scroll container (`tag#id.class`); absent when no element scroller was found (document, virtual or canvas pages). */
   scrollRoot?: string;
+  /** Inferred scroll mode; absent on scans produced before this field existed. */
+  scrollMode?: ScrollMode;
+  /** Diagnostic wrapper label (`tag#id.class`) only with scrollMode "virtual"; not a guaranteed unique selector and never a replay root. */
+  virtualRoot?: string;
+  /** Short explanation for non-document modes (e.g. canvas-only pages). */
+  note?: string;
   /** Mobile-only element evidence; absent unless the capture asked for it. */
   responsive?: ResponsiveReport;
   /** Additive marker: this scan ran on an attached page and never navigated. */
@@ -76,8 +85,14 @@ export interface ScanResult {
   title: string;
   totalHeight: number;
   candidates: RawBand[];
-  /** Detected inner scroll container (`tag#id.class`); absent for document-root scrolling. */
+  /** Detected inner scroll container (`tag#id.class`); absent for document, virtual and canvas pages. */
   scrollRoot?: string;
+  /** Inferred scroll mode; always set by the current snippet. */
+  scrollMode?: ScrollMode;
+  /** Diagnostic virtual wrapper label; only with scrollMode "virtual". */
+  virtualRoot?: string;
+  /** Short explanation for non-document modes (e.g. canvas-only pages). */
+  note?: string;
   /** Landmark y-tops (headings + distinct-bg children ≥400px). Omitted when collection threw. */
   landmarks?: number[];
   /** Mobile element evidence; omitted unless the snippet was called with responsive:true. */
@@ -140,6 +155,483 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     return best;
   }
 
+  // Empty-shape clip proof, mirrored from src/atlas/scan.ts. Only inset(),
+  // circle(), ellipse() and legacy rect() can be proven empty; polygon(),
+  // path() and url() shapes are never rejected on shape alone.
+  function resolveClipLength(token: any, base: number): number | null {
+    const match = /^(-?\d*\.?\d+)(px|%)?$/.exec(String(token ?? ""));
+    if (!match) return null;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) return null;
+    if (match[2] === "%") return (amount / 100) * base;
+    // Unitless lengths are only valid as zero.
+    return match[2] === undefined && amount !== 0 ? null : amount;
+  }
+  function insetClipRegion(
+    value: any,
+    rect: any,
+  ): { left: number; top: number; right: number; bottom: number } | null {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (text.includes("round")) return null;
+    const inner = /^inset\(([\s\S]*)\)$/.exec(text)?.[1];
+    if (inner === undefined) return null;
+    const tokens = inner.split(/[\s,]+/).filter(Boolean);
+    if (tokens.length === 0 || tokens.length > 4) return null;
+    const width = Number(rect.width || 0);
+    const height = Number(rect.height || 0);
+    const topToken = tokens[0];
+    const rightToken = tokens[1] ?? topToken;
+    const bottomToken = tokens[2] ?? topToken;
+    const leftToken = tokens[3] ?? rightToken;
+    const top = resolveClipLength(topToken, height);
+    const right = resolveClipLength(rightToken, width);
+    const bottom = resolveClipLength(bottomToken, height);
+    const left = resolveClipLength(leftToken, width);
+    if (top === null || right === null || bottom === null || left === null) return null;
+    return {
+      left: rect.left + left,
+      top: rect.top + top,
+      right: rect.right - right,
+      bottom: rect.bottom - bottom,
+    };
+  }
+  // Rectangular inset for affirmative visibility. Rounded corners cannot be
+  // resolved to area here, so `round` is not an accepted rectangle.
+  function insetClipRect(
+    value: any,
+    rect: any,
+  ): { left: number; top: number; right: number; bottom: number } | null {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (text.includes("round")) return null;
+    const inner = /^inset\(([\s\S]*)\)$/.exec(text)?.[1];
+    if (inner === undefined) return null;
+    return insetClipRegion(`inset(${inner})`, rect);
+  }
+
+  // Legacy `clip: rect(top, right, bottom, left)` for canvas area. Offsets
+  // are relative to the border box; `auto` resolves to that box's edge, and
+  // anything else non-px is unresolved.
+  function legacyClipRect(
+    value: any,
+    rect: any,
+  ): { left: number; top: number; right: number; bottom: number } | null {
+    const text = String(value ?? "").trim().toLowerCase();
+    const match = /^rect\(([^)]*)\)$/.exec(text);
+    if (!match) return null;
+    const parts = String(match[1] ?? "").split(/[\s,]+/).filter(Boolean);
+    if (parts.length !== 4) return null;
+    const edges: number[] = [];
+    const autoEdges = [0, rect.width, rect.height, 0];
+    for (let i = 0; i < 4; i++) {
+      const part = parts[i]!;
+      if (part === "auto") {
+        edges.push(Number(autoEdges[i] || 0));
+        continue;
+      }
+      const m = /^(-?\d*\.?\d+)(px)?$/.exec(part);
+      if (!m) return null;
+      edges.push(Number(m[1]));
+    }
+    return {
+      left: rect.left + edges[3]!,
+      top: rect.top + edges[0]!,
+      right: rect.left + edges[1]!,
+      bottom: rect.top + edges[2]!,
+    };
+  }
+  // All-zero inset: a no-op clip, so it cannot be the reason a canvas is
+  // rejected under a transform chain.
+  function zeroInsetClip(value: any): boolean {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (text.includes("round")) return false;
+    const inner = /^inset\(([\s\S]*)\)$/.exec(text)?.[1];
+    if (inner === undefined) return false;
+    const tokens = inner.split(/[\s,]+/).filter(Boolean);
+    if (tokens.length === 0 || tokens.length > 4) return false;
+    for (const token of tokens) {
+      const match = /^(-?\d*\.?\d+)(px|%)?$/.exec(token);
+      if (!match || Number(match[1]) !== 0) return false;
+    }
+    return true;
+  }
+  // `zoom` scales layout and local clip geometry like a transform.
+  function hasNonDefaultZoom(value: any): boolean {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (!text || text === "normal") return false;
+    const amount = parseFloat(text);
+    if (!Number.isFinite(amount)) return true;
+    return text.indexOf("%") >= 0 ? amount !== 100 : amount !== 1;
+  }
+  // Individual transform properties (scale/rotate/translate) compose with
+  // `transform`; zoom scales too. Any non-default one makes local clip
+  // geometry unmappable.
+  function hasTransformLike(style: any): boolean {
+    return (
+      String(style.transform || "none") !== "none" ||
+      String(style.scale || "none") !== "none" ||
+      String(style.rotate || "none") !== "none" ||
+      String(style.translate || "none") !== "none" ||
+      hasNonDefaultZoom(style.zoom)
+    );
+  }
+  function hasTransformChain(node: any): boolean {
+    let cur = node;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && depth < 100) {
+      if (hasTransformLike(g.getComputedStyle(cur))) return true;
+      cur = cur.parentElement;
+      depth++;
+    }
+    return false;
+  }
+  // `width`/`height` are fractional layout dimensions when untransformed.
+  // Under a transform they are transformed client dimensions, so only
+  // percentage sums >= 100% (or zero shapes) can prove emptiness; local px
+  // insets cannot be mapped through an unknown transform.
+  function clipPathEmpty(
+    value: any,
+    width: number,
+    height: number,
+    transformed: boolean,
+  ): boolean {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (!text || text === "none") return false;
+    const call = /^([a-z-]+)\(([\s\S]*)\)$/.exec(text);
+    if (!call) return false;
+    const kind = call[1];
+    const tokens = String(call[2] ?? "")
+      .split(" round ")[0]!
+      .trim()
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    if (kind === "inset") {
+      if (transformed) {
+        if (!(width > 0 && height > 0)) return true; // zero-size box
+        if (tokens.length === 0 || tokens.length > 4) return false;
+        const topToken = tokens[0];
+        const rightToken = tokens[1] ?? topToken;
+        const bottomToken = tokens[2] ?? topToken;
+        const leftToken = tokens[3] ?? rightToken;
+        // Percent-equivalent value, or null when a nonzero px/unknown unit
+        // cannot be resolved without the untransformed layout box.
+        function percent(token: any): number | null {
+          const match = /^(-?\d*\.?\d+)(px|%)?$/.exec(String(token ?? ""));
+          if (!match) return null;
+          const amount = Number(match[1]);
+          if (!Number.isFinite(amount)) return null;
+          if (match[2] === "%") return amount;
+          return amount === 0 ? 0 : null;
+        }
+        const top = percent(topToken);
+        const right = percent(rightToken);
+        const bottom = percent(bottomToken);
+        const left = percent(leftToken);
+        return (
+          (top !== null && bottom !== null && top + bottom >= 100) ||
+          (left !== null && right !== null && left + right >= 100)
+        );
+      }
+      // Rounding only shrinks the region, so the rectangle decides emptiness.
+      const region = insetClipRegion(
+        `inset(${String(call[2] ?? "").split(" round ")[0]!})`,
+        { left: 0, top: 0, right: width, bottom: height, width, height },
+      );
+      return (
+        region !== null && (!(region.right > region.left) || !(region.bottom > region.top))
+      );
+    }
+    if (kind === "circle") {
+      if (transformed) {
+        const match = /^(-?\d*\.?\d+)(px|%)?$/.exec(tokens[0] ?? "");
+        return !!match && Number(match[1]) === 0;
+      }
+      const radius = resolveClipLength(tokens[0], Math.hypot(width, height) / Math.SQRT2);
+      return radius !== null && radius <= 0;
+    }
+    if (kind === "ellipse") {
+      if (transformed) {
+        if (tokens.length < 2) return false;
+        for (let ti = 0; ti < 2; ti++) {
+          const match = /^(-?\d*\.?\d+)(px|%)?$/.exec(tokens[ti] ?? "");
+          if (match && Number(match[1]) === 0) return true;
+        }
+        return false;
+      }
+      const rx = resolveClipLength(tokens[0], width);
+      const ry = resolveClipLength(tokens[1], height);
+      return rx !== null && ry !== null && (rx <= 0 || ry <= 0);
+    }
+    // polygon()/path()/url() shapes are not proven empty here.
+    return false;
+  }
+  function legacyClipEmpty(style: any, transformed: boolean): boolean {
+    const position = String(style.position || "");
+    if (position !== "absolute" && position !== "fixed") return false;
+    const value = String(style.clip || "").trim().toLowerCase();
+    if (!value || value === "auto") return false;
+    const match = /^rect\(([^)]*)\)$/.exec(value);
+    if (!match) return false;
+    const parts = String(match[1] ?? "").split(/[\s,]+/).filter(Boolean);
+    if (parts.length !== 4) return false;
+    const lengths: number[] = [];
+    for (const part of parts) {
+      if (part === "auto") return false;
+      const amount = Number.parseFloat(part);
+      if (!Number.isFinite(amount)) return false;
+      lengths.push(amount);
+    }
+    // A transformed px rect can only prove emptiness when it is all zeros;
+    // other empty rects are local px and cannot be mapped.
+    if (transformed) {
+      return lengths.every(function (length) {
+        return length === 0;
+      });
+    }
+    return lengths[0]! >= lengths[2]! || lengths[3]! >= lengths[1]!;
+  }
+  function emptyShapeClip(node: any, style: any): boolean {
+    if (String(style.display || "") === "contents") return false;
+    const clipPath = String(style.clipPath || "none");
+    const clipPosition = String(style.position || "");
+    const legacyClip = String(style.clip || "").trim().toLowerCase();
+    const hasLegacyClip =
+      (clipPosition === "absolute" || clipPosition === "fixed") &&
+      !!legacyClip &&
+      legacyClip !== "auto";
+    // Only clipping nodes pay for the transform-chain walk.
+    const transformed =
+      clipPath !== "none" || hasLegacyClip ? hasTransformChain(node) : false;
+    if (clipPath !== "none") {
+      const rect = node.getBoundingClientRect();
+      const width = Number(rect.width || 0);
+      const height = Number(rect.height || 0);
+      if (clipPathEmpty(clipPath, width, height, transformed)) return true;
+    }
+    return legacyClipEmpty(style, transformed);
+  }
+
+  // Conservative visibility/fixed/clip walk for virtual-root and canvas
+  // candidates. body/html are exempt from the fixed and overflow vetoes: a
+  // pinned body is the page shell on smooth-scroll sites, not an overlay.
+  // Opacity does not inherit, so every ancestor is walked. An empty clip-path
+  // or legacy clip proves no paint anywhere, so it applies to roots too.
+  // Mirrored inline in preScroll.
+  function ancestry(el: any): {
+    hidden: boolean;
+    fixed: boolean;
+    clipped: boolean;
+    clipEmpty: boolean;
+  } {
+    let hidden = false;
+    let fixed = false;
+    let clipped = false;
+    let clipEmpty = false;
+    let cur = el;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && depth < 100) {
+      const s = g.getComputedStyle(cur);
+      const isRoot = cur === doc.body || cur === doc.documentElement;
+      if (
+        String(s.display) === "none" ||
+        String(s.visibility) === "hidden" ||
+        String(s.visibility) === "collapse" ||
+        String(s.contentVisibility || "") === "hidden" ||
+        parseFloat(String(s.opacity || "1")) === 0 ||
+        /(?:^|\s)opacity\(\s*0(?:\.0+)?%?\s*\)/.test(String(s.filter || "").toLowerCase())
+      ) {
+        hidden = true;
+      }
+      if (!isRoot && String(s.position) === "fixed") fixed = true;
+      if (!isRoot && (String(s.overflowY) === "hidden" || String(s.overflowY) === "clip")) {
+        clipped = true;
+      }
+      if (emptyShapeClip(cur, s)) clipEmpty = true;
+      if (isRoot) break;
+      cur = cur.parentElement;
+      depth++;
+    }
+    return { hidden: hidden, fixed: fixed, clipped: clipped, clipEmpty: clipEmpty };
+  }
+
+  // A body that is itself the scroll container (html pinned, body
+  // overflow-y:auto|scroll) has tall in-flow content, not translated content.
+  // Treating a section as a virtual wrapper there both invents a mode and
+  // truncates totalHeight, so it is vetoed separately from overflow roots.
+  function bodyOverflows(): boolean {
+    try {
+      const body = doc.body;
+      if (!body) return false;
+      const s = g.getComputedStyle(body);
+      const overflowY = String(s.overflowY || "");
+      if (overflowY !== "auto" && overflowY !== "scroll") return false;
+      const clientHeight = Number(body.clientHeight || 0);
+      // Any real overflow counts: a 950px body in a 900px viewport is still
+      // the page's scroll container, not a one-viewport document.
+      return clientHeight > 0 && Number(body.scrollHeight || 0) > clientHeight;
+    } catch {
+      return false;
+    }
+  }
+
+  // Virtual-scroll fallback (Lenis/Locomotive-style transform scrolling): the
+  // document never scrolls and no element has overflow auto/scroll, but a
+  // wide in-flow wrapper is laid out far taller than the viewport and gets
+  // moved by transform. Tallest wins; DOM order makes the outermost win ties.
+  // This is bounded layout evidence, NOT proof of a working scroll controller.
+  // Mirrored inline in preScroll.
+  function findVirtualRoot(): any {
+    let best: any = null;
+    let bestHeight = 0;
+    try {
+      const de = doc.documentElement;
+      const scrolling = doc.scrollingElement;
+      // The document's real scroll extent. body.scrollHeight is not it: a
+      // pinned body still reports clipped/translated content height.
+      const rootHeight = Number(
+        (scrolling && scrolling.scrollHeight !== undefined
+          ? scrolling.scrollHeight
+          : de.scrollHeight) || 0,
+      );
+      const viewportHeight = Number(g.innerHeight || de.clientHeight || 0);
+      if (rootHeight > viewportHeight + 100) return null;
+      if (bodyOverflows()) return null;
+      const bodyWidth = doc.body.getBoundingClientRect().width || 1;
+      const all = doc.querySelectorAll("*");
+      for (let i = 0; i < all.length && i < 20000; i++) {
+        const el = all[i];
+        if (el === doc.body || el === doc.documentElement) continue;
+        // A tall canvas is scene content, not a translated DOM wrapper.
+        if (String(el.tagName || "").toLowerCase() === "canvas") continue;
+        const r = el.getBoundingClientRect();
+        if (!(r.width >= 0.6 * bodyWidth) || !(r.height > viewportHeight + 100)) continue;
+        if (!(r.height > bestHeight)) continue;
+        const a = ancestry(el);
+        if (a.hidden || a.fixed || a.clipped || a.clipEmpty) continue;
+        bestHeight = r.height;
+        best = el;
+      }
+    } catch {}
+    return best;
+  }
+
+  // Canvas-only page: neither the viewport/body overflow root nor a virtual
+  // root is taller than the viewport, but one visible canvas covers >= 80% of
+  // the viewport area. Visibility matters: a display:none / hidden /
+  // transparent canvas is not a scene. Clip/overflow matter too: a 100x100
+  // overflow:hidden hole or a deep clip-path inset can leave only a sliver of
+  // a big canvas, while a full-size shell still shows the whole canvas. Only
+  // provable rectangular insets, resolvable legacy rect() clips and
+  // non-visible overflow are intersected. Any other clip-path shape (circle,
+  // ellipse, polygon, path, url, calc, rounded inset) or unresolvable legacy
+  // clip leaves dominance unknown and declines the canvas; it never counts
+  // the unclipped rect.
+  function hasViewportCanvas(): boolean {
+    try {
+      const vw = Number(g.innerWidth || 0);
+      const vh = Number(g.innerHeight || 0);
+      if (!(vw > 0 && vh > 0)) return false;
+      const canvases = doc.querySelectorAll("canvas");
+      for (let i = 0; i < canvases.length; i++) {
+        const canvas = canvases[i];
+        const a = ancestry(canvas);
+        if (a.hidden || a.clipEmpty) continue;
+        // Under a transform chain, local clip lengths and ancestor boxes
+        // cannot be mapped into client space. Any real clipping then leaves
+        // dominance unknown: only none/all-zero insets are neutral.
+        const transformed = hasTransformChain(canvas);
+        let unknownClip = false;
+        const r = canvas.getBoundingClientRect();
+        let left = Math.max(r.left, 0);
+        let top = Math.max(r.top, 0);
+        let right = Math.min(r.right, vw);
+        let bottom = Math.min(r.bottom, vh);
+        // The canvas's own clip-path and every ancestor's inset clip-path clip
+        // painting; overflow on ancestors clips descendants. Intersect with
+        // border-box rects (borders ignored).
+        let cur = canvas;
+        let depth = 0;
+        while (cur && cur.nodeType === 1 && depth < 100) {
+          const s = g.getComputedStyle(cur);
+          if (String(s.display || "") !== "contents") {
+            const clipPath = String(s.clipPath || "none");
+            if (clipPath !== "none") {
+              if (transformed) {
+                if (!zeroInsetClip(clipPath)) unknownClip = true;
+              } else {
+                const clipRect = cur === canvas ? r : cur.getBoundingClientRect();
+                const region = insetClipRect(clipPath, clipRect);
+                if (region) {
+                  left = Math.max(left, region.left);
+                  top = Math.max(top, region.top);
+                  right = Math.min(right, region.right);
+                  bottom = Math.min(bottom, region.bottom);
+                } else {
+                  // Unresolved shape cannot prove >= 80% visible area.
+                  unknownClip = true;
+                }
+              }
+            }
+            const clipPosition = String(s.position || "");
+            const legacyClip = String(s.clip || "").trim().toLowerCase();
+            if (
+              (clipPosition === "absolute" || clipPosition === "fixed") &&
+              legacyClip &&
+              legacyClip !== "auto"
+            ) {
+              if (transformed) {
+                unknownClip = true;
+              } else {
+                const clipRect = cur === canvas ? r : cur.getBoundingClientRect();
+                const region = legacyClipRect(legacyClip, clipRect);
+                if (region) {
+                  left = Math.max(left, region.left);
+                  top = Math.max(top, region.top);
+                  right = Math.min(right, region.right);
+                  bottom = Math.min(bottom, region.bottom);
+                } else {
+                  unknownClip = true;
+                }
+              }
+            }
+          }
+          if (cur !== canvas) {
+            const clipsX = String(s.overflowX || "visible") !== "visible";
+            const clipsY = String(s.overflowY || "visible") !== "visible";
+            if (clipsX || clipsY) {
+              if (transformed) {
+                unknownClip = true;
+              } else {
+                // Overflow clips to the padding box, not the border box: a
+                // 300px border must not count as visible canvas area.
+                const box = cur.getBoundingClientRect();
+                const clientWidth = Number(cur.clientWidth || 0);
+                const clientHeight = Number(cur.clientHeight || 0);
+                if (clientWidth > 0 && clientHeight > 0) {
+                  const clientLeft = Number(cur.clientLeft || 0);
+                  const clientTop = Number(cur.clientTop || 0);
+                  left = Math.max(left, box.left + clientLeft);
+                  top = Math.max(top, box.top + clientTop);
+                  right = Math.min(right, box.left + clientLeft + clientWidth);
+                  bottom = Math.min(bottom, box.top + clientTop + clientHeight);
+                } else {
+                  unknownClip = true;
+                }
+              }
+            }
+          }
+          cur = cur.parentElement;
+          depth++;
+        }
+        if (unknownClip) continue;
+        const w = right - left;
+        const h = bottom - top;
+        if (!(w > 0 && h > 0) || (w * h) / (vw * vh) < 0.8) continue;
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   function cssEscape(value: any): string {
     const css = g.CSS;
     if (css && typeof css.escape === "function") return String(css.escape(String(value)));
@@ -156,19 +648,57 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   }
 
   const scroller = findScrollRoot();
+  const bodyOverflow = bodyOverflows();
+  const virtualRoot = scroller ? null : findVirtualRoot();
+  const virtualRect = virtualRoot ? virtualRoot.getBoundingClientRect() : null;
+  const virtualTop = virtualRect ? virtualRect.top : 0;
   const scrollerRect = scroller ? scroller.getBoundingClientRect() : null;
   const scrollerTop = scrollerRect ? scrollerRect.top : 0;
   const scrollerScrollTop = scroller ? scroller.scrollTop || 0 : 0;
-  const documentHeight = Math.max(
-    Number(doc.documentElement.scrollHeight || 0),
-    doc.body ? Number(doc.body.scrollHeight || 0) : 0,
+  const scrollingRoot = doc.scrollingElement;
+  // Virtual/canvas gates ask whether the viewport itself scrolls, so they use
+  // the scrolling element. Document totalHeight needs the body fallback: when
+  // body is the actual overflow container, its content is the page height.
+  // A pinned/hidden body's scrollHeight only reports clipped or transformed
+  // overflow, which must not inflate a document page.
+  const rootHeight = Number(
+    (scrollingRoot && scrollingRoot.scrollHeight !== undefined
+      ? scrollingRoot.scrollHeight
+      : doc.documentElement.scrollHeight) || 0,
   );
-  const totalHeight = Math.round(scroller ? scroller.scrollHeight : documentHeight);
+  const bodyHeight = doc.body ? Number(doc.body.scrollHeight || 0) : 0;
+  const documentHeight = bodyOverflow ? Math.max(rootHeight, bodyHeight) : rootHeight;
+  const totalHeight = Math.round(
+    scroller ? scroller.scrollHeight : virtualRect ? virtualRect.height : documentHeight,
+  );
 
-  // Content y in the scanned scroller's coordinates: the document root adds
-  // window scroll; an element scroller subtracts its viewport top and adds its
-  // own scrollTop (mirrors the pure coordinateY helper).
-  function coordY(r: any): number {
+  // Only the translated wrapper's own subtree is virtual content space. Fixed
+  // chrome and siblings outside it stay viewport-anchored, so a fixed header
+  // does not inherit the wrapper's negative top.
+  function inVirtual(el: any): boolean {
+    let cur = el;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && depth < 100) {
+      if (cur === virtualRoot) return true;
+      cur = cur.parentElement;
+      depth++;
+    }
+    return false;
+  }
+
+  // Content y in the scanned scroll container's coordinates: the document
+  // root adds window scroll; an element scroller subtracts its viewport top
+  // and adds its own scrollTop; a virtual wrapper subtracts its own translated
+  // top for its whole subtree. Fixed descendants of the transformed wrapper
+  // are virtual content too: the transform makes the wrapper their containing
+  // block, so their rect already carries the translation. Only siblings
+  // outside the subtree stay viewport-anchored. The pure coordinateY helper
+  // covers the document and element branches only.
+  function coordY(r: any, el?: any): number {
+    if (virtualRect) {
+      if (el && !inVirtual(el)) return Math.round(r.top);
+      return Math.round(r.top - virtualTop);
+    }
     return Math.round(scrollerRect ? r.top - scrollerTop + scrollerScrollTop : r.top + g.scrollY);
   }
 
@@ -212,7 +742,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
           tag: el.tagName.toLowerCase(),
           label: (el.id ? "#" + el.id : "") + (el.classList.length ? "." + String(el.classList[0]) : ""),
           bg: s.backgroundColor,
-          top: coordY(r),
+          top: coordY(r, el),
           height: Math.round(r.height),
           textStart: (el.textContent ?? "").trim().slice(0, 60),
         });
@@ -232,7 +762,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   try {
     const tops: number[] = [];
     for (const h of doc.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
-      tops.push(coordY(h.getBoundingClientRect()));
+      tops.push(coordY(h.getBoundingClientRect(), h));
     }
     let walked = 0;
     function walkLandmarks(el: any, depth: number): void {
@@ -242,7 +772,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
         const r = el.getBoundingClientRect();
         const bg = g.getComputedStyle(el).backgroundColor;
         if (r.height >= 400 && bg !== g.getComputedStyle(el.parentElement).backgroundColor) {
-          tops.push(coordY(r));
+          tops.push(coordY(r, el));
         }
       }
       for (const child of el.children) walkLandmarks(child, depth + 1);
@@ -258,7 +788,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
       const secs = doc.querySelectorAll("section, article, [role=main]");
       for (let i = 0; i < secs.length && secTops.length < 12; i++) {
         try {
-          secTops.push(coordY(secs[i].getBoundingClientRect()));
+          secTops.push(coordY(secs[i].getBoundingClientRect(), secs[i]));
         } catch {}
       }
     } catch {}
@@ -270,7 +800,20 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
     // landmarks stays undefined — the scan degrades to candidates only
   }
   const out: ScanResult = { title: doc.title, totalHeight, candidates };
-  if (scroller) out.scrollRoot = scrollRootLabel(scroller);
+  if (scroller) {
+    out.scrollRoot = scrollRootLabel(scroller);
+    out.scrollMode = "element";
+  } else if (virtualRoot) {
+    out.scrollMode = "virtual";
+    // Diagnostic only: never reuse this as scrollRoot / replay identity.
+    out.virtualRoot = scrollRootLabel(virtualRoot);
+  } else if (!bodyOverflow && rootHeight <= Number(g.innerHeight || 0) + 100 && hasViewportCanvas()) {
+    out.scrollMode = "canvas";
+    out.note =
+      "A visible canvas covers the viewport; DOM bands cannot describe content drawn inside it and additional DOM UI may still exist. Use motion recording or 3D scene capture for canvas motion/scene evidence.";
+  } else {
+    out.scrollMode = "document";
+  }
   if (landmarks) out.landmarks = landmarks;
   // Responsive evidence, mobile captures only. One pass in document
   // coordinates; every rule is independent and the whole block degrades to no
@@ -330,7 +873,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
         return {
           parts: selectorParts(el),
           x: Math.round(r.left + g.scrollX),
-          y: coordY(r),
+          y: coordY(r, el),
           w: Math.round(r.width),
           h: Math.round(r.height),
           detail: detail,
@@ -357,7 +900,7 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
           const s = g.getComputedStyle(cur);
           if (s.overflowX === "auto" || s.overflowX === "scroll") return true;
           if (s.overflowX === "hidden" && !isRoot) return true;
-          if (String(s.transform || "none") !== "none" && !isRoot) return true;
+          if (hasTransformLike(s) && !isRoot) return true;
           cur = cur.parentElement;
           depth++;
         }
@@ -435,10 +978,10 @@ export const SCAN_SNIPPET = function (args: { responsive?: boolean }): ScanResul
   return out;
 };
 
-// PURE: content y in the scanned scroll container's coordinate space.
-// Document-root scrolling adds window.scrollY to the viewport rect; an inner
-// scroller subtracts its own viewport top and adds its scrollTop. Mirrored
-// inline in SCAN_SNIPPET (which cannot import module helpers).
+// PURE: content y for the document and element scroller branches. Document
+// scrolling adds window.scrollY to the viewport rect; an inner scroller
+// subtracts its own viewport top and adds its scrollTop. SCAN_SNIPPET mirrors
+// these two branches inline and adds a scan-local virtual branch here.
 export function coordinateY(
   rectTop: number,
   docScrollY: number,
@@ -682,11 +1225,13 @@ export interface WaitOpts {
   proxyServer?: string;
 }
 
-/** What preScroll measured after its walk. `scrollRoot` is the detected inner scroller label, null for the document. */
+/** What preScroll measured after its walk. `scrollRoot` is the detected inner scroller label; null when no element scroller was found (document, virtual or canvas pages). */
 export interface PreScrollInfo {
   scrollRoot: string | null;
   scrollHeight: number;
   clientHeight: number;
+  /** Diagnostic layout height of a credible virtual wrapper; no scrolling is possible or implied. */
+  virtualHeight?: number;
 }
 
 // tsx (esbuild keepNames) injects __name()/__defProp helpers at module scope;
@@ -724,10 +1269,19 @@ export const PRE_SCROLL_DEADLINE_MS = 8_000;
 // Both walks stop at MAX_PRESCROLL_STEPS/8s even when scrollHeight keeps
 // growing, and always reset to the top. Returns the detected inner scroller
 // label + final metrics so capture can re-query it; existing callers ignore it.
+// scrollMode/virtualRoot/note live on the scan, not here. A virtual wrapper
+// only contributes a diagnostic virtualHeight: scrollRoot stays null, so no
+// caller mistakes it for a replayable element scroller.
 export async function preScroll(page: any): Promise<PreScrollInfo> {
   return page.evaluate(async function () {
     const g = globalThis as any;
     const doc = g.document;
+    // The real document scroller; body.scrollHeight includes clipped and
+    // transformed overflow and cannot answer whether the document scrolls.
+    const scrollingRoot =
+      doc.scrollingElement && doc.scrollingElement.scrollHeight !== undefined
+        ? doc.scrollingElement
+        : doc.documentElement;
     const step = 450;
     const maxSteps = 80; // MAX_PRESCROLL_STEPS
     const deadlineMs = 8000; // PRE_SCROLL_DEADLINE_MS
@@ -833,17 +1387,301 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
     }
     g.window.scrollTo({ left: 0, top: 0, behavior: "instant" });
     await new Promise((r) => setTimeout(r, 150));
+    // Measure after the walk and reset: lazy pages append sections or grow
+    // wrappers while scrolling, and the gates plus returned metrics must
+    // describe the final layout the scan will see, not the pre-walk one.
+    // Body-as-scroller: tall in-flow content, not a translated wrapper.
+    let bodyOverflow = false;
+    try {
+      const body = doc.body;
+      if (body) {
+        const s = g.getComputedStyle(body);
+        const overflowY = String(s.overflowY || "");
+        const clientHeight = Number(body.clientHeight || 0);
+        bodyOverflow =
+          (overflowY === "auto" || overflowY === "scroll") &&
+          clientHeight > 0 &&
+          Number(body.scrollHeight || 0) > clientHeight;
+      }
+    } catch {}
+    const rootHeight = Number(scrollingRoot ? scrollingRoot.scrollHeight || 0 : 0);
+    const bodyHeight = doc.body ? Number(doc.body.scrollHeight || 0) : 0;
+    // Mirror of SCAN_SNIPPET's findVirtualRoot negatives, inline: the document
+    // did not scroll, so report the wrapper's layout height as a diagnostic.
+    // Clipped/fixed/hidden/narrow wrappers never qualify, and no scrolling of
+    // the wrapper is attempted.
+    let virtualHeight = 0;
+    try {
+      const de = doc.documentElement;
+      const viewportHeight = Number(g.innerHeight || de.clientHeight || 0);
+      if (!bodyOverflow && !(rootHeight > viewportHeight + 100)) {
+        const bodyWidth = doc.body.getBoundingClientRect().width || 1;
+        const all = doc.querySelectorAll("*");
+        for (let i = 0; i < all.length && i < 20000; i++) {
+          const el = all[i];
+          if (el === doc.body || el === doc.documentElement) continue;
+          if (String(el.tagName || "").toLowerCase() === "canvas") continue;
+          const r = el.getBoundingClientRect();
+          if (!(r.width >= 0.6 * bodyWidth) || !(r.height > viewportHeight + 100)) continue;
+          if (!(r.height > virtualHeight)) continue;
+          let rejected = false;
+          let cur = el;
+          let depth = 0;
+          while (cur && cur.nodeType === 1 && depth < 100) {
+            const s = g.getComputedStyle(cur);
+            const isRoot = cur === doc.body || cur === doc.documentElement;
+            if (
+              String(s.display) === "none" ||
+              String(s.visibility) === "hidden" ||
+              String(s.visibility) === "collapse" ||
+              String(s.contentVisibility || "") === "hidden" ||
+              parseFloat(String(s.opacity || "1")) === 0 ||
+              /(?:^|\s)opacity\(\s*0(?:\.0+)?%?\s*\)/.test(String(s.filter || "").toLowerCase()) ||
+              (!isRoot && String(s.position) === "fixed") ||
+              (!isRoot && (String(s.overflowY) === "hidden" || String(s.overflowY) === "clip"))
+            ) {
+              rejected = true;
+              break;
+            }
+            // Empty clip-path / legacy clip proves the subtree paints nothing.
+            // The shape parser is inlined (no nested named helpers here) and
+            // mirrors SCAN_SNIPPET / src/atlas/scan.ts: inset, circle, ellipse
+            // and legacy rect only; polygon/path/url are not proof. Fractional
+            // rect geometry is used, and under a transform only zero shapes or
+            // percentage sums >= 100% prove emptiness.
+            if (String(s.display || "") !== "contents") {
+              const clipPath = String(s.clipPath || "none");
+              const clipPosition = String(s.position || "");
+              const legacyClip = String(s.clip || "").trim().toLowerCase();
+              const hasLegacyClip =
+                (clipPosition === "absolute" || clipPosition === "fixed") &&
+                !!legacyClip &&
+                legacyClip !== "auto";
+              const transformed =
+                clipPath !== "none" || hasLegacyClip
+                  ? (function (node: any): boolean {
+                      let t = node;
+                      let td = 0;
+                      while (t && t.nodeType === 1 && td < 100) {
+                        const ts = g.getComputedStyle(t);
+                        if (
+                          String(ts.transform || "none") !== "none" ||
+                          String(ts.scale || "none") !== "none" ||
+                          String(ts.rotate || "none") !== "none" ||
+                          String(ts.translate || "none") !== "none" ||
+                          (function (value: any): boolean {
+                            const text = String(value ?? "").trim().toLowerCase();
+                            if (!text || text === "normal") return false;
+                            const amount = parseFloat(text);
+                            if (!Number.isFinite(amount)) return true;
+                            return text.indexOf("%") >= 0 ? amount !== 100 : amount !== 1;
+                          })(ts.zoom)
+                        ) {
+                          return true;
+                        }
+                        t = t.parentElement;
+                        td++;
+                      }
+                      return false;
+                    })(cur)
+                  : false;
+              if (clipPath !== "none") {
+                const clipRect = cur.getBoundingClientRect();
+                const clipWidth = Number(clipRect.width || 0);
+                const clipHeight = Number(clipRect.height || 0);
+                const shapeEmpty = (function (
+                  value: any,
+                  width: number,
+                  height: number,
+                  underTransform: boolean,
+                ): boolean {
+                  const text = String(value ?? "").trim().toLowerCase();
+                  if (!text || text === "none") return false;
+                  const call = /^([a-z-]+)\(([\s\S]*)\)$/.exec(text);
+                  if (!call) return false;
+                  const kind = call[1];
+                  const tokens = String(call[2] ?? "")
+                    .split(" round ")[0]!
+                    .trim()
+                    .split(/[\s,]+/)
+                    .filter(Boolean);
+                  if (kind === "inset") {
+                    if (underTransform) {
+                      if (!(width > 0 && height > 0)) return true;
+                      if (tokens.length === 0 || tokens.length > 4) return false;
+                      const topToken = tokens[0];
+                      const rightToken = tokens[1] ?? topToken;
+                      const bottomToken = tokens[2] ?? topToken;
+                      const leftToken = tokens[3] ?? rightToken;
+                      const percent = (token: any): number | null => {
+                        const m = /^(-?\d*\.?\d+)(px|%)?$/.exec(String(token ?? ""));
+                        if (!m) return null;
+                        const amount = Number(m[1]);
+                        if (!Number.isFinite(amount)) return null;
+                        if (m[2] === "%") return amount;
+                        return amount === 0 ? 0 : null;
+                      };
+                      const top = percent(topToken);
+                      const right = percent(rightToken);
+                      const bottom = percent(bottomToken);
+                      const left = percent(leftToken);
+                      return (
+                        (top !== null && bottom !== null && top + bottom >= 100) ||
+                        (left !== null && right !== null && left + right >= 100)
+                      );
+                    }
+                    if (tokens.length === 0 || tokens.length > 4) return false;
+                    const topToken = tokens[0];
+                    const rightToken = tokens[1] ?? topToken;
+                    const bottomToken = tokens[2] ?? topToken;
+                    const leftToken = tokens[3] ?? rightToken;
+                    const sides = [topToken, rightToken, bottomToken, leftToken];
+                    const bases = [height, width, height, width];
+                    const vals: Array<number | null> = [];
+                    for (let si = 0; si < 4; si++) {
+                      const m = /^(-?\d*\.?\d+)(px|%)?$/.exec(sides[si] ?? "");
+                      if (!m) {
+                        vals.push(null);
+                        continue;
+                      }
+                      const amount = Number(m[1]);
+                      if (!Number.isFinite(amount)) {
+                        vals.push(null);
+                        continue;
+                      }
+                      const base = bases[si]!;
+                      vals.push(
+                        m[2] === "%"
+                          ? (amount / 100) * base
+                          : m[2] === undefined && amount !== 0
+                            ? null
+                            : amount,
+                      );
+                    }
+                    if (
+                      vals[0] === null ||
+                      vals[1] === null ||
+                      vals[2] === null ||
+                      vals[3] === null
+                    ) {
+                      return false;
+                    }
+                    return vals[0] + vals[2] >= height || vals[1] + vals[3] >= width;
+                  }
+                  if (kind === "circle") {
+                    if (underTransform) {
+                      const m = /^(-?\d*\.?\d+)(px|%)?$/.exec(tokens[0] ?? "");
+                      return !!m && Number(m[1]) === 0;
+                    }
+                    const m = /^(-?\d*\.?\d+)(px|%)?$/.exec(tokens[0] ?? "");
+                    if (!m) return false;
+                    const amount = Number(m[1]);
+                    if (!Number.isFinite(amount)) return false;
+                    const radius =
+                      m[2] === "%"
+                        ? ((amount / 100) * Math.hypot(width, height)) / Math.SQRT2
+                        : m[2] === undefined && amount !== 0
+                          ? null
+                          : amount;
+                    return radius !== null && radius <= 0;
+                  }
+                  if (kind === "ellipse") {
+                    if (tokens.length < 2) return false;
+                    if (underTransform) {
+                      for (let ti = 0; ti < 2; ti++) {
+                        const m = /^(-?\d*\.?\d+)(px|%)?$/.exec(tokens[ti] ?? "");
+                        if (m && Number(m[1]) === 0) return true;
+                      }
+                      return false;
+                    }
+                    const vals: Array<number | null> = [];
+                    for (let ti = 0; ti < 2; ti++) {
+                      const m = /^(-?\d*\.?\d+)(px|%)?$/.exec(tokens[ti]);
+                      if (!m) {
+                        vals.push(null);
+                        continue;
+                      }
+                      const amount = Number(m[1]);
+                      if (!Number.isFinite(amount)) {
+                        vals.push(null);
+                        continue;
+                      }
+                      const base = ti === 0 ? width : height;
+                      vals.push(
+                        m[2] === "%"
+                          ? (amount / 100) * base
+                          : m[2] === undefined && amount !== 0
+                            ? null
+                            : amount,
+                      );
+                    }
+                    return (
+                      vals[0] !== null &&
+                      vals[1] !== null &&
+                      (vals[0] <= 0 || vals[1] <= 0)
+                    );
+                  }
+                  return false;
+                })(clipPath, clipWidth, clipHeight, transformed);
+                if (shapeEmpty) {
+                  rejected = true;
+                  break;
+                }
+              }
+              if (hasLegacyClip) {
+                const match = /^rect\(([^)]*)\)$/.exec(legacyClip);
+                if (match) {
+                  const parts = String(match[1] ?? "")
+                    .split(/[\s,]+/)
+                    .filter(Boolean);
+                  if (parts.length === 4) {
+                    let valid = true;
+                    let hasAuto = false;
+                    const nums: number[] = [];
+                    for (let pi = 0; pi < 4; pi++) {
+                      if (parts[pi] === "auto") {
+                        hasAuto = true;
+                        break;
+                      }
+                      const amount = Number.parseFloat(String(parts[pi] ?? ""));
+                      if (!Number.isFinite(amount)) {
+                        valid = false;
+                        break;
+                      }
+                      nums.push(amount);
+                    }
+                    if (valid && !hasAuto) {
+                      if (transformed) {
+                        // Local px rects cannot be mapped; only all-zero
+                        // rects prove emptiness under a transform.
+                        if (nums.every((n) => n === 0)) {
+                          rejected = true;
+                          break;
+                        }
+                      } else if (nums[0]! >= nums[2]! || nums[3]! >= nums[1]!) {
+                        rejected = true;
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            if (isRoot) break;
+            cur = cur.parentElement;
+            depth++;
+          }
+          if (!rejected) virtualHeight = r.height;
+        }
+      }
+    } catch {}
     return {
       scrollRoot: null,
-      scrollHeight: Math.round(
-        Math.max(
-          Number(doc.documentElement.scrollHeight || 0),
-          doc.body ? Number(doc.body.scrollHeight || 0) : 0,
-        ),
-      ),
+      ...(virtualHeight > 0 ? { virtualHeight: Math.round(virtualHeight) } : {}),
+      scrollHeight: Math.round(bodyOverflow ? Math.max(rootHeight, bodyHeight) : rootHeight),
       clientHeight: Math.round(
         Number(
-          (doc.scrollingElement && doc.scrollingElement.clientHeight) ||
+          (scrollingRoot && scrollingRoot.clientHeight) ||
             g.innerHeight ||
             doc.documentElement.clientHeight ||
             0,
@@ -851,6 +1689,16 @@ export async function preScroll(page: any): Promise<PreScrollInfo> {
       ),
     };
   });
+}
+
+// Additive diagnostics: omitted entirely when an older/partial scan lacks
+// them, so legacy records keep their exact shape.
+function scrollModeFields(raw: ScanResult): Pick<PageStructure, "scrollMode" | "virtualRoot" | "note"> {
+  return {
+    ...(raw.scrollMode ? { scrollMode: raw.scrollMode } : {}),
+    ...(raw.virtualRoot ? { virtualRoot: raw.virtualRoot } : {}),
+    ...(raw.note ? { note: raw.note } : {}),
+  };
 }
 
 export async function analyzePageStructure(
@@ -905,6 +1753,7 @@ export async function analyzePageStructure(
         totalHeight: raw.totalHeight,
         bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
         ...(raw.scrollRoot ? { scrollRoot: raw.scrollRoot } : {}),
+        ...scrollModeFields(raw),
         attached: true,
       };
     } finally {
@@ -953,6 +1802,7 @@ export async function analyzePageStructure(
       bands: splitCollapsedBands(collapseBands(raw.candidates, raw.totalHeight, maxBands ?? 40), raw.landmarks ?? []),
     };
     if (raw.scrollRoot) structure.scrollRoot = raw.scrollRoot;
+    Object.assign(structure, scrollModeFields(raw));
     if (raw.responsive) structure.responsive = buildResponsiveReport(raw.responsive, profile);
     return structure;
   } finally {

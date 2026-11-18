@@ -56,6 +56,16 @@ describe("install documentation", () => {
     expect(text).toContain("manual post-release admin step");
   });
 
+  it("README marks 1.21 qualification blocked and failing on the fixed-shell fixture", () => {
+    const text = flatten(README);
+    expect(text).toContain(
+      "Full qualification for 1.21 is therefore BLOCKED and currently FAILS",
+    );
+    expect(text).toContain("`browser.atlas_capture` check");
+    expect(text).toContain("**FAIL (1)**");
+    expect(text).toContain("INCOMPLETE (exit 2) applies only to offline");
+  });
+
   it("README qualifies a supplied tarball against the approved fixture", () => {
     const text = flatten(README);
     const section = text.slice(

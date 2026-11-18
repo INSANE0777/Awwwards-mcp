@@ -202,6 +202,410 @@ export const ATLAS_SECTION_SCAN = function (hints: {
     }
   }
   /**
+   * Section visual eligibility, separate from text accessibility. A section is
+   * drawable when it can paint pixels somewhere in the document; the current
+   * viewport is deliberately never consulted, so a normal below-fold section
+   * stays eligible and becomes observable at a checkpoint. Only provable
+   * causes are rejected: hidden content, a zero-opacity chain, an empty legacy
+   * `clip`/`clip-path`, and ancestor overflow that permanently clips the
+   * section to zero area. Scrollable overflow is not proof — its content can
+   * still scroll into view.
+   */
+  const pxValue = (value: any): number => {
+    const parsed = Number.parseFloat(String(value ?? ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const resolveLength = (token: string | undefined, base: number): number | null => {
+    const match = /^(-?\d*\.?\d+)(px|%)?$/.exec(String(token ?? ""));
+    if (!match) return null;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) return null;
+    if (match[2] === "%") return (amount / 100) * base;
+    // Unitless lengths are only valid as zero.
+    return match[2] === undefined && amount !== 0 ? null : amount;
+  };
+  /** The rectangle an inset() clip-path leaves, in client coordinates. */
+  const insetClipRegion = (
+    value: any,
+    rect: any,
+  ): { left: number; top: number; right: number; bottom: number } | null => {
+    const text = String(value ?? "").trim().toLowerCase();
+    // Rounded insets are not intersected (the rectangle over-approximates); the
+    // emptiness check below still strips `round`, since rounding only shrinks.
+    if (text.includes("round")) return null;
+    const inner = /^inset\(([\s\S]*)\)$/.exec(text)?.[1];
+    if (inner === undefined) return null;
+    const tokens = inner.split(/[\s,]+/).filter(Boolean);
+    if (tokens.length === 0 || tokens.length > 4) return null;
+    const width = Number(rect.width || 0);
+    const height = Number(rect.height || 0);
+    const topToken = tokens[0];
+    const rightToken = tokens[1] ?? topToken;
+    const bottomToken = tokens[2] ?? topToken;
+    const leftToken = tokens[3] ?? rightToken;
+    const top = resolveLength(topToken, height);
+    const right = resolveLength(rightToken, width);
+    const bottom = resolveLength(bottomToken, height);
+    const left = resolveLength(leftToken, width);
+    if (top === null || right === null || bottom === null || left === null) return null;
+    return {
+      left: rect.left + left,
+      top: rect.top + top,
+      right: rect.right - right,
+      bottom: rect.bottom - bottom,
+    };
+  };
+  const clipPathEmpty = (value: any, width: number, height: number): boolean => {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (!text || text === "none") return false;
+    const call = /^([a-z-]+)\(([\s\S]*)\)$/.exec(text);
+    if (!call) return false;
+    const kind = call[1];
+    const tokens = String(call[2] ?? "")
+      .split(" round ")[0]!
+      .trim()
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    if (kind === "inset") {
+      // Rounding only shrinks the region, so the rectangle decides emptiness.
+      const region = insetClipRegion(
+        `inset(${String(call[2] ?? "").split(" round ")[0]!})`,
+        { left: 0, top: 0, right: width, bottom: height, width, height },
+      );
+      return (
+        region !== null && (!(region.right > region.left) || !(region.bottom > region.top))
+      );
+    }
+    if (kind === "circle") {
+      const radius = resolveLength(tokens[0], Math.hypot(width, height) / Math.SQRT2);
+      return radius !== null && radius <= 0;
+    }
+    if (kind === "ellipse") {
+      const rx = resolveLength(tokens[0], width);
+      const ry = resolveLength(tokens[1], height);
+      return rx !== null && ry !== null && (rx <= 0 || ry <= 0);
+    }
+    // polygon()/path()/url() shapes are not proven empty here.
+    return false;
+  };
+  const zeroLength = (token: string | undefined): boolean => {
+    const match = /^([+-]?(?:\d*\.?\d+))(px|%)?$/.exec(String(token ?? "").trim());
+    return Boolean(match) && Number(match![1]) === 0;
+  };
+  /**
+   * Under a transform the layout box cannot be measured precisely (client rects
+   * are scaled, `offsetWidth`/`offsetHeight` are rounded), so only proofs that
+   * do not depend on its size survive: zero-radius shapes and percentages that
+   * already consume the box.
+   */
+  const clipPathProvablyEmptyScaled = (value: any): boolean => {
+    const text = String(value ?? "").trim().toLowerCase();
+    const call = /^([a-z-]+)\(([\s\S]*)\)$/.exec(text);
+    if (!call) return false;
+    const kind = call[1];
+    const tokens = String(call[2] ?? "")
+      .split(" round ")[0]!
+      .trim()
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    if (kind === "inset") {
+      // Each side is proven only when it is a percentage or an exact zero; the
+      // pair then proves the axis empty when it already consumes the box.
+      const sides = tokens.map((token) => {
+        if (zeroLength(token)) return 0;
+        const percent = /^(-?\d*\.?\d+)%$/.exec(token);
+        return percent ? Number(percent[1]) : null;
+      });
+      if (sides.length === 0 || sides.some((side) => side === null)) return false;
+      const amount = (index: number): number => sides[index] as number;
+      const top = amount(0);
+      const right = sides.length > 1 ? amount(1) : top;
+      const bottom = sides.length > 2 ? amount(2) : top;
+      const left = sides.length > 3 ? amount(3) : right;
+      return right + left >= 100 || top + bottom >= 100;
+    }
+    // Radius tokens precede any `at <position>` clause.
+    const atIndex = tokens.indexOf("at");
+    const radii = atIndex === -1 ? tokens : tokens.slice(0, atIndex);
+    if (kind === "circle") return radii.length >= 1 && zeroLength(radii[0]);
+    if (kind === "ellipse") {
+      return radii.length >= 2 && (zeroLength(radii[0]) || zeroLength(radii[1]));
+    }
+    return false;
+  };
+  const legacyClipEmpty = (style: any): boolean => {
+    const position = String(style.position || "");
+    if (position !== "absolute" && position !== "fixed") return false;
+    const value = String(style.clip || "").trim().toLowerCase();
+    if (!value || value === "auto") return false;
+    const match = /^rect\(([^)]*)\)$/.exec(value);
+    if (!match) return false;
+    const parts = String(match[1] ?? "").split(/[\s,]+/).filter(Boolean);
+    if (parts.length !== 4) return false;
+    const lengths: number[] = [];
+    for (const part of parts) {
+      if (part === "auto") return false;
+      const amount = Number.parseFloat(part);
+      if (!Number.isFinite(amount)) return false;
+      lengths.push(amount);
+    }
+    return lengths[0]! >= lengths[2]! || lengths[3]! >= lengths[1]!;
+  };
+  const clippedOverflow = (value: any): boolean => {
+    const overflow = String(value || "");
+    return overflow === "hidden" || overflow === "clip";
+  };
+  // Properties that make an ancestor a containing block for fixed positioning
+  // (and, with the ancestor's own position, for absolute positioning).
+  const paintContainingBlock = (style: any): boolean => {
+    if (String(style.transform || "none") !== "none") return true;
+    if (String(style.filter || "none") !== "none") return true;
+    if (String(style.backdropFilter || "none") !== "none") return true;
+    if (String(style.perspective || "none") !== "none") return true;
+    if (/paint|layout|strict|content/.test(String(style.contain || ""))) return true;
+    return /transform|filter|perspective|contain/.test(String(style.willChange || ""));
+  };
+  /**
+   * A `visibility:hidden` box can still paint through a descendant that sets
+   * `visibility:visible`. That is proof of pixels, so the section stays
+   * eligible; the scan does not try to prove the opposite.
+   *
+   * shortcut: inspection stops after 400 descendants per hidden section
+   * (document order, early exit) so a pathological hidden subtree cannot stall
+   * the scan. A cutoff is unknown, not proof, so the section is retained;
+   * upgrade to an uncapped walk if that over-retention becomes material.
+   */
+  const paintsVisibleDescendant = (el: any): boolean => {
+    try {
+      let node = el.firstElementChild;
+      let visited = 0;
+      while (node && visited < 400) {
+        visited += 1;
+        const style = win.getComputedStyle(node);
+        if (
+          String(style.visibility || "") === "visible" &&
+          Number(style.opacity ?? 1) > 0
+        ) {
+          const nodeRect = node.getBoundingClientRect();
+          if (nodeRect.width > 0 && nodeRect.height > 0) return true;
+        }
+        if (node.firstElementChild) {
+          node = node.firstElementChild;
+          continue;
+        }
+        while (node && node !== el && !node.nextElementSibling) node = node.parentElement;
+        node = node && node !== el ? node.nextElementSibling : null;
+      }
+      // A budget cutoff leaves the subtree unexamined: unknown is retained.
+      if (node) return true;
+      return false;
+    } catch {
+      // Unknown state is retained, never excluded without proof.
+      return true;
+    }
+  };
+  const hasDrawablePixels = (el: any, rect: any): boolean => {
+    try {
+      if (!(rect.width > 0 && rect.height > 0)) return false;
+      const position = String(win.getComputedStyle(el).position || "");
+      const positioned = position === "absolute" || position === "fixed";
+      // An out-of-flow section escapes the overflow of ancestors strictly
+      // between itself and its containing block (CSS 2.1 §11.1.1).
+      let containingBlock: any = null;
+      if (positioned) {
+        let ancestor = el.parentElement;
+        let scanDepth = 0;
+        while (ancestor && ancestor.nodeType === 1 && scanDepth < 64) {
+          const ancestorStyle = win.getComputedStyle(ancestor);
+          if (
+            String(ancestorStyle.display || "") !== "contents" &&
+            (paintContainingBlock(ancestorStyle) ||
+              (position === "absolute" && String(ancestorStyle.position || "static") !== "static"))
+          ) {
+            containingBlock = ancestor;
+            break;
+          }
+          ancestor = ancestor.parentElement;
+          scanDepth += 1;
+        }
+      }
+      const clipsFrom = (ancestor: any): boolean => {
+        if (!positioned) return true;
+        // An out-of-flow section is clipped only by its containing block and
+        // that block's ancestors, never by boxes between it and the section
+        // (CSS 2.1 §11.1.1). No containing block means the viewport holds it,
+        // so every ancestor sits between the section and its containing block
+        // and none clips: returning false is correct, not a default.
+        if (!containingBlock) return false;
+        return ancestor === containingBlock || ancestor.contains(containingBlock);
+      };
+      // Client-space intersections are only valid when no transform stands
+      // between the element and the box being intersected. A transform on any
+      // ancestor scales local px, so the chain is checked, not just the node.
+      const transformedChainCache = new Map<any, boolean>();
+      const transformedChain = (node: any): boolean => {
+        const cached = transformedChainCache.get(node);
+        if (cached !== undefined) return cached;
+        let current = node;
+        let scanDepth = 0;
+        let result = false;
+        while (current && current.nodeType === 1 && scanDepth < 64) {
+          const chainStyle = win.getComputedStyle(current);
+          // Individual transform properties offset geometry exactly like
+          // `transform`, and `zoom` scales layout px, so they must be resolved
+          // as part of the chain.
+          if (
+            String(chainStyle.transform || "none") !== "none" ||
+            String(chainStyle.scale || "none") !== "none" ||
+            String(chainStyle.rotate || "none") !== "none" ||
+            String(chainStyle.translate || "none") !== "none" ||
+            String(chainStyle.zoom || "1") !== "1"
+          ) {
+            result = true;
+            break;
+          }
+          current = current.parentElement;
+          scanDepth += 1;
+        }
+        transformedChainCache.set(node, result);
+        return result;
+      };
+      // Nearest scroller wins: once a nearer ancestor scrolls on an axis, an
+      // outer clip cannot prove the section never paints on that axis.
+      let scrollsX = false;
+      let scrollsY = false;
+      // A scroll container between the section and a clip box can move the
+      // section through that box, so its current position proves nothing.
+      let scrolledBelow = false;
+      let left = rect.left;
+      let top = rect.top;
+      let right = rect.right;
+      let bottom = rect.bottom;
+      let current = el;
+      let depth = 0;
+      while (current && current.nodeType === 1 && depth < 64) {
+        const style = win.getComputedStyle(current);
+        if (current !== el && String(style.display || "") === "contents") {
+          // No box, so its opacity/clip/overflow cannot hide descendants.
+          current = current.parentElement;
+          depth += 1;
+          continue;
+        }
+        if (current === el && String(style.visibility || "visible") !== "visible") {
+          // visibility inherits, so an ancestor's hidden value is already
+          // reflected here unless a descendant overrides it and paints.
+          if (!paintsVisibleDescendant(el)) return false;
+        }
+        if (Number(style.opacity ?? 1) <= 0) return false;
+        // On the section itself content-visibility only skips its contents;
+        // its box, background and border still paint. Only ancestors hide it.
+        if (current !== el && String(style.contentVisibility || "") === "hidden") return false;
+        if (legacyClipEmpty(style)) return false;
+        const overflowX = String(style.overflowX || "");
+        const overflowY = String(style.overflowY || "");
+        // `hidden` still scrolls programmatically when its content overflows,
+        // so it is scroll-reachable; `clip` never scrolls. Any overflow counts:
+        // a single pixel is enough to expose a section with scrollTop.
+        const scrollableHiddenX =
+          overflowX === "hidden" &&
+          Number(current.scrollWidth || 0) > Number(current.clientWidth || 0);
+        const scrollableHiddenY =
+          overflowY === "hidden" &&
+          Number(current.scrollHeight || 0) > Number(current.clientHeight || 0);
+        const scrollableBox =
+          /auto|scroll|overlay/.test(overflowX) ||
+          /auto|scroll|overlay/.test(overflowY) ||
+          scrollableHiddenX ||
+          scrollableHiddenY;
+        const clipPath = String(style.clipPath || "none");
+        if (clipPath !== "none") {
+          const clipRect = current === el ? rect : current.getBoundingClientRect();
+          const chainTransformed = transformedChain(current);
+          // clip-path lengths and percentages resolve against the untransformed
+          // border box, so a transformed bounding rect would measure them
+          // wrongly (e.g. inset(60px) on a scale(.5) 200px box). An untransformed
+          // box's client rect is that border box, fractional size included;
+          // `offsetWidth` would round 200.4 down and fake an empty inset.
+          const layoutWidth = chainTransformed ? 0 : Number(clipRect.width || 0);
+          const layoutHeight = chainTransformed ? 0 : Number(clipRect.height || 0);
+          // A rectangular inset can be intersected exactly in client space
+          // only when nothing can move or scale the boxes since layout.
+          // Scrollable content can move through a fixed clip box, so the
+          // section's current position proves nothing there.
+          if (!chainTransformed && !scrollableBox && !scrolledBelow) {
+            const region = insetClipRegion(clipPath, clipRect);
+            if (region) {
+              left = Math.max(left, region.left);
+              right = Math.min(right, region.right);
+              top = Math.max(top, region.top);
+              bottom = Math.min(bottom, region.bottom);
+              if (!(right > left) || !(bottom > top)) return false;
+            }
+          }
+          // Under a transform only scale-invariant proofs survive; under none
+          // the exact fractional layout box decides.
+          if (chainTransformed) {
+            if (clipPathProvablyEmptyScaled(clipPath)) return false;
+          } else if (clipPathEmpty(clipPath, layoutWidth, layoutHeight)) {
+            return false;
+          }
+        }
+        // A scrolling box moves its content through any outer clip box.
+        if (scrollableBox) scrolledBelow = true;
+        if (current !== el) {
+          if (/auto|scroll|overlay/.test(overflowX) || scrollableHiddenX) scrollsX = true;
+          if (/auto|scroll|overlay/.test(overflowY) || scrollableHiddenY) scrollsY = true;
+          const clippedX = clippedOverflow(overflowX) && !scrollsX;
+          const clippedY = clippedOverflow(overflowY) && !scrollsY;
+          if (
+            (clippedX || clippedY) &&
+            String(style.display || "") !== "inline" &&
+            clipsFrom(current)
+          ) {
+            const box = current.getBoundingClientRect();
+            // Border widths are layout px. A transform anywhere in the chain
+            // scales them in client space, so subtracting them unscaled would
+            // over-clip; keep the whole border box there (an over-approximation
+            // is the only safe intersection without resolving the transform).
+            const borderless = transformedChain(current);
+            // overflow-clip-margin paints outside the clip box; Chromium
+            // reports it as a computed length (optionally with a visual box).
+            const clipMargin = (() => {
+              if (overflowX !== "clip" && overflowY !== "clip") return 0;
+              const raw = String(style.overflowClipMargin || "");
+              const match = /(-?\d*\.?\d+)px\s*$/.exec(raw);
+              return match ? Math.max(0, Number(match[1])) : 0;
+            })();
+            const marginX = overflowX === "clip" ? clipMargin : 0;
+            const marginY = overflowY === "clip" ? clipMargin : 0;
+            // A scaled margin cannot be measured in client px; retain instead.
+            if (clippedX && marginX > 0 && !borderless) {
+              left = Math.max(left, box.left + pxValue(style.borderLeftWidth) - marginX);
+              right = Math.min(right, box.right - pxValue(style.borderRightWidth) + marginX);
+            } else if (clippedX && marginX === 0) {
+              left = Math.max(left, box.left + (borderless ? 0 : pxValue(style.borderLeftWidth)));
+              right = Math.min(right, box.right - (borderless ? 0 : pxValue(style.borderRightWidth)));
+            }
+            if (clippedY && marginY > 0 && !borderless) {
+              top = Math.max(top, box.top + pxValue(style.borderTopWidth) - marginY);
+              bottom = Math.min(bottom, box.bottom - pxValue(style.borderBottomWidth) + marginY);
+            } else if (clippedY && marginY === 0) {
+              top = Math.max(top, box.top + (borderless ? 0 : pxValue(style.borderTopWidth)));
+              bottom = Math.min(bottom, box.bottom - (borderless ? 0 : pxValue(style.borderBottomWidth)));
+            }
+            if (!(right > left) || !(bottom > top)) return false;
+          }
+        }
+        current = current.parentElement;
+        depth += 1;
+      }
+      return true;
+    } catch {
+      // Unexpected style failure is not proof of nonvisual pixels.
+      return true;
+    }
+  };
+  /**
    * Effective visibility is browser hit-tested: the viewport-intersected rect
    * is sampled at up to nine points and the topmost element at each point
    * decides. Chromium already resolves transforms, containing blocks, overflow
@@ -419,7 +823,9 @@ export const ATLAS_SECTION_SCAN = function (hints: {
         heading,
         headingLevel,
         text: boundedText(el, 4_000, bounded),
-        visible: visibleNode(el),
+        // Drawing eligibility, not text accessibility: segmentation already
+        // excludes `visible:false` candidates.
+        visible: hasDrawablePixels(el, rect),
         articleNested:
           Boolean(closestWithin(el, "article", 12)) &&
           String(el.tagName || "").toLowerCase() !== "article",

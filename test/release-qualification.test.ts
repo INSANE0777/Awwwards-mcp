@@ -550,6 +550,46 @@ describe("release workflow ordering", () => {
       expect(workflow).toContain(gate);
     }
   });
+
+  it("requires Chromium under both environment spellings before any suite", () => {
+    expect(workflow).toContain("AWWWARDS_CHROMIUM_SMOKE: \"1\"");
+    expect(workflow).toContain("AWWARDS_CHROMIUM_SMOKE: \"1\"");
+    const install = workflow.indexOf("name: Install Chromium for required browser suites");
+    const preflight = workflow.indexOf("name: Assert Chromium launches");
+    const unit = workflow.indexOf("- run: npm test");
+    expect(install).toBeGreaterThan(-1);
+    expect(preflight).toBeGreaterThan(install);
+    expect(unit).toBeGreaterThan(preflight);
+    expect(workflow.slice(install, preflight)).toContain("npx playwright install chromium");
+    expect(workflow.slice(preflight, unit)).toContain("chromium.launch");
+  });
+
+  it("builds once before tests and runs both browser suites", () => {
+    const install = workflow.indexOf("name: Install Chromium for required browser suites");
+    const build = workflow.indexOf("- run: npm run build");
+    const unit = workflow.indexOf("- run: npm test");
+    const browser = workflow.indexOf("name: Real-Chromium fixture smoke");
+    expect(workflow.split("- run: npm run build").length - 1).toBe(1);
+    expect(build).toBeGreaterThan(install);
+    expect(unit).toBeGreaterThan(build);
+    expect(browser).toBeGreaterThan(unit);
+    expect(workflow.slice(browser, workflow.indexOf("name: Protocol smoke (Atlas off)"))).toContain(
+      "npm run test:browser",
+    );
+  });
+
+  it("runs the protocol smoke with Atlas off and on after the build", () => {
+    const build = workflow.indexOf("- run: npm run build");
+    const off = workflow.indexOf("name: Protocol smoke (Atlas off)");
+    const on = workflow.indexOf("name: Protocol smoke (Atlas on)");
+    expect(build).toBeGreaterThan(-1);
+    expect(off).toBeGreaterThan(build);
+    expect(on).toBeGreaterThan(off);
+    const onStep = workflow.slice(on, workflow.indexOf("name: Pack release artifact"));
+    expect(onStep).toContain('AWWWARDS_MCP_ATLAS: "1"');
+    expect(onStep).toContain("npm run protocol:smoke");
+    expect(workflow.slice(off, on)).toContain("npm run protocol:smoke");
+  });
 });
 
 describe("artifact-input qualification mode", () => {

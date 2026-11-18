@@ -161,7 +161,9 @@ export async function analyze_page_structure(ctx: HandlerContext, args: {
     if ("error" in structure) return { content: [text(structure.error)], isError: true };
     if (guard?.blocked()) return blockedByGuard(guard);
     const { finalUrl: landedUrl, ...structurePayload } = structure;
-    // Desktop default is byte-identical: no new keys unless compare is set.
+    // Desktop default returns the analyzer payload plus provenance. scrollMode
+    // is always present and note appears for canvas pages; compare adds only
+    // the mobile keys.
     if (args.compare !== "mobile") {
       return { content: [text(JSON.stringify({ ...structurePayload, provenance: captureProvenance(args.url, landedUrl ?? structure.url, viewport, `structure:${args.waitStrategy ?? "load"}`) }, null, 1))] };
     }
@@ -193,6 +195,10 @@ export async function analyze_page_structure(ctx: HandlerContext, args: {
       diff: diffBands(structure, mobile),
       provenance: captureProvenance(args.url, landedUrl ?? structure.url, viewport, `structure:${args.waitStrategy ?? "load"}`),
     };
+    // The mobile capture's own diagnosis travels beside mobileBands/diff.
+    if (mobile.scrollMode) payload.mobileScrollMode = mobile.scrollMode;
+    if (mobile.virtualRoot) payload.mobileVirtualRoot = mobile.virtualRoot;
+    if (mobile.note) payload.mobileNote = mobile.note;
     if (mobile.responsive) payload.responsive = mobile.responsive;
     return {
       content: [text(JSON.stringify(payload, null, 1))],

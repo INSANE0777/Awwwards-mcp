@@ -28,6 +28,7 @@ export interface AtlasScanSection {
   heading: string | null;
   headingLevel: number | null;
   text: string;
+  /** Has drawable pixels (no hidden chain, empty clip or zero-area clipping). */
   visible: boolean;
   articleNested: boolean;
   landmarkNested: boolean;

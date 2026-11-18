@@ -13,6 +13,7 @@
 // mapping. No console.* in this module: all user-visible output is returned.
 
 import { copyFile, lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { decodeHTMLAttribute } from "entities/decode";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 // Call-time-only cycle (house precedent: capture.ts/structure.ts) — the
 // vite/next emit dispatch below and emit-next's cssTo/nn/attributeBlocks both
@@ -246,7 +247,7 @@ const walkTopLevel = (body: string): RebuildSection[] => walkSpans(body);
 // emit section AND div band roots; keying on the c-N class, not the tag,
 // keeps every band). Fallback: top-level section/header/footer/main tags.
 export function parseRebuildSections(html: string): ParsedSections {
-  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
+  const body = bodyInner(html);
   const roots = walkTopLevel(body);
   const rebuild = roots.filter((r) => r.className !== "" && REBUILD_ROOT_CLASS.test(r.className));
   const generic = roots.filter((r) => GENERIC_CONTAINERS.has(r.tag));
@@ -293,7 +294,21 @@ const parseRules = (css: string): string[] => {
 const CSS_IMPORT_AT = /@import\s+(?:url\(\s*(["']?)[^)"']+\1\s*\)|"[^"]*"|'[^']*')\s*[^;]*;/gi;
 // Quote-aware: `content: "/* x */"` is data, not a comment. Backslash escapes
 // inside strings are preserved so an escaped quote cannot end the string early.
-const stripCssComments = (css: string): string => {
+// Title text is text, not markup: a captured title may contain ">", "<" or a
+// tag-like string, which a JSX/Astro template would parse as syntax. Escaping
+// to entities keeps the rendered text identical and existing entities intact.
+// `braces` also neutralizes `{`/`}` for Astro, where they start an expression.
+export const escapeTitleText = (text: string, braces = false): string => {
+  const out = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return braces ? out.replace(/\{/g, "&#123;").replace(/\}/g, "&#125;") : out;
+};
+
+export const escapeTitleTag = (tag: string, braces = false): string => {
+  const m = /^(<title\b[^>]*>)([\s\S]*?)(<\/title\s*>)$/i.exec(tag);
+  return m ? `${m[1]}${escapeTitleText(m[2] ?? "", braces)}${m[3]}` : tag;
+};
+
+export const stripCssComments = (css: string): string => {
   let out = "";
   let quote = "";
   for (let i = 0; i < css.length; i++) {
@@ -440,12 +455,16 @@ export const isLocalRef = (ref: string): boolean =>
 // scripts after the body opener are never misclassified as head scripts; with
 // neither marker nothing is confidently head.
 export const headBounds = (html: string): { start: number; end: number } => {
-  const open = /<head\b[^>]*>/i.exec(html);
-  const start = open ? open.index + open[0].length : 0;
-  const close = /<\/head\s*>/i.exec(html);
-  if (close) return { start, end: close.index };
-  const body = /<body\b[^>]*>/i.exec(html);
-  return { start, end: body ? body.index : start };
+  // Same parser as the document tags: a `<head>`/`</head>` inside a script,
+  // template or raw-text body is text, not document structure.
+  const open = documentTagSpan(html, "head");
+  const start = open ? open.end : 0;
+  const close = closeTagAt(html, "head", start);
+  if (close !== -1) return { start, end: close };
+  // No </head>: the head ends where the real body starts (document walk, so an
+  // attribute carrying "<body>" does not end it early).
+  const body = documentTagSpan(html, "body");
+  return { start, end: body ? body.start : start };
 };
 
 export function extractScripts(html: string): ExtractedScripts {
@@ -739,7 +758,10 @@ export async function copyAssets(html: string, srcDir: string, outDir: string, o
   return { copied, missing };
 }
 
-const bodyInner = (html: string): string => /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
+const bodyInner = (html: string): string => {
+  const { start, end } = bodyBounds(html);
+  return html.slice(start, end);
+};
 
 // All JS in document order, including scripts that sat inside a section. The
 // rehost loader runs this exact sequence; inline bodies keep their slots.
@@ -949,12 +971,227 @@ export function splitRehost(html: string): RehostSplit | null {
   };
 }
 
-// Offset-safe body inner bounds for emitters that need the body only.
+// Offset-safe body inner bounds for emitters that need the body only. The
+// opening tag comes from the document walk (attribute decoys cannot shift it).
 export const bodyBounds = (html: string): { start: number; end: number } => {
-  const open = /<body\b[^>]*>/i.exec(html);
-  const start = open ? open.index + open[0].length : 0;
-  const close = /<\/body\s*>/i.exec(html);
-  return { start, end: close ? close.index : html.length };
+  const open = documentTagSpan(html, "body");
+  if (!open) return { start: 0, end: html.length };
+  const close = closeTagAt(html, "body", open.end);
+  return { start: open.end, end: close === -1 ? html.length : close };
+};
+
+// Document-level attributes that survive conversion. The allowlist is the
+// contract: arbitrary HTML attributes are not a feature, and executable ones
+// (on*, javascript:/expression() in a style) never cross.
+const DOCUMENT_ATTRS = {
+  html: /^(?:lang|dir|class|id|style|data-[a-z0-9_.:-]+)$/,
+  body: /^(?:lang|dir|class|id|style|data-[a-z0-9_.:-]+|aria-[a-z-]+)$/,
+};
+const EXECUTABLE_STYLE = /expression\s*\(|javascript:/i;
+
+export interface DocumentAttrs {
+  html: Array<[string, string]>;
+  body: Array<[string, string]>;
+}
+
+// Quote-aware scan of one opening tag's attributes; the first duplicate wins,
+// matching a browser's duplicate-attribute rule.
+const scanTagAttrs = (openTag: string): Array<[string, string]> => {
+  const out: Array<[string, string]> = [];
+  const end = tagEnd(openTag, 0);
+  if (end === -1) return out;
+  const at = (i: number): string => openTag[i] ?? "";
+  let i = 1;
+  while (i < end && !/[\s/>]/.test(at(i))) i += 1;
+  while (i < end) {
+    while (i < end && (/[\s/]/.test(at(i)) || at(i) === ">")) i += 1;
+    let name = "";
+    while (i < end && !/[\s=>]/.test(at(i))) {
+      name += at(i);
+      i += 1;
+    }
+    if (name === "") {
+      i += 1;
+      continue;
+    }
+    while (i < end && /\s/.test(at(i))) i += 1;
+    let value = "";
+    if (at(i) === "=") {
+      i += 1;
+      while (i < end && /\s/.test(at(i))) i += 1;
+      const quote = at(i);
+      if (quote === '"' || quote === "'") {
+        i += 1;
+        while (i < end && at(i) !== quote) {
+          value += at(i);
+          i += 1;
+        }
+        i += 1;
+      } else {
+        while (i < end && !/[\s>]/.test(at(i))) {
+          value += at(i);
+          i += 1;
+        }
+      }
+    }
+    out.push([name.toLowerCase(), value]);
+  }
+  return out;
+};
+
+// Opening <html>/<body> tag, found by a sequential quote-aware tag walk:
+// every tag is consumed as a whole (tagEnd honours quoted attribute values), so
+// markup inside `data-x="…<body …>…"`, `<meta content="The <body> element">` or
+// any other attribute can never be mistaken for a document tag. Comments,
+// raw-text bodies (script/style/title/textarea/…) and opaque bodies
+// (noscript/template) are skipped whole. `plaintext` swallows the rest of the
+// document, so a document that starts one has no readable document tags.
+const RAW_TEXT_TAGS = new Set(["iframe", "noembed", "noframes", "plaintext", "script", "style", "textarea", "title", "xmp"]);
+const OPAQUE_BODY_TAGS = new Set(["noscript", "template"]);
+
+interface TagSpan {
+  name: string;
+  start: number; // index of "<"
+  end: number; // just past ">"
+  closing: boolean;
+}
+
+const tagSpanAt = (html: string, at: number): TagSpan | null => {
+  const gt = tagEnd(html, at);
+  if (gt === -1) return null;
+  const closing = html[at + 1] === "/";
+  const nameStart = closing ? at + 2 : at + 1;
+  const m = /^[a-zA-Z][^\s/>]*/.exec(html.slice(nameStart, nameStart + 80));
+  if (!m) return null;
+  return { name: m[0].toLowerCase(), start: at, end: gt + 1, closing };
+};
+
+// Elements whose start tag never nests: a duplicate `<body>`/`<head>` in body
+// text is ignored by browsers (the tag is dropped or treated as attributes), so
+// depth-counting it would push the body past its real end.
+const NON_NESTING_TAGS = new Set(["body", "head"]);
+
+// Index of the "<" that opens the close tag for `name`, or -1. Raw-text
+// elements end at their first close tag (their body is never parsed as tags);
+// other elements are depth-counted, skipping comments as they go.
+const closeTagAt = (html: string, name: string, from: number): number => {
+  if (RAW_TEXT_TAGS.has(name)) {
+    const re = new RegExp(`</${name}\\s*>`, "gi");
+    re.lastIndex = from;
+    const m = re.exec(html);
+    return m ? m.index : -1;
+  }
+  let depth = 0;
+  let i = from;
+  while (i < html.length) {
+    const lt = html.indexOf("<", i);
+    if (lt === -1) return -1;
+    if (html.startsWith("<!--", lt)) {
+      const end = html.indexOf("-->", lt + 4);
+      if (end === -1) return -1;
+      i = end + 3;
+      continue;
+    }
+    const span = tagSpanAt(html, lt);
+    if (!span) {
+      i = lt + 1;
+      continue;
+    }
+    if (span.name === name) {
+      if (span.closing) {
+        if (depth === 0) return span.start;
+        depth -= 1;
+      } else if (!NON_NESTING_TAGS.has(name)) {
+        depth += 1;
+      }
+    } else if (!span.closing && (RAW_TEXT_TAGS.has(span.name) || OPAQUE_BODY_TAGS.has(span.name))) {
+      // A "close" inside a script/style/template body is text, not a close tag.
+      const skip = closeTagAt(html, span.name, span.end);
+      if (skip === -1) return -1;
+      const gt = tagEnd(html, skip);
+      if (gt === -1) return -1;
+      i = gt + 1;
+      continue;
+    }
+    i = span.end;
+  }
+  return -1;
+};
+
+const documentTagSpan = (html: string, tag: string): TagSpan | null => {
+  let i = 0;
+  while (i < html.length) {
+    const lt = html.indexOf("<", i);
+    if (lt === -1) return null;
+    if (html.startsWith("<!--", lt)) {
+      const end = html.indexOf("-->", lt + 4);
+      if (end === -1) return null;
+      i = end + 3;
+      continue;
+    }
+    const lead = html[lt + 1] ?? "";
+    if (lead === "!" || lead === "?") {
+      const end = tagEnd(html, lt);
+      if (end === -1) return null;
+      i = end + 1;
+      continue;
+    }
+    const span = tagSpanAt(html, lt);
+    if (!span) {
+      i = lt + 1;
+      continue;
+    }
+    if (!span.closing) {
+      if (span.name === tag) return span;
+      if (span.name === "plaintext") return null;
+      if (RAW_TEXT_TAGS.has(span.name) || OPAQUE_BODY_TAGS.has(span.name)) {
+        const close = closeTagAt(html, span.name, span.end);
+        if (close === -1) return null;
+        const gt = tagEnd(html, close);
+        if (gt === -1) return null;
+        i = gt + 1;
+        continue;
+      }
+    }
+    i = span.end;
+  }
+  return null;
+};
+
+const documentOpenSource = (html: string, tag: "html" | "body"): string => {
+  const span = documentTagSpan(html, tag);
+  return span ? html.slice(span.start, span.end) : "";
+};
+
+export function readDocumentAttrs(html: string): DocumentAttrs {
+  const pick = (tag: "html" | "body"): Array<[string, string]> => {
+    const allowed = DOCUMENT_ATTRS[tag];
+    const out: Array<[string, string]> = [];
+    const seen = new Set<string>();
+    for (const [name, value] of scanTagAttrs(documentOpenSource(html, tag))) {
+      if (!allowed.test(name) || seen.has(name)) continue;
+      // Browser-equivalent decode (literal CR/CRLF is LF first) so a named
+      // reference like `javascript&colon;` is caught, not just numeric ones.
+      if (name === "style" && EXECUTABLE_STYLE.test(stripCssComments(decodeHTMLAttribute(value.replace(/\r\n?/g, "\n"))))) continue;
+      seen.add(name);
+      out.push([name, value]);
+    }
+    return out;
+  };
+  return { html: pick("html"), body: pick("body") };
+}
+
+// Captured values already carry their entity encoding; only the quote/angle
+// characters that would end the attribute or tag need escaping.
+export const escapeDocumentAttr = (value: string): string =>
+  value.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+// Opening tag for the HTML-source targets (vite/astro). An absent html lang
+// keeps the emitters' existing en fallback; an explicit one wins.
+const documentOpenTag = (html: string, tag: "html" | "body"): string => {
+  const pairs = readDocumentAttrs(html)[tag];
+  if (tag === "html" && !pairs.some(([name]) => name === "lang")) pairs.unshift(["lang", "en"]);
+  return `<${tag}${pairs.map(([name, value]) => ` ${name}="${escapeDocumentAttr(value)}"`).join("")}>`;
 };
 
 // Fallback when the section model cannot cover the body: h1/p-only pages have
@@ -1413,6 +1650,12 @@ const rehostHeadReplay = (rehost: RehostSplit, dir: string, astro: boolean, auth
     /<title\b[^>]*>[\s\S]*?<\/title\s*>|<meta\b[^>]*>|<link\b[^>]*>|<script\b[^>]*>[\s\S]*?<\/script\s*>/gi,
   )) {
     const tag = m[0];
+    if (astro && /^<title/i.test(tag)) {
+      // An astro template parses `<` and `{` in text as syntax; the title is
+      // data (same guard the JSX twin applies).
+      lines.push(escapeTitleTag(tag, true));
+      continue;
+    }
     if (/^<script/i.test(tag)) {
       const open = /^<script\b[^>]*>/i.exec(tag)?.[0] ?? "";
       if (JS_TYPES.has(attr(open, "type").toLowerCase())) {
@@ -1435,11 +1678,12 @@ const withRehostHead = (doc: string, head: string): string => {
 };
 
 // One ordered block at the end of the shell (the single loader for this page).
+// The real body close is found by the tag walk: a `</body>` inside a script or
+// template body would otherwise swallow the loader.
 const withLoader = (doc: string, block: string): string => {
   if (block === "") return doc;
-  return /<\/body\s*>/i.test(doc)
-    ? doc.replace(/<\/body\s*>/i, () => `${block}\n</body>`)
-    : `${doc}\n${block}\n`;
+  const at = closeTagAt(doc, "body", 0);
+  return at === -1 ? `${doc}\n${block}\n` : `${doc.slice(0, at)}${block}\n${doc.slice(at)}`;
 };
 
 const inlineShell = (rehost: RehostSplit): string => {
@@ -1523,6 +1767,10 @@ export function emitAstro(split: Split, outDir: string, name: string, motion?: M
     const bodyScripts = authored ? rehost.scripts.filter(keepAuthoredBodyScript) : rehost.scripts;
     const loader = bodyScripts.map(astroRehostLoaderTag).join("\n");
     const head = rehostHeadReplay(rehost, "scripts", true, authored);
+    // The shell is the captured document itself (a rehost transfers nothing):
+    // its own on* handlers and any other authored attribute stay as authored.
+    // Only reconstructed document tags (Next layout, legacy html templates) are
+    // filtered by readDocumentAttrs.
     const shell = authored ? withAstroPageMotion(rehost.shell, rehost.sections.length) : rehost.shell;
     add(
       "src/pages/index.astro",
@@ -1591,14 +1839,14 @@ ${authored ? astroMotionScript(i) : ""}`,
 ${imports.join("\n")}
 ---
 <!doctype html>
-<html lang="en">
+${documentOpenTag(split.html, "html")}
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${name}</title>
+    <title>${escapeTitleText(name, true)}</title>
 ${headTags.map((t) => indent(t, 4)).join("\n")}
   </head>
-  <body>
+  ${documentOpenTag(split.html, "body")}
 ${authored ? astroPageMotionScript() : ""}${sections.map((_, i) => `    <${nn(i)} />`).join("\n")}
 ${bodyTags ? `${indent(bodyTags, 4)}\n` : ""}${pageLevelScript}  </body>
 </html>
@@ -1713,6 +1961,10 @@ export default {
       .join("\n");
     add(
       "index.html",
+      // The shell is the captured document itself (a rehost transfers nothing):
+      // its own on* handlers and any other authored attribute stay as authored.
+      // Only reconstructed document tags (Next layout, legacy html template) are
+      // filtered by readDocumentAttrs.
       withLoader(
         withRehostHead(inlineShell(rehost), rehostHeadReplay(rehost, "src/scripts", false, authored)),
         loader,
@@ -1739,14 +1991,14 @@ export default {
   add(
     "index.html",
     `<!doctype html>
-<html lang="en">
+${documentOpenTag(split.html, "html")}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${name}</title>
 ${headTags.join("\n")}
 </head>
-<body>
+${documentOpenTag(split.html, "body")}
 ${body}
 ${bodyTags ? `${bodyTags}\n` : ""}<script type="module" src="/src/main.js"></script>
 </body>

@@ -38,16 +38,22 @@ function maxResponseBytes(env: NodeJS.ProcessEnv): number {
   return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : DEFAULT_MAX_RESPONSE_BYTES;
 }
 
+const SERIALIZATION_ERROR_MESSAGE = "Tool result could not be serialized.";
+
 // The full serialized result: text, inline image data and structuredContent.
 // isError and other result keys are part of it too, so no field can bypass the
 // ceiling by living outside `content`.
 function resultBytes(result: unknown): number {
-  if (!result || typeof result !== "object") return 0;
+  let serialized: string | undefined;
   try {
-    return Buffer.byteLength(JSON.stringify(result) ?? "", "utf8");
+    serialized = JSON.stringify(result);
   } catch {
-    return 0;
+    throw new Error(SERIALIZATION_ERROR_MESSAGE);
   }
+  // JSON.stringify returns undefined for values it cannot represent (for
+  // example a function). That is a failed measurement, not a zero-byte result.
+  if (serialized === undefined) throw new Error(SERIALIZATION_ERROR_MESSAGE);
+  return Buffer.byteLength(serialized, "utf8");
 }
 
 const note = (): string =>
@@ -82,16 +88,19 @@ export function registerGuarded(
       try {
         const result = await handler(...callArgs);
         const bytes = resultBytes(result);
-        if (bytes > limit && result && typeof result === "object") {
-          const record = result as Record<string, unknown>;
-          // A structured success cannot survive truncation: keep the notice
-          // text but drop the payload and mark the result as an error so the
-          // SDK's output-schema validation is skipped instead of failing on a
-          // missing structuredContent.
-          const { structuredContent } = record;
-          const wasError = record.isError === true || structuredContent !== undefined;
+        if (bytes > limit) {
+          // Truncation discards every original field. Always mark the
+          // replacement as an error so an unstructured payload that lost its
+          // evidence cannot pass as a successful result. isError also makes
+          // the SDK skip output-schema validation, which would otherwise fail
+          // on the missing structuredContent.
+          //
+          // The replacement is a fixed recovery envelope, not payload. It can
+          // exceed a deliberately tiny configured limit (a 10-byte limit
+          // cannot fit any JSON-RPC result); it is about 200 bytes and stays
+          // under 1 KiB for every registered tool name.
           return {
-            ...(wasError ? { isError: true } : {}),
+            isError: true,
             content: [
               {
                 type: "text",

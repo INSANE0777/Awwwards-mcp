@@ -42,6 +42,15 @@ describe("Atlas documentation", () => {
     }
   });
 
+  it("keeps the blocked qualification claim and disclaims stale reports", () => {
+    expect(ATLAS_DOC).toContain("**Full qualification for 1.21 is BLOCKED and currently FAILS**");
+    expect(ATLAS_DOC).toContain("`browser.atlas_capture` check expects published sections");
+    expect(ATLAS_DOC).toContain("**FAIL (1)**, not INCOMPLETE");
+    expect(ATLAS_DOC).toContain(
+      "stale `.qualification/installed-report.json` is not release evidence",
+    );
+  });
+
   it("documents every Atlas tool and its annotations", () => {
     for (const tool of TOOLS) expect(ATLAS_DOC).toContain(`\`${tool}\``);
 

@@ -1,6 +1,6 @@
 {
   "name": "awwwards-mcp",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "mcpName": "io.github.insane0777/awwwards-mcp",
   "description": "Awwwards design inspiration, screenshots, motion and scene evidence for AI agents.",
   "type": "module",
@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.4.0",
+    "entities": "9.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
