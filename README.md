@@ -672,15 +672,14 @@ Install them with the [`skills` CLI](https://skills.sh):
 npx skills add INSANE0777/awwwards-skills
 ```
 
-Documented pairing: **`awwwards-mcp@1.21.0` + [`skills-v2026.11.16`](https://github.com/INSANE0777/awwwards-skills/tree/skills-v2026.11.16)**.
-The tag exists independently. We checked the pairing manually on **2026-11-18**
+Documented pairing: **`awwwards-mcp@1.21.0` + [`skills-v2026.11.19`](https://github.com/INSANE0777/awwwards-skills/tree/skills-v2026.11.19)**.
+The tag exists independently. We checked the pairing manually on **2026-11-19**
 against that tag: all nine routing copies are byte-identical to this package's
 `test/fixtures/v2-routing.md`, the skills structural validator passes, and the
 1.21 release keeps the same **41 / 13 / 15** tool surface (**45 / 13 / 16** with
 `AWWWARDS_MCP_ATLAS=1`) as 1.20. This is a one-time manual catalog/routing check,
 not an automated cross-repo test or a replay of every skill workflow; rerun it
-before a later release changes either side. No external skills repository or
-website was edited or redeployed for this release.
+before a later release changes either side.
 
 The CLI detects your agents and lets you choose a project or user-level
 install, then links each skill into that agent's skills directory. Useful
