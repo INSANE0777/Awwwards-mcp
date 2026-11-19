@@ -23,7 +23,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -70,16 +70,34 @@ function isExecutableFile(path: string): boolean {
 }
 
 /**
+ * Split a Windows PATH into directories. Quotes protect semicolons in a
+ * directory name, and only fully qualified entries are usable: drive-relative
+ * forms such as `C:npm` resolve against the cwd.
+ */
+function windowsPathEntries(path: string): string[] {
+  const entries: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (const char of path) {
+    if (char === '"') quoted = !quoted;
+    else if (char === ";" && !quoted) {
+      entries.push(current);
+      current = "";
+    } else current += char;
+  }
+  entries.push(current);
+  return entries.filter((entry) =>
+    /^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/.test(entry),
+  );
+}
+
+/**
  * Resolve npm.cmd through PATH only. A bare `npm` handed to cmd.exe would be
  * searched in the inherited working directory first, so a project-local
  * npm.cmd could run instead of the installed one.
  */
 function findNpmOnPath(): string | null {
-  for (const entry of (process.env.PATH || "").split(delimiter)) {
-    // Windows PATH entries may be quoted; empty and relative entries resolve
-    // against the cwd, so never use those.
-    const dir = entry.replace(/^"(.*)"$/, "$1");
-    if (!dir || !isAbsolute(dir)) continue;
+  for (const dir of windowsPathEntries(process.env.PATH || "")) {
     const candidate = join(dir, "npm.cmd");
     if (isRegularFile(candidate)) return candidate;
   }
@@ -274,27 +292,42 @@ export function selfUpdateCommand(
   args: string[];
   shell: boolean;
   windowsVerbatimArguments?: boolean;
+  cwd?: string;
   env?: NodeJS.ProcessEnv;
 } | null {
   if (!isSafeVersion(version)) return null;
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-    const sibling = join(dirname(execPath), "npm.cmd");
+    const nodeDir = dirname(execPath);
+    const sibling = join(nodeDir, "npm.cmd");
     // Prefer the Node-adjacent shim, then PATH; never a bare npm command.
     const npmCmd = isRegularFile(sibling) ? sibling : findNpmOnPath();
     if (!npmCmd) return null;
+    const basePath = process.env.PATH || "";
     return {
       cmd: join(systemRoot, "System32", "cmd.exe"),
       args: [
         "/d",
         "/s",
+        "/v:off",
         "/c",
-        `""${npmCmd}" install -g awwwards-mcp@${version}"`,
+        // The shim path travels through the child environment because cmd.exe
+        // expands %NAME% text inside a literal path, and /v:off keeps `!`
+        // literal even when the host enables delayed expansion.
+        `""%NPM_CMD%" install -g awwwards-mcp@${version}"`,
       ],
       shell: false,
       // Without verbatim quoting Node adds another quote layer and cmd.exe
       // exits 1 before running npm, so the old spawn silently did nothing.
       windowsVerbatimArguments: true,
+      // A PATH-selected shim may call bare `node`; run next to the running
+      // node and put that directory first so neither resolves via the cwd.
+      cwd: nodeDir,
+      env: {
+        ...process.env,
+        NPM_CMD: npmCmd,
+        PATH: [nodeDir, basePath].filter(Boolean).join(";"),
+      },
     };
   }
   // GUI-launched agents often have a minimal PATH that omits nvm/Homebrew
@@ -329,6 +362,7 @@ export function startSelfUpdate(version: string): ReturnType<typeof spawn> | nul
         shell: command.shell,
         windowsHide: true,
         windowsVerbatimArguments: command.windowsVerbatimArguments,
+        cwd: command.cwd,
         env: command.env,
       },
     );

@@ -83,12 +83,16 @@ describe("selfUpdateCommand", () => {
     const npmCmd = join(dir, "npm.cmd");
     writeFileSync(npmCmd, "");
     try {
-      expect(selfUpdateCommand("1.2.3", "win32", execPath)).toEqual({
+      const command = selfUpdateCommand("1.2.3", "win32", execPath);
+      expect(command).toMatchObject({
         cmd: join(root, "System32", "cmd.exe"),
-        args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
+        args: ["/d", "/s", "/v:off", "/c", `""%NPM_CMD%" install -g awwwards-mcp@1.2.3"`],
         shell: false,
         windowsVerbatimArguments: true,
+        cwd: dir,
       });
+      expect(command?.env?.NPM_CMD).toBe(npmCmd);
+      expect(command?.env?.PATH?.split(";")[0]).toBe(dir);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -162,47 +166,81 @@ describe("selfUpdateCommand", () => {
     },
   );
 
-  it("resolves a missing sibling npm.cmd from absolute PATH entries only", () => {
-    const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-    const pathDir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-path-"));
-    const missing = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-missing-"));
-    const npmCmd = join(pathDir, "npm.cmd");
-    const originalPath = process.env.PATH;
-    const missingNode = join(missing, "node.exe");
-    writeFileSync(npmCmd, "");
-    try {
-      process.env.PATH = pathDir;
+  it.skipIf(process.platform !== "win32")(
+    "resolves a missing sibling npm.cmd from fully qualified Windows PATH entries",
+    () => {
+      const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+      const pathDir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-path-"));
+      const quotedDir = mkdtempSync(join(tmpdir(), "awwwards;quoted-"));
+      const otherDir = mkdtempSync(join(tmpdir(), "awwwards-other-"));
+      const missing = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-missing-"));
+      const npmCmd = join(pathDir, "npm.cmd");
+      const quotedNpmCmd = join(quotedDir, "npm.cmd");
+      const originalPath = process.env.PATH;
+      const missingNode = join(missing, "node.exe");
+      writeFileSync(npmCmd, "");
+      writeFileSync(quotedNpmCmd, "");
       const fallback = {
         cmd: join(root, "System32", "cmd.exe"),
-        args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
+        args: ["/d", "/s", "/v:off", "/c", `""%NPM_CMD%" install -g awwwards-mcp@1.2.3"`],
         shell: false,
         windowsVerbatimArguments: true,
       };
-      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toEqual(fallback);
-      const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-dir-"));
-      mkdirSync(join(dir, "npm.cmd"));
       try {
-        expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toEqual(fallback);
+        process.env.PATH = pathDir;
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toMatchObject({
+          ...fallback,
+          env: { NPM_CMD: npmCmd },
+        });
+        const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-dir-"));
+        mkdirSync(join(dir, "npm.cmd"));
+        try {
+          expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toMatchObject({
+            ...fallback,
+            env: { NPM_CMD: npmCmd },
+          });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+
+        // A quoted entry containing `;` is one directory, not two.
+        process.env.PATH = `"${quotedDir}"`;
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toMatchObject({
+          ...fallback,
+          env: { NPM_CMD: quotedNpmCmd },
+        });
+
+        // Ordinary quoted entries, with an earlier directory that has no shim.
+        process.env.PATH = `"${otherDir}";"${pathDir}"`;
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toMatchObject({
+          ...fallback,
+          env: { NPM_CMD: npmCmd },
+        });
+
+        // Drive-relative entries resolve against the cwd; skip them.
+        process.env.PATH = `C:npm;${pathDir}`;
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toMatchObject({
+          ...fallback,
+          env: { NPM_CMD: npmCmd },
+        });
+        process.env.PATH = "C:npm";
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
+
+        // Empty and relative PATH entries resolve against the cwd; skip them.
+        process.env.PATH = `.${delimiter}${delimiter}`;
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
+        delete process.env.PATH;
+        expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        rmSync(pathDir, { recursive: true, force: true });
+        rmSync(quotedDir, { recursive: true, force: true });
+        rmSync(otherDir, { recursive: true, force: true });
+        rmSync(missing, { recursive: true, force: true });
       }
-
-      // Quoted entries are common on Windows and still absolute.
-      process.env.PATH = `"${pathDir}"`;
-      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toEqual(fallback);
-
-      // Empty and relative PATH entries resolve against the cwd; skip them.
-      process.env.PATH = `.${delimiter}${delimiter}`;
-      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
-      delete process.env.PATH;
-      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
-    } finally {
-      if (originalPath === undefined) delete process.env.PATH;
-      else process.env.PATH = originalPath;
-      rmSync(pathDir, { recursive: true, force: true });
-      rmSync(missing, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it("rejects version strings that could be shell syntax", () => {
     expect(selfUpdateCommand("1.2.3 && calc", "win32")).toBeNull();
@@ -368,6 +406,11 @@ describe("selfUpdateCommand", () => {
           "install -g awwwards-mcp@1.2.3",
         );
         expect(existsSync(join(fallback, "fallback.log"))).toBe(false);
+        const options = vi.mocked(spawn).mock.calls.at(-1)?.[2] as
+          | { cwd?: string; env?: NodeJS.ProcessEnv }
+          | undefined;
+        expect(options?.cwd).toBe(dir);
+        expect(options?.env?.PATH?.split(";")[0]).toBe(dir);
       } finally {
         process.execPath = nodeExecPath;
         vi.unstubAllEnvs();
@@ -375,6 +418,92 @@ describe("selfUpdateCommand", () => {
       }
     },
     15000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "runs a PATH npm.cmd from a directory containing % and !",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "awwwards %PATH% !shim-"));
+      const missing = mkdtempSync(join(tmpdir(), "awwwards missing node-"));
+      try {
+        writeFileSync(
+          join(dir, "npm.cmd"),
+          '@echo off\r\necho %* > "%~dp0args.log"\r\nexit /b 0\r\n',
+        );
+        vi.stubEnv("PATH", `"${dir}"`);
+        process.execPath = join(missing, "node.exe");
+        const child = startSelfUpdate("1.2.3");
+        expect(child).not.toBeNull();
+        if (!child) return;
+        expect(await once(child, "exit")).toEqual([0, null]);
+        expect(readFileSync(join(dir, "args.log"), "utf8")).toContain(
+          "install -g awwwards-mcp@1.2.3",
+        );
+      } finally {
+        process.execPath = nodeExecPath;
+        vi.unstubAllEnvs();
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(missing, { recursive: true, force: true });
+      }
+    },
+    15000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "runs bare node from the controlled cwd, not the caller's working directory",
+    async () => {
+      const nodeDir = mkdtempSync(join(tmpdir(), "awwwards-node-dir-"));
+      const cwdDir = mkdtempSync(join(tmpdir(), "awwwards-node-cwd-"));
+      try {
+        writeFileSync(
+          join(nodeDir, "node.cmd"),
+          '@echo off\r\necho node > "%~dp0node-ran.log"\r\nexit /b 0\r\n',
+        );
+        writeFileSync(
+          join(nodeDir, "npm.cmd"),
+          '@echo off\r\ncall node --version\r\nexit /b 0\r\n',
+        );
+        writeFileSync(
+          join(cwdDir, "node.cmd"),
+          '@echo off\r\necho cwd > "%~dp0cwd-node.log"\r\nexit /b 0\r\n',
+        );
+        const script = `
+          import { once } from "node:events";
+          process.execPath = process.env.FIXTURE_NODE;
+          const { startSelfUpdate } = await import(${JSON.stringify(
+            new URL("../src/version-check.ts", import.meta.url).href,
+          )});
+          const timer = setTimeout(() => process.exit(3), 10000);
+          const child = startSelfUpdate("1.2.3");
+          if (!child) process.exit(2);
+          const [code] = await once(child, "exit");
+          clearTimeout(timer);
+          process.exit(code ?? 1);
+        `;
+        const { spawn: spawnNode } =
+          await vi.importActual<typeof import("node:child_process")>("node:child_process");
+        const worker = spawnNode(
+          nodeExecPath,
+          ["--experimental-strip-types", "--input-type=module", "--eval", script],
+          {
+            cwd: cwdDir,
+            env: { ...process.env, PATH: nodeDir, FIXTURE_NODE: join(nodeDir, "node.exe") },
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 15000,
+          },
+        );
+        const stderr: Buffer[] = [];
+        worker.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+        const [code] = await once(worker, "close");
+        expect(code, Buffer.concat(stderr).toString()).toBe(0);
+        expect(readFileSync(join(nodeDir, "node-ran.log"), "utf8")).toContain("node");
+        expect(existsSync(join(cwdDir, "cwd-node.log"))).toBe(false);
+      } finally {
+        rmSync(nodeDir, { recursive: true, force: true });
+        rmSync(cwdDir, { recursive: true, force: true });
+      }
+    },
+    20000,
   );
 });
 
@@ -496,7 +625,7 @@ describe("checkForUpdate", () => {
     expect(fakeSpawn).toHaveBeenLastCalledWith(
       expect.any(String),
       process.platform === "win32"
-        ? ["/d", "/s", "/c", `""${join(dir, "npm.cmd")}" install -g awwwards-mcp@2.1.0-rc.1+build.02"`]
+        ? ["/d", "/s", "/v:off", "/c", `""%NPM_CMD%" install -g awwwards-mcp@2.1.0-rc.1+build.02"`]
         : ["install", "-g", "awwwards-mcp@2.1.0-rc.1+build.02"],
       expect.any(Object),
     );
