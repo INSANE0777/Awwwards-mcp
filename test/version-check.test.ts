@@ -8,7 +8,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -135,10 +134,40 @@ describe("selfUpdateCommand", () => {
     }
   });
 
+  it("falls back to PATH when the sibling npm is not a file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-dir-"));
+    mkdirSync(join(dir, "npm"));
+    try {
+      expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))?.cmd).toBe("npm");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "falls back to PATH when the sibling npm is not executable",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-mode-"));
+      writeFileSync(join(dir, "npm"), "", { mode: 0o644 });
+      try {
+        expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))?.cmd).toBe("npm");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("fails closed when npm.cmd is not beside the running Node binary", () => {
     expect(
       selfUpdateCommand("1.2.3", "win32", join(tmpdir(), "missing-node", "node.exe")),
     ).toBeNull();
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-dir-"));
+    mkdirSync(join(dir, "npm.cmd"));
+    try {
+      expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("rejects version strings that could be shell syntax", () => {
@@ -325,7 +354,7 @@ describe("checkForUpdate", () => {
     expect(notices()).not.toContain("attempting to install");
   });
 
-  it("refreshes checkedAt when a claim already exists and when the latest changes", async () => {
+  it("refreshes checkedAt and keeps a claim across days", async () => {
     writeFileSync(statePath, JSON.stringify({ checkedAt: now, latest }));
     start();
     expect(fakeSpawn).toHaveBeenCalledOnce();
@@ -333,9 +362,6 @@ describe("checkForUpdate", () => {
 
     const claimFiles = readdirSync(dir).filter((name) => name.startsWith("version-check.json.auto-"));
     expect(claimFiles).toHaveLength(1);
-    // Startup must never reclaim the same day by treating an old file as stale.
-    const earlier = new Date(now - 10 * 60 * 1000);
-    utimesSync(join(dir, claimFiles[0]), earlier, earlier);
     writeFileSync(statePath, JSON.stringify({ checkedAt: now - day, latest }));
     start();
     await drainRefresh();
@@ -362,11 +388,26 @@ describe("checkForUpdate", () => {
 
     vi.mocked(Date.now).mockReturnValue(now + day / 2);
     start();
-    expect(fakeSpawn).toHaveBeenCalledTimes(3);
+    expect(fakeSpawn).toHaveBeenCalledTimes(2);
     expect(fetchRegistry).toHaveBeenCalledTimes(2);
   });
 
-  it("honors a legacy attempt on refresh and allows a new claim the next UTC day", async () => {
+  it("treats build metadata as the same npm target", async () => {
+    writeFileSync(statePath, JSON.stringify({ checkedAt: now, latest }));
+    start();
+    expect(fakeSpawn).toHaveBeenCalledOnce();
+
+    vi.mocked(Date.now).mockReturnValue(now + 1);
+    writeFileSync(statePath, JSON.stringify({ checkedAt: now - day, latest: "2.0.0+new" }));
+    fetchRegistry.mockResolvedValue(registryResponse("2.0.0+new"));
+    start();
+    await drainRefresh();
+    expect(checkedState()).toEqual({ checkedAt: now + 1, latest: "2.0.0+new" });
+    expect(fakeSpawn).toHaveBeenCalledOnce();
+    expect(notices()).toContain("already reserved");
+  });
+
+  it("honors a legacy attempt and never reclaims the same version", async () => {
     writeFileSync(statePath, JSON.stringify({
       checkedAt: now - day, latest, autoAttemptedVersion: latest, autoAttemptedAt: now - 1,
     }));
@@ -382,7 +423,7 @@ describe("checkForUpdate", () => {
     vi.mocked(Date.now).mockReturnValue(now + day / 2);
     start();
     expect(fetchRegistry).toHaveBeenCalledOnce();
-    expect(fakeSpawn).toHaveBeenCalledOnce();
+    expect(fakeSpawn).not.toHaveBeenCalled();
   });
 
   it("reports a busy cache without reporting a launch or an existing claim", async () => {

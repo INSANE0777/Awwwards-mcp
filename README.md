@@ -377,10 +377,10 @@ stderr notice when a newer `awwwards-mcp` exists (stdout stays clean for the
 JSON-RPC channel — your agent sees the notice as a log line). Set
 `AWWWARDS_AUTO_UPDATE=1` in the server's `env` to opt into background
 self-update of the **global npm copy**. Startups sharing a cache directory
-reserve one attempt per version per UTC day, even if the launch fails.
-Restart your agent after installation to load the update. Update `npx` caches
-and local project installs separately. A successful registry check is cached
-for 24 hours, and serving never waits on the check.
+reserve **one automatic attempt per version** (build metadata ignored), even
+if the launch fails. Restart your agent after installation to load the update.
+Update `npx` caches and local project installs separately. A successful
+registry check is cached for 24 hours, and serving never waits on the check.
 
 > **`npx` is the core, no-browser path.** `npx -y awwwards-mcp` runs the
 > package from an isolated cache that does not contain Playwright or

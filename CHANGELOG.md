@@ -10,8 +10,8 @@
 - Windows background self-update now passes `windowsVerbatimArguments: true`, so `cmd.exe` reaches `npm.cmd` instead of exiting 1 before npm runs. The old spawn failed silently while the notice claimed an install was in progress.
 - The launch notice appears after the child spawns. Startup failures and non-zero exits report the manual `npm install -g` fallback.
 - macOS and Linux prefer the `npm` next to the running `node` and put that directory first on the child's `PATH`, keeping the system default when `PATH` is unset; this covers GUI-launched agents with a minimal PATH and npm's `#!/usr/bin/env node` shebang.
-- Concurrent startups reserve one opt-in attempt per version per UTC day through an exclusive claim file. Claims survive registry-cache refreshes, including opt-out refreshes, and subsequent startups report an existing reservation or an unavailable cache.
-- Successful registry refreshes renew the 24-hour cache independently of the launch outcome. Fresh and cached versions must be valid SemVer before they can appear in a notice or install command.
+- Concurrent startups reserve one opt-in attempt per canonical version through an exclusive claim file, so a midnight boundary or a paused process cannot launch the same npm target twice. Build metadata does not create a second claim. Claims survive registry-cache refreshes, including opt-out refreshes, and subsequent startups report an existing reservation or an unavailable cache. A failed launch consumes that version's reservation.
+- Successful registry refreshes renew the 24-hour cache independently of the launch outcome, with a bounded retry when Windows briefly blocks replacing the state file. Fresh and cached versions must be valid SemVer before they can appear in a notice or install command. A sibling `npm` is used only when it is a regular executable file.
 - Background self-update still updates the global npm copy only; `npx` and local project installs must be updated themselves.
 
 ## v1.21.0 - 2026-11-18

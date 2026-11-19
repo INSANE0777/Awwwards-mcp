@@ -10,12 +10,15 @@
 // restart their agent; without the env var, the notice just tells the agent.
 
 import {
+  accessSync,
   closeSync,
+  constants,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -41,6 +44,29 @@ export function isSafeVersion(value: unknown): value is string {
   return match !== null
     && match.slice(1, 4).every((part) => Number.isSafeInteger(Number(part)))
     && !match[4]?.split(".").some((id) => /^0\d+$/.test(id));
+}
+
+/** npm resolves build metadata to the same package version. */
+export function canonicalVersion(version: string): string {
+  return version.split("+", 1)[0];
+}
+
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isExecutableFile(path: string): boolean {
+  if (!isRegularFile(path)) return false;
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function parseVersion(v: string): [number, number, number] {
@@ -86,16 +112,38 @@ function readState(): CheckState | null {
 function writeState(state: CheckState): void {
   const path = stateFile();
   const temp = `${path}.${randomUUID()}.tmp`;
+  const payload = JSON.stringify(state);
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    writeFileSync(temp, JSON.stringify(state), { mode: 0o600 });
-    renameSync(temp, path);
   } catch {
+    return;
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      unlinkSync(temp);
+      writeFileSync(temp, payload, { mode: 0o600 });
+      renameSync(temp, path);
+      return;
     } catch {
-      // Cache writes are best-effort.
+      // A reader on Windows can briefly block replacement; retry, then write
+      // in place if the sharing mode allows it.
+      if (attempt < 2) {
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        } catch {
+          // no shared memory; continue immediately
+        }
+      }
     }
+  }
+  try {
+    writeFileSync(path, payload, { mode: 0o600 });
+  } catch {
+    // Cache writes are best-effort; the claim file still gates launches.
+  }
+  try {
+    unlinkSync(temp);
+  } catch {
+    // already renamed or never written
   }
 }
 
@@ -116,17 +164,16 @@ export function buildUpdateNotice(
 }
 
 function claimAutoAttempt(version: string, state: CheckState | null): AutoClaim {
-  const day = Math.floor(Date.now() / CHECK_INTERVAL_MS);
+  const canonical = canonicalVersion(version);
   if (
-    state?.autoAttemptedVersion === version &&
-    typeof state.autoAttemptedAt === "number" &&
-    Math.floor(state.autoAttemptedAt / CHECK_INTERVAL_MS) === day
+    isSafeVersion(state?.autoAttemptedVersion) &&
+    canonicalVersion(state.autoAttemptedVersion) === canonical
   ) {
     return "already-claimed";
   }
 
-  const versionHash = createHash("sha256").update(version).digest("hex");
-  const path = `${stateFile()}.auto-${day}-${versionHash}`;
+  const versionHash = createHash("sha256").update(canonical).digest("hex");
+  const path = `${stateFile()}.auto-${versionHash}`;
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   } catch {
@@ -221,7 +268,7 @@ export function selfUpdateCommand(
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
     const npmCmd = join(dirname(execPath), "npm.cmd");
-    if (!existsSync(npmCmd)) return null;
+    if (!isRegularFile(npmCmd)) return null;
     return {
       cmd: join(systemRoot, "System32", "cmd.exe"),
       args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@${version}"`],
@@ -240,7 +287,7 @@ export function selfUpdateCommand(
   const sibling = join(nodeDir, "npm");
   const basePath = process.env.PATH || "/usr/bin:/bin";
   return {
-    cmd: existsSync(sibling) ? sibling : "npm",
+    cmd: isExecutableFile(sibling) ? sibling : "npm",
     args: ["install", "-g", `awwwards-mcp@${version}`],
     shell: false,
     env: {
