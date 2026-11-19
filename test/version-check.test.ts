@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildUpdateNotice,
@@ -48,13 +55,17 @@ describe("selfUpdateCommand", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-    expect(
-      selfUpdateCommand("1.2.3", "linux", join(tmpdir(), "missing-node", "node")),
-    ).toEqual({
+    const missingExecPath = join(tmpdir(), "missing-node", "node");
+    expect(selfUpdateCommand("1.2.3", "linux", missingExecPath)).toMatchObject({
       cmd: "npm",
       args: ["install", "-g", "awwwards-mcp@1.2.3"],
       shell: false,
     });
+    expect(
+      selfUpdateCommand("1.2.3", "linux", missingExecPath)?.env?.PATH?.split(
+        delimiter,
+      )[0],
+    ).toBe(join(tmpdir(), "missing-node"));
   });
 
   it("prefers the npm next to node when PATH may be minimal", () => {
@@ -62,11 +73,16 @@ describe("selfUpdateCommand", () => {
     const npm = join(dir, "npm");
     writeFileSync(npm, "");
     try {
-      expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))).toEqual({
+      expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))).toMatchObject({
         cmd: npm,
         args: ["install", "-g", "awwwards-mcp@1.2.3"],
         shell: false,
       });
+      expect(
+        selfUpdateCommand("1.2.3", "linux", join(dir, "node"))?.env?.PATH?.split(
+          delimiter,
+        )[0],
+      ).toBe(dir);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -89,7 +105,10 @@ describe("selfUpdateCommand", () => {
     "actually runs the npm next to node on macOS and Linux",
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "awwwards-update-posix-"));
+      const fallback = join(dir, "fallback");
+      mkdirSync(fallback);
       const originalExecPath = process.execPath;
+      const originalPath = process.env.PATH;
       try {
         writeFileSync(join(dir, "node"), "");
         writeFileSync(
@@ -97,17 +116,34 @@ describe("selfUpdateCommand", () => {
           '#!/bin/sh\nprintf "%s\\n" "$*" > "$(dirname "$0")/args.log"\n',
           { mode: 0o755 },
         );
+        // If the sibling preference disappears, resolve this harmless shim
+        // instead of the host's real npm and fail on its marker log.
+        writeFileSync(
+          join(fallback, "npm"),
+          '#!/bin/sh\nprintf "%s\\n" "$*" > "$(dirname "$0")/fallback.log"\n',
+          { mode: 0o755 },
+        );
+        process.env.PATH = fallback;
         process.execPath = join(dir, "node");
         expect(startSelfUpdate("1.2.3")).toBe(true);
         const logPath = join(dir, "args.log");
+        const fallbackLogPath = join(fallback, "fallback.log");
         const deadline = Date.now() + 8000;
-        while (!existsSync(logPath) && Date.now() < deadline) {
+        let log = "";
+        while (Date.now() < deadline) {
+          if (existsSync(logPath)) {
+            log = readFileSync(logPath, "utf8");
+            if (log.includes("install -g awwwards-mcp@1.2.3")) break;
+          }
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        expect(existsSync(logPath)).toBe(true);
-        expect(readFileSync(logPath, "utf8")).toContain("install -g awwwards-mcp@1.2.3");
+        expect(log).toContain("install -g awwwards-mcp@1.2.3");
+        expect(existsSync(fallbackLogPath)).toBe(false);
+        await new Promise((resolve) => setTimeout(resolve, 100));
       } finally {
         process.execPath = originalExecPath;
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
         rmSync(dir, { recursive: true, force: true });
       }
     },
@@ -129,11 +165,16 @@ describe("selfUpdateCommand", () => {
         expect(startSelfUpdate("1.2.3")).toBe(true);
         const logPath = join(dir, "args.log");
         const deadline = Date.now() + 8000;
-        while (!existsSync(logPath) && Date.now() < deadline) {
+        let log = "";
+        while (Date.now() < deadline) {
+          if (existsSync(logPath)) {
+            log = readFileSync(logPath, "utf8");
+            if (log.includes("install -g awwwards-mcp@1.2.3")) break;
+          }
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        expect(existsSync(logPath)).toBe(true);
-        expect(readFileSync(logPath, "utf8")).toContain("install -g awwwards-mcp@1.2.3");
+        expect(log).toContain("install -g awwwards-mcp@1.2.3");
+        await new Promise((resolve) => setTimeout(resolve, 100));
       } finally {
         process.execPath = originalExecPath;
         rmSync(dir, { recursive: true, force: true });
@@ -154,6 +195,12 @@ describe("buildUpdateNotice", () => {
   it("mentions the restart step when auto-update is enabled", () => {
     const notice = buildUpdateNotice("1.0.0", "1.1.0", true);
     expect(notice).toMatch(/restart your agent/i);
+  });
+
+  it("does not claim a new attempt when this interval already tried", () => {
+    const notice = buildUpdateNotice("1.0.0", "1.1.0", true, false);
+    expect(notice).toContain("already made");
+    expect(notice).not.toContain("attempting to install");
   });
 
   it("returns null when running the latest or newer", () => {

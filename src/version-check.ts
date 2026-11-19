@@ -10,7 +10,7 @@
 // restart their agent; without the env var, the notice just tells the agent.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -32,7 +32,12 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-type CheckState = { checkedAt: number; latest?: string };
+type CheckState = {
+  checkedAt: number;
+  latest?: string;
+  autoAttemptedVersion?: string;
+  autoAttemptedAt?: number;
+};
 
 function stateFile(): string {
   const cacheRoot =
@@ -62,12 +67,15 @@ export function buildUpdateNotice(
   current: string,
   latest: string,
   autoUpdateEnabled: boolean,
+  willAttempt = autoUpdateEnabled,
 ): string | null {
   if (compareVersions(latest, current) <= 0) return null;
   const lines = [
     `awwwards-mcp: update available — v${latest} (running v${current}).`,
     autoUpdateEnabled
-      ? `awwwards-mcp: auto-update is enabled; attempting to install v${latest} in the background. Restart your agent after it finishes.`
+      ? willAttempt
+        ? `awwwards-mcp: auto-update is enabled; attempting to install v${latest} in the background. Restart your agent after it finishes.`
+        : `awwwards-mcp: an auto-update attempt for v${latest} was already made; restart if it installed, otherwise run \`npm install -g awwwards-mcp@latest\`.`
       : `awwwards-mcp: update with \`npm install -g awwwards-mcp@latest\` (or clear your npx cache), or set AWWWARDS_AUTO_UPDATE=1 to self-update on startup.`,
   ];
   return lines.join("\n");
@@ -83,10 +91,13 @@ export function checkForUpdate(currentVersion: string): void {
   // No: state gates the fetch itself, so a fresh install always has a shot.
   const state = readState();
   if (state && Date.now() - state.checkedAt < CHECK_INTERVAL_MS) {
-    // within the interval: reuse the known latest to (re)warn without fetching
+    // within the interval: reuse the known latest and, when opt-in was enabled
+    // after the check, still make the one attempt this interval allows.
     if (state.latest) {
-      const notice = buildUpdateNotice(currentVersion, state.latest, auto);
+      const willAttempt = auto && state.autoAttemptedVersion !== state.latest;
+      const notice = buildUpdateNotice(currentVersion, state.latest, auto, willAttempt);
       if (notice) console.error(notice);
+      if (notice && willAttempt) attemptAutoUpdate(state.latest, state);
     }
     return;
   }
@@ -99,19 +110,30 @@ export function checkForUpdate(currentVersion: string): void {
       });
       if (!res.ok) return; // unpublished / registry hiccup → silent
       const data = (await res.json()) as { version?: string };
-      if (!data?.version) return;
-      writeState({ checkedAt: Date.now(), latest: data.version });
-      const notice = buildUpdateNotice(currentVersion, data.version, auto);
+      if (!data?.version || !SAFE_VERSION.test(data.version)) return;
+      const next: CheckState = { checkedAt: Date.now(), latest: data.version };
+      writeState(next);
+      const notice = buildUpdateNotice(currentVersion, data.version, auto, auto);
       if (notice) console.error(notice);
-      if (notice && auto && !startSelfUpdate(data.version)) {
-        console.error(
-          `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${data.version}\``,
-        );
-      }
+      if (notice && auto) attemptAutoUpdate(data.version, next);
     } catch {
       // offline / timeout / JSON garbage — never surface, never block
     }
   })();
+}
+
+function attemptAutoUpdate(version: string, state: CheckState): void {
+  if (startSelfUpdate(version)) {
+    writeState({
+      ...state,
+      autoAttemptedVersion: version,
+      autoAttemptedAt: Date.now(),
+    });
+    return;
+  }
+  console.error(
+    `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${version}\``,
+  );
 }
 
 // npm/npx are .cmd shims on Windows. Spawning npm.cmd with shell:true emits
@@ -124,7 +146,13 @@ export function selfUpdateCommand(
   version: string,
   platform: NodeJS.Platform = process.platform,
   execPath: string = process.execPath,
-): { cmd: string; args: string[]; shell: boolean; windowsVerbatimArguments?: boolean } | null {
+): {
+  cmd: string;
+  args: string[];
+  shell: boolean;
+  windowsVerbatimArguments?: boolean;
+  env?: NodeJS.ProcessEnv;
+} | null {
   if (!SAFE_VERSION.test(version)) return null;
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
@@ -141,11 +169,18 @@ export function selfUpdateCommand(
   }
   // GUI-launched agents often have a minimal PATH that omits nvm/Homebrew
   // bins. Prefer the npm next to the running node, then fall back to PATH.
-  const sibling = join(dirname(execPath), "npm");
+  // npm's shebang is `#!/usr/bin/env node`, so the child needs node's dir on
+  // PATH too or it can pick a different (or no) Node.
+  const nodeDir = dirname(execPath);
+  const sibling = join(nodeDir, "npm");
   return {
     cmd: existsSync(sibling) ? sibling : "npm",
     args: ["install", "-g", `awwwards-mcp@${version}`],
     shell: false,
+    env: {
+      ...process.env,
+      PATH: [nodeDir, process.env.PATH].filter(Boolean).join(delimiter),
+    },
   };
 }
 
@@ -162,6 +197,7 @@ export function startSelfUpdate(version: string): boolean {
         shell: command.shell,
         windowsHide: true,
         windowsVerbatimArguments: command.windowsVerbatimArguments,
+        env: command.env,
       },
     );
     child.on("error", () => {
@@ -169,8 +205,12 @@ export function startSelfUpdate(version: string): boolean {
         `awwwards-mcp: background self-update failed to start — install manually with \`npm install -g awwwards-mcp@${version}\``,
       );
     });
-    child.on("exit", (code) => {
-      if (code !== 0) {
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        console.error(
+          `awwwards-mcp: background self-update was terminated by ${signal} — install manually with \`npm install -g awwwards-mcp@${version}\``,
+        );
+      } else if (code !== 0) {
         console.error(
           `awwwards-mcp: background self-update exited with code ${code} — install manually with \`npm install -g awwwards-mcp@${version}\``,
         );
