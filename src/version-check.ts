@@ -72,9 +72,10 @@ function isExecutableFile(path: string): boolean {
 /**
  * Split a Windows PATH into directories. Quotes protect semicolons in a
  * directory name, and only fully qualified entries are usable: drive-relative
- * forms such as `C:npm` resolve against the cwd.
+ * forms such as `C:npm` and single-rooted forms such as `\npm` resolve against
+ * the cwd. UNC entries arrive as both `\\server\share` and `//server/share`.
  */
-function windowsPathEntries(path: string): string[] {
+export function windowsPathEntries(path: string): string[] {
   const entries: string[] = [];
   let current = "";
   let quoted = false;
@@ -87,7 +88,7 @@ function windowsPathEntries(path: string): string[] {
   }
   entries.push(current);
   return entries.filter((entry) =>
-    /^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/.test(entry),
+    /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)/.test(entry),
   );
 }
 
@@ -304,6 +305,9 @@ export function selfUpdateCommand(
     const npmCmd = isRegularFile(sibling) ? sibling : findNpmOnPath();
     if (!npmCmd) return null;
     const basePath = process.env.PATH || "";
+    // A `;` in the Node directory must not split the child PATH; cmd.exe
+    // honors quotes around a PATH entry.
+    const pathPrefix = nodeDir.includes(";") ? `"${nodeDir}"` : nodeDir;
     return {
       cmd: join(systemRoot, "System32", "cmd.exe"),
       args: [
@@ -326,7 +330,7 @@ export function selfUpdateCommand(
       env: {
         ...process.env,
         NPM_CMD: npmCmd,
-        PATH: [nodeDir, basePath].filter(Boolean).join(";"),
+        PATH: [pathPrefix, basePath].filter(Boolean).join(";"),
       },
     };
   }

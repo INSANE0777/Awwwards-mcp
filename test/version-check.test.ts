@@ -21,6 +21,7 @@ import {
   parseVersion,
   selfUpdateCommand,
   startSelfUpdate,
+  windowsPathEntries,
 } from "../src/version-check.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -73,6 +74,31 @@ describe("isSafeVersion", () => {
       expect(buildUpdateNotice("1.0.0", version, "manual")).toBeNull();
     },
   );
+});
+
+describe("windowsPathEntries", () => {
+  it("accepts fully qualified drive and UNC entries in either slash form", () => {
+    expect(
+      windowsPathEntries(
+        String.raw`C:\node;D:/tools;\\server\share\npm;//server/share/npm`,
+      ),
+    ).toEqual([
+      String.raw`C:\node`,
+      "D:/tools",
+      String.raw`\\server\share\npm`,
+      "//server/share/npm",
+    ]);
+  });
+
+  it("rejects drive-relative, single-rooted, and relative entries", () => {
+    expect(windowsPathEntries(String.raw`C:npm;\npm;.;;relative`)).toEqual([]);
+  });
+
+  it("keeps a quoted semicolon inside one entry", () => {
+    expect(
+      windowsPathEntries(String.raw`"C:\a;b";C:\c`),
+    ).toEqual([String.raw`C:\a;b`, String.raw`C:\c`]);
+  });
 });
 
 describe("selfUpdateCommand", () => {
@@ -173,6 +199,7 @@ describe("selfUpdateCommand", () => {
       const pathDir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-path-"));
       const quotedDir = mkdtempSync(join(tmpdir(), "awwwards;quoted-"));
       const otherDir = mkdtempSync(join(tmpdir(), "awwwards-other-"));
+      const rootedDir = mkdtempSync(join(tmpdir(), "awwwards-rooted-"));
       const missing = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-missing-"));
       const npmCmd = join(pathDir, "npm.cmd");
       const quotedNpmCmd = join(quotedDir, "npm.cmd");
@@ -180,6 +207,7 @@ describe("selfUpdateCommand", () => {
       const missingNode = join(missing, "node.exe");
       writeFileSync(npmCmd, "");
       writeFileSync(quotedNpmCmd, "");
+      writeFileSync(join(rootedDir, "npm.cmd"), "");
       const fallback = {
         cmd: join(root, "System32", "cmd.exe"),
         args: ["/d", "/s", "/v:off", "/c", `""%NPM_CMD%" install -g awwwards-mcp@1.2.3"`],
@@ -226,6 +254,20 @@ describe("selfUpdateCommand", () => {
         process.env.PATH = "C:npm";
         expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
 
+        // A single-rooted `\...` entry resolves against the current drive.
+        // Point it at a real shim so accepting it would beat the fallback.
+        const originalCwd = process.cwd();
+        process.chdir(tmpdir());
+        try {
+          process.env.PATH = `${rootedDir.replace(/^[A-Za-z]:/, "")};${pathDir}`;
+          expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toMatchObject({
+            ...fallback,
+            env: { NPM_CMD: npmCmd },
+          });
+        } finally {
+          process.chdir(originalCwd);
+        }
+
         // Empty and relative PATH entries resolve against the cwd; skip them.
         process.env.PATH = `.${delimiter}${delimiter}`;
         expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
@@ -237,6 +279,7 @@ describe("selfUpdateCommand", () => {
         rmSync(pathDir, { recursive: true, force: true });
         rmSync(quotedDir, { recursive: true, force: true });
         rmSync(otherDir, { recursive: true, force: true });
+        rmSync(rootedDir, { recursive: true, force: true });
         rmSync(missing, { recursive: true, force: true });
       }
     },
@@ -375,6 +418,65 @@ describe("selfUpdateCommand", () => {
         rmSync(cwdDir, { recursive: true, force: true });
         rmSync(pathDir, { recursive: true, force: true });
         rmSync(missing, { recursive: true, force: true });
+      }
+    },
+    20000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "keeps a semicolon in the Node directory from splitting the child PATH",
+    async () => {
+      const nodeDir = mkdtempSync(join(tmpdir(), "awwwards;node-dir-"));
+      const cwdDir = mkdtempSync(join(tmpdir(), "awwwards;node-cwd-"));
+      try {
+        writeFileSync(
+          join(nodeDir, "node.cmd"),
+          '@echo off\r\necho node > "%~dp0node-ran.log"\r\nexit /b 0\r\n',
+        );
+        writeFileSync(
+          join(nodeDir, "npm.cmd"),
+          '@echo off\r\ncall node --version\r\nexit /b %errorlevel%\r\n',
+        );
+        const script = `
+          import { once } from "node:events";
+          process.execPath = process.env.FIXTURE_NODE;
+          const { startSelfUpdate } = await import(${JSON.stringify(
+            new URL("../src/version-check.ts", import.meta.url).href,
+          )});
+          const timer = setTimeout(() => process.exit(3), 10000);
+          const child = startSelfUpdate("1.2.3");
+          if (!child) process.exit(2);
+          const [code] = await once(child, "exit");
+          clearTimeout(timer);
+          process.exit(code ?? 1);
+        `;
+        const { spawn: spawnNode } =
+          await vi.importActual<typeof import("node:child_process")>("node:child_process");
+        const worker = spawnNode(
+          nodeExecPath,
+          ["--experimental-strip-types", "--input-type=module", "--eval", script],
+          {
+            cwd: cwdDir,
+            env: {
+              ...process.env,
+              PATH: nodeDir,
+              FIXTURE_NODE: join(nodeDir, "node.exe"),
+              // Without this cmd.exe would find node.cmd in the child cwd and
+              // hide a split PATH.
+              NoDefaultCurrentDirectoryInExePath: "1",
+            },
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 15000,
+          },
+        );
+        const stderr: Buffer[] = [];
+        worker.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+        const [code] = await once(worker, "close");
+        expect(code, Buffer.concat(stderr).toString()).toBe(0);
+        expect(readFileSync(join(nodeDir, "node-ran.log"), "utf8")).toContain("node");
+      } finally {
+        rmSync(nodeDir, { recursive: true, force: true });
+        rmSync(cwdDir, { recursive: true, force: true });
       }
     },
     20000,
