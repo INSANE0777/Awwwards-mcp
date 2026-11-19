@@ -676,6 +676,7 @@ npx skills add INSANE0777/awwwards-skills
 ```
 
 Documented pairing: **`awwwards-mcp@1.21.0` + [`skills-v2026.11.19`](https://github.com/INSANE0777/awwwards-skills/tree/skills-v2026.11.19)**.
+`1.21.1` is an auto-update hotfix with no tool, schema or skill-surface change, so the same skills remain compatible.
 The tag exists independently. We checked the pairing manually on **2026-11-19**
 against that tag: all nine routing copies are byte-identical to this package's
 `test/fixtures/v2-routing.md`, the skills structural validator passes, and the
