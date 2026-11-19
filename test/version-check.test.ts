@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -11,7 +11,9 @@ import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildUpdateNotice,
+  checkForUpdate,
   compareVersions,
+  isSafeVersion,
   parseVersion,
   selfUpdateCommand,
   startSelfUpdate,
@@ -35,6 +37,16 @@ describe("compareVersions", () => {
     expect(compareVersions("1.0.1", "1.0.0")).toBe(1);
     expect(compareVersions("1.0.0", "1.0.0")).toBe(0);
     expect(compareVersions("1.0.0", "2.0.0")).toBe(-1);
+  });
+});
+
+describe("isSafeVersion", () => {
+  it("accepts only semver strings", () => {
+    expect(isSafeVersion("1.2.3")).toBe(true);
+    expect(isSafeVersion("1.2.3-beta.1+build.5")).toBe(true);
+    expect(isSafeVersion(["2.0.0"])).toBe(false);
+    expect(isSafeVersion("1.2.3 review-marker")).toBe(false);
+    expect(isSafeVersion(undefined)).toBe(false);
   });
 });
 
@@ -66,6 +78,16 @@ describe("selfUpdateCommand", () => {
         delimiter,
       )[0],
     ).toBe(join(tmpdir(), "missing-node"));
+    const originalPath = process.env.PATH;
+    try {
+      delete process.env.PATH;
+      expect(
+        selfUpdateCommand("1.2.3", "linux", missingExecPath)?.env?.PATH,
+      ).toContain("/usr/bin:/bin");
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
   });
 
   it("prefers the npm next to node when PATH may be minimal", () => {
@@ -113,33 +135,26 @@ describe("selfUpdateCommand", () => {
         writeFileSync(join(dir, "node"), "");
         writeFileSync(
           join(dir, "npm"),
-          '#!/bin/sh\nprintf "%s\\n" "$*" > "$(dirname "$0")/args.log"\n',
+          '#!/bin/sh\nprintf "%s\\n" "$*" > "${0%/*}/args.log"\n',
           { mode: 0o755 },
         );
         // If the sibling preference disappears, resolve this harmless shim
         // instead of the host's real npm and fail on its marker log.
         writeFileSync(
           join(fallback, "npm"),
-          '#!/bin/sh\nprintf "%s\\n" "$*" > "$(dirname "$0")/fallback.log"\n',
+          '#!/bin/sh\nprintf "%s\\n" "$*" > "${0%/*}/fallback.log"\n',
           { mode: 0o755 },
         );
         process.env.PATH = fallback;
         process.execPath = join(dir, "node");
-        expect(startSelfUpdate("1.2.3")).toBe(true);
+        const child = startSelfUpdate("1.2.3");
+        expect(child).not.toBeNull();
+        if (!child) return;
+        expect(await new Promise((resolve) => child.once("exit", resolve))).toBe(0);
         const logPath = join(dir, "args.log");
         const fallbackLogPath = join(fallback, "fallback.log");
-        const deadline = Date.now() + 8000;
-        let log = "";
-        while (Date.now() < deadline) {
-          if (existsSync(logPath)) {
-            log = readFileSync(logPath, "utf8");
-            if (log.includes("install -g awwwards-mcp@1.2.3")) break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-        expect(log).toContain("install -g awwwards-mcp@1.2.3");
+        expect(readFileSync(logPath, "utf8")).toContain("install -g awwwards-mcp@1.2.3");
         expect(existsSync(fallbackLogPath)).toBe(false);
-        await new Promise((resolve) => setTimeout(resolve, 100));
       } finally {
         process.execPath = originalExecPath;
         if (originalPath === undefined) delete process.env.PATH;
@@ -153,7 +168,7 @@ describe("selfUpdateCommand", () => {
   it.skipIf(process.platform !== "win32")(
     "actually runs npm.cmd on Windows with verbatim quoting",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "awwwards-update-"));
+      const dir = mkdtempSync(join(tmpdir(), "awwwards update-"));
       const originalExecPath = process.execPath;
       try {
         writeFileSync(join(dir, "node.exe"), "");
@@ -162,19 +177,13 @@ describe("selfUpdateCommand", () => {
           '@echo off\r\necho %* > "%~dp0args.log"\r\nexit /b 0\r\n',
         );
         process.execPath = join(dir, "node.exe");
-        expect(startSelfUpdate("1.2.3")).toBe(true);
-        const logPath = join(dir, "args.log");
-        const deadline = Date.now() + 8000;
-        let log = "";
-        while (Date.now() < deadline) {
-          if (existsSync(logPath)) {
-            log = readFileSync(logPath, "utf8");
-            if (log.includes("install -g awwwards-mcp@1.2.3")) break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-        expect(log).toContain("install -g awwwards-mcp@1.2.3");
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        const child = startSelfUpdate("1.2.3");
+        expect(child).not.toBeNull();
+        if (!child) return;
+        expect(await new Promise((resolve) => child.once("exit", resolve))).toBe(0);
+        expect(readFileSync(join(dir, "args.log"), "utf8")).toContain(
+          "install -g awwwards-mcp@1.2.3",
+        );
       } finally {
         process.execPath = originalExecPath;
         rmSync(dir, { recursive: true, force: true });
@@ -182,6 +191,28 @@ describe("selfUpdateCommand", () => {
     },
     15000,
   );
+});
+
+describe("checkForUpdate", () => {
+  it("ignores an unsafe cached version without throwing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-version-state-"));
+    const originalCache = process.env.AWWWARDS_CACHE_DIR;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      writeFileSync(
+        join(dir, "version-check.json"),
+        JSON.stringify({ checkedAt: Date.now(), latest: ["2.0.0"] }),
+      );
+      process.env.AWWWARDS_CACHE_DIR = dir;
+      expect(() => checkForUpdate("1.0.0")).not.toThrow();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      if (originalCache === undefined) delete process.env.AWWWARDS_CACHE_DIR;
+      else process.env.AWWWARDS_CACHE_DIR = originalCache;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("buildUpdateNotice", () => {

@@ -9,13 +9,33 @@
 // `npm install -g awwwards-mcp@<latest>` detached, then asks the user to
 // restart their agent; without the env var, the notice just tells the agent.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
 const REGISTRY_URL = "https://registry.npmjs.org/awwwards-mcp/latest";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const AUTO_LOCK_MS = 60 * 1000;
+
+// npm/npx are .cmd shims on Windows. Spawning npm.cmd with shell:true emits
+// DEP0190 on modern Node, so run the validated install through cmd.exe's /c
+// form with shell:false. The registry-provided version is validated first, so
+// no shell syntax can reach the command line.
+const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+export function isSafeVersion(value: unknown): value is string {
+  return typeof value === "string" && SAFE_VERSION.test(value);
+}
 
 export function parseVersion(v: string): [number, number, number] {
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -54,12 +74,14 @@ function readState(): CheckState | null {
   }
 }
 
-function writeState(state: CheckState): void {
+function writeState(state: CheckState): boolean {
   try {
-    mkdirSync(join(stateFile(), ".."), { recursive: true, mode: 0o700 });
+    mkdirSync(dirname(stateFile()), { recursive: true, mode: 0o700 });
     writeFileSync(stateFile(), JSON.stringify(state), { mode: 0o600 });
+    return true;
   } catch {
     // notification is best-effort; an unwritable cache dir is fine
+    return false;
   }
 }
 
@@ -69,6 +91,7 @@ export function buildUpdateNotice(
   autoUpdateEnabled: boolean,
   willAttempt = autoUpdateEnabled,
 ): string | null {
+  if (!isSafeVersion(current) || !isSafeVersion(latest)) return null;
   if (compareVersions(latest, current) <= 0) return null;
   const lines = [
     `awwwards-mcp: update available — v${latest} (running v${current}).`,
@@ -82,6 +105,52 @@ export function buildUpdateNotice(
 }
 
 /**
+ * Claim the one auto-update attempt for this version inside one daily
+ * interval. The lock makes the read-check-write atomic across concurrent
+ * MCP server startups sharing the same cache.
+ */
+function claimAutoAttempt(version: string, base: CheckState): boolean {
+  if (!isSafeVersion(version)) return false;
+  const lockPath = `${stateFile()}.auto.lock`;
+  let fd: number | undefined;
+  try {
+    mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
+    try {
+      const stat = statSync(lockPath);
+      if (Date.now() - stat.mtimeMs > AUTO_LOCK_MS) unlinkSync(lockPath);
+    } catch {
+      // no stale lock
+    }
+    fd = openSync(lockPath, "wx", 0o600);
+  } catch {
+    return false;
+  }
+  try {
+    const fresh = readState() ?? base;
+    if (fresh.autoAttemptedVersion === version) return false;
+    return writeState({
+      ...fresh,
+      latest: version,
+      autoAttemptedVersion: version,
+      autoAttemptedAt: Date.now(),
+    });
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // best-effort unlock
+      }
+    }
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      // already gone
+    }
+  }
+}
+
+/**
  * Fire-and-forget update check. Never throws, never blocks the caller:
  * registry errors, timeouts, and unwritable state files are all swallowed.
  */
@@ -91,14 +160,19 @@ export function checkForUpdate(currentVersion: string): void {
   // No: state gates the fetch itself, so a fresh install always has a shot.
   const state = readState();
   if (state && Date.now() - state.checkedAt < CHECK_INTERVAL_MS) {
-    // within the interval: reuse the known latest and, when opt-in was enabled
-    // after the check, still make the one attempt this interval allows.
-    if (state.latest) {
-      const willAttempt = auto && state.autoAttemptedVersion !== state.latest;
-      const notice = buildUpdateNotice(currentVersion, state.latest, auto, willAttempt);
+    if (!isSafeVersion(state.latest)) return;
+    if (compareVersions(state.latest, currentVersion) <= 0) return;
+    if (!auto) {
+      const notice = buildUpdateNotice(currentVersion, state.latest, false);
       if (notice) console.error(notice);
-      if (notice && willAttempt) attemptAutoUpdate(state.latest, state);
+      return;
     }
+    // Within the interval: if opt-in was enabled after the check, make the
+    // one attempt this interval allows; later startups do not retry.
+    const result = runAutoUpdate(state.latest, state);
+    const notice = buildUpdateNotice(currentVersion, state.latest, true, result.started);
+    if (notice) console.error(notice);
+    if (result.failure) console.error(result.failure);
     return;
   }
 
@@ -109,38 +183,44 @@ export function checkForUpdate(currentVersion: string): void {
         headers: { accept: "application/json" },
       });
       if (!res.ok) return; // unpublished / registry hiccup → silent
-      const data = (await res.json()) as { version?: string };
-      if (!data?.version || !SAFE_VERSION.test(data.version)) return;
-      const next: CheckState = { checkedAt: Date.now(), latest: data.version };
-      writeState(next);
-      const notice = buildUpdateNotice(currentVersion, data.version, auto, auto);
+      const data = (await res.json()) as { version?: unknown };
+      if (!isSafeVersion(data?.version)) return;
+      const version = data.version;
+      const checkedAt = Date.now();
+      if (compareVersions(version, currentVersion) <= 0) {
+        writeState({ checkedAt, latest: version });
+        return;
+      }
+      if (!auto) {
+        writeState({ checkedAt, latest: version });
+        const notice = buildUpdateNotice(currentVersion, version, false);
+        if (notice) console.error(notice);
+        return;
+      }
+      const result = runAutoUpdate(version, { checkedAt, latest: version });
+      const notice = buildUpdateNotice(currentVersion, version, true, result.started);
       if (notice) console.error(notice);
-      if (notice && auto) attemptAutoUpdate(data.version, next);
+      if (result.failure) console.error(result.failure);
     } catch {
       // offline / timeout / JSON garbage — never surface, never block
     }
   })();
 }
 
-function attemptAutoUpdate(version: string, state: CheckState): void {
-  if (startSelfUpdate(version)) {
-    writeState({
-      ...state,
-      autoAttemptedVersion: version,
-      autoAttemptedAt: Date.now(),
-    });
-    return;
+function runAutoUpdate(
+  version: string,
+  base: CheckState,
+): { started: boolean; failure?: string } {
+  if (!claimAutoAttempt(version, base)) return { started: false };
+  const child = startSelfUpdate(version);
+  if (!child) {
+    return {
+      started: false,
+      failure: `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${version}\``,
+    };
   }
-  console.error(
-    `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${version}\``,
-  );
+  return { started: true };
 }
-
-// npm/npx are .cmd shims on Windows. Spawning npm.cmd with shell:true emits
-// DEP0190 on modern Node, so run the validated install through cmd.exe's /c
-// form with shell:false. The registry-provided version is validated first, so
-// no shell syntax can reach the command line.
-const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export function selfUpdateCommand(
   version: string,
@@ -153,7 +233,7 @@ export function selfUpdateCommand(
   windowsVerbatimArguments?: boolean;
   env?: NodeJS.ProcessEnv;
 } | null {
-  if (!SAFE_VERSION.test(version)) return null;
+  if (!isSafeVersion(version)) return null;
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
     const npmCmd = join(dirname(execPath), "npm.cmd");
@@ -170,24 +250,26 @@ export function selfUpdateCommand(
   // GUI-launched agents often have a minimal PATH that omits nvm/Homebrew
   // bins. Prefer the npm next to the running node, then fall back to PATH.
   // npm's shebang is `#!/usr/bin/env node`, so the child needs node's dir on
-  // PATH too or it can pick a different (or no) Node.
+  // PATH too or it can pick a different (or no) Node. Keep the system default
+  // when PATH is unset rather than replacing it with only the node directory.
   const nodeDir = dirname(execPath);
   const sibling = join(nodeDir, "npm");
+  const basePath = process.env.PATH || "/usr/bin:/bin";
   return {
     cmd: existsSync(sibling) ? sibling : "npm",
     args: ["install", "-g", `awwwards-mcp@${version}`],
     shell: false,
     env: {
       ...process.env,
-      PATH: [nodeDir, process.env.PATH].filter(Boolean).join(delimiter),
+      PATH: [nodeDir, basePath].filter(Boolean).join(delimiter),
     },
   };
 }
 
-export function startSelfUpdate(version: string): boolean {
+export function startSelfUpdate(version: string): ReturnType<typeof spawn> | null {
   try {
     const command = selfUpdateCommand(version);
-    if (!command) return false;
+    if (!command) return null;
     const child = spawn(
       command.cmd,
       command.args,
@@ -217,8 +299,8 @@ export function startSelfUpdate(version: string): boolean {
       }
     });
     child.unref();
-    return true;
+    return child;
   } catch {
-    return false;
+    return null;
   }
 }
