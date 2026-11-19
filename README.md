@@ -376,8 +376,10 @@ Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
 stderr notice when a newer `awwwards-mcp` exists (stdout stays clean for the
 JSON-RPC channel — your agent sees the notice as a log line). Set
 `AWWWARDS_AUTO_UPDATE=1` in the server's `env` to opt into background
-self-update; restart your agent afterwards to load it. Nothing is fetched
-more than once a day and serving never waits on the check.
+self-update of the **global npm copy**; restart your agent afterwards to load
+it. An `npx` cache or a local project install is not replaced by that command
+and must be updated itself. Nothing is fetched more than once a day and
+serving never waits on the check.
 
 > **`npx` is the core, no-browser path.** `npx -y awwwards-mcp` runs the
 > package from an isolated cache that does not contain Playwright or

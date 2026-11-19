@@ -3,6 +3,15 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased
+
+### Auto-update actually runs
+
+- Windows background self-update now passes `windowsVerbatimArguments: true`, so `cmd.exe` reaches `npm.cmd` instead of exiting 1 before npm runs. The old spawn failed silently while the notice claimed an install was in progress.
+- A non-zero self-update exit is reported with the manual `npm install -g` fallback, and a self-update that cannot be constructed no longer claims it started.
+- macOS and Linux prefer the `npm` next to the running `node` before falling back to `PATH`, covering GUI-launched agents with a minimal PATH.
+- Background self-update still updates the global npm copy only; `npx` and local project installs must be updated themselves.
+
 ## v1.21.0 - 2026-11-18
 
 ### Discarded output is a tool error

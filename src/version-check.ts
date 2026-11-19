@@ -67,7 +67,7 @@ export function buildUpdateNotice(
   const lines = [
     `awwwards-mcp: update available — v${latest} (running v${current}).`,
     autoUpdateEnabled
-      ? `awwwards-mcp: v${latest} is being installed in the background; restart your agent to load it.`
+      ? `awwwards-mcp: auto-update is enabled; attempting to install v${latest} in the background. Restart your agent after it finishes.`
       : `awwwards-mcp: update with \`npm install -g awwwards-mcp@latest\` (or clear your npx cache), or set AWWWARDS_AUTO_UPDATE=1 to self-update on startup.`,
   ];
   return lines.join("\n");
@@ -103,7 +103,11 @@ export function checkForUpdate(currentVersion: string): void {
       writeState({ checkedAt: Date.now(), latest: data.version });
       const notice = buildUpdateNotice(currentVersion, data.version, auto);
       if (notice) console.error(notice);
-      if (notice && auto) startSelfUpdate(data.version);
+      if (notice && auto && !startSelfUpdate(data.version)) {
+        console.error(
+          `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${data.version}\``,
+        );
+      }
     } catch {
       // offline / timeout / JSON garbage — never surface, never block
     }
@@ -120,7 +124,7 @@ export function selfUpdateCommand(
   version: string,
   platform: NodeJS.Platform = process.platform,
   execPath: string = process.execPath,
-): { cmd: string; args: string[]; shell: boolean } | null {
+): { cmd: string; args: string[]; shell: boolean; windowsVerbatimArguments?: boolean } | null {
   if (!SAFE_VERSION.test(version)) return null;
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
@@ -130,31 +134,51 @@ export function selfUpdateCommand(
       cmd: join(systemRoot, "System32", "cmd.exe"),
       args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@${version}"`],
       shell: false,
+      // Without verbatim quoting Node adds another quote layer and cmd.exe
+      // exits 1 before running npm, so the old spawn silently did nothing.
+      windowsVerbatimArguments: true,
     };
   }
+  // GUI-launched agents often have a minimal PATH that omits nvm/Homebrew
+  // bins. Prefer the npm next to the running node, then fall back to PATH.
+  const sibling = join(dirname(execPath), "npm");
   return {
-    cmd: "npm",
+    cmd: existsSync(sibling) ? sibling : "npm",
     args: ["install", "-g", `awwwards-mcp@${version}`],
     shell: false,
   };
 }
 
-function startSelfUpdate(version: string): void {
+export function startSelfUpdate(version: string): boolean {
   try {
     const command = selfUpdateCommand(version);
-    if (!command) return;
+    if (!command) return false;
     const child = spawn(
       command.cmd,
       command.args,
-      { detached: true, stdio: "ignore", shell: command.shell, windowsHide: true },
+      {
+        detached: true,
+        stdio: "ignore",
+        shell: command.shell,
+        windowsHide: true,
+        windowsVerbatimArguments: command.windowsVerbatimArguments,
+      },
     );
     child.on("error", () => {
       console.error(
         `awwwards-mcp: background self-update failed to start — install manually with \`npm install -g awwwards-mcp@${version}\``,
       );
     });
+    child.on("exit", (code) => {
+      if (code !== 0) {
+        console.error(
+          `awwwards-mcp: background self-update exited with code ${code} — install manually with \`npm install -g awwwards-mcp@${version}\``,
+        );
+      }
+    });
     child.unref();
+    return true;
   } catch {
-    // self-update is best-effort; the notice already told the user what to do
+    return false;
   }
 }

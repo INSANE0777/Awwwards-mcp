@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -7,6 +7,7 @@ import {
   compareVersions,
   parseVersion,
   selfUpdateCommand,
+  startSelfUpdate,
 } from "../src/version-check.js";
 
 describe("parseVersion", () => {
@@ -42,15 +43,33 @@ describe("selfUpdateCommand", () => {
         cmd: join(root, "System32", "cmd.exe"),
         args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
         shell: false,
+        windowsVerbatimArguments: true,
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-    expect(selfUpdateCommand("1.2.3", "linux")).toEqual({
+    expect(
+      selfUpdateCommand("1.2.3", "linux", join(tmpdir(), "missing-node", "node")),
+    ).toEqual({
       cmd: "npm",
       args: ["install", "-g", "awwwards-mcp@1.2.3"],
       shell: false,
     });
+  });
+
+  it("prefers the npm next to node when PATH may be minimal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-sibling-"));
+    const npm = join(dir, "npm");
+    writeFileSync(npm, "");
+    try {
+      expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))).toEqual({
+        cmd: npm,
+        args: ["install", "-g", "awwwards-mcp@1.2.3"],
+        shell: false,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when npm.cmd is not beside the running Node binary", () => {
@@ -65,6 +84,63 @@ describe("selfUpdateCommand", () => {
     expect(selfUpdateCommand("1.2.3-beta.1", "linux")).not.toBeNull();
     expect(selfUpdateCommand("1.2.3+build.5", "linux")).not.toBeNull();
   });
+
+  it.skipIf(process.platform === "win32")(
+    "actually runs the npm next to node on macOS and Linux",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "awwwards-update-posix-"));
+      const originalExecPath = process.execPath;
+      try {
+        writeFileSync(join(dir, "node"), "");
+        writeFileSync(
+          join(dir, "npm"),
+          '#!/bin/sh\nprintf "%s\\n" "$*" > "$(dirname "$0")/args.log"\n',
+          { mode: 0o755 },
+        );
+        process.execPath = join(dir, "node");
+        expect(startSelfUpdate("1.2.3")).toBe(true);
+        const logPath = join(dir, "args.log");
+        const deadline = Date.now() + 8000;
+        while (!existsSync(logPath) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        expect(existsSync(logPath)).toBe(true);
+        expect(readFileSync(logPath, "utf8")).toContain("install -g awwwards-mcp@1.2.3");
+      } finally {
+        process.execPath = originalExecPath;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    15000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "actually runs npm.cmd on Windows with verbatim quoting",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "awwwards-update-"));
+      const originalExecPath = process.execPath;
+      try {
+        writeFileSync(join(dir, "node.exe"), "");
+        writeFileSync(
+          join(dir, "npm.cmd"),
+          '@echo off\r\necho %* > "%~dp0args.log"\r\nexit /b 0\r\n',
+        );
+        process.execPath = join(dir, "node.exe");
+        expect(startSelfUpdate("1.2.3")).toBe(true);
+        const logPath = join(dir, "args.log");
+        const deadline = Date.now() + 8000;
+        while (!existsSync(logPath) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        expect(existsSync(logPath)).toBe(true);
+        expect(readFileSync(logPath, "utf8")).toContain("install -g awwwards-mcp@1.2.3");
+      } finally {
+        process.execPath = originalExecPath;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    15000,
+  );
 });
 
 describe("buildUpdateNotice", () => {
@@ -77,7 +153,7 @@ describe("buildUpdateNotice", () => {
 
   it("mentions the restart step when auto-update is enabled", () => {
     const notice = buildUpdateNotice("1.0.0", "1.1.0", true);
-    expect(notice).toContain("restart your agent");
+    expect(notice).toMatch(/restart your agent/i);
   });
 
   it("returns null when running the latest or newer", () => {
