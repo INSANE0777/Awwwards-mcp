@@ -117,7 +117,7 @@ describe("selfUpdateCommand", () => {
   it("prefers the npm next to node when PATH may be minimal", () => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-sibling-"));
     const npm = join(dir, "npm");
-    writeFileSync(npm, "");
+    writeFileSync(npm, "", { mode: 0o755 });
     try {
       expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))).toMatchObject({
         cmd: npm,
@@ -157,14 +157,21 @@ describe("selfUpdateCommand", () => {
     },
   );
 
-  it("fails closed when npm.cmd is not beside the running Node binary", () => {
+  it("falls back to PATH npm.cmd when the sibling is missing or not a file", () => {
+    const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const fallback = {
+      cmd: join(root, "System32", "cmd.exe"),
+      args: ["/d", "/s", "/c", "npm install -g awwwards-mcp@1.2.3"],
+      shell: false,
+      windowsVerbatimArguments: true,
+    };
     expect(
       selfUpdateCommand("1.2.3", "win32", join(tmpdir(), "missing-node", "node.exe")),
-    ).toBeNull();
+    ).toEqual(fallback);
     const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-dir-"));
     mkdirSync(join(dir, "npm.cmd"));
     try {
-      expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toBeNull();
+      expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toEqual(fallback);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -219,6 +226,35 @@ describe("selfUpdateCommand", () => {
         if (originalPath === undefined) delete process.env.PATH;
         else process.env.PATH = originalPath;
         rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    15000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "falls back to npm.cmd on PATH on Windows",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "awwwards update path-"));
+      const missing = mkdtempSync(join(tmpdir(), "awwwards missing node-"));
+      try {
+        writeFileSync(
+          join(dir, "npm.cmd"),
+          '@echo off\r\necho %* > "%~dp0args.log"\r\nexit /b 0\r\n',
+        );
+        vi.stubEnv("PATH", dir);
+        process.execPath = join(missing, "node.exe");
+        const child = startSelfUpdate("1.2.3");
+        expect(child).not.toBeNull();
+        if (!child) return;
+        expect(await once(child, "exit")).toEqual([0, null]);
+        expect(readFileSync(join(dir, "args.log"), "utf8")).toContain(
+          "install -g awwwards-mcp@1.2.3",
+        );
+      } finally {
+        process.execPath = nodeExecPath;
+        vi.unstubAllEnvs();
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(missing, { recursive: true, force: true });
       }
     },
     15000,

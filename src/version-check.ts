@@ -124,8 +124,8 @@ function writeState(state: CheckState): void {
       renameSync(temp, path);
       return;
     } catch {
-      // A reader on Windows can briefly block replacement; retry, then write
-      // in place if the sharing mode allows it.
+      // A reader on Windows can briefly block replacement. Retrying leaves
+      // the previous valid JSON intact if the handle stays open.
       if (attempt < 2) {
         try {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
@@ -134,11 +134,6 @@ function writeState(state: CheckState): void {
         }
       }
     }
-  }
-  try {
-    writeFileSync(path, payload, { mode: 0o600 });
-  } catch {
-    // Cache writes are best-effort; the claim file still gates launches.
   }
   try {
     unlinkSync(temp);
@@ -157,7 +152,7 @@ export function buildUpdateNotice(
   const messages = {
     manual: `update with \`npm install -g awwwards-mcp@latest\` (or clear your npx cache), or set AWWWARDS_AUTO_UPDATE=1 to self-update on startup.`,
     spawned: `auto-update is enabled; attempting to install v${latest} in the background. Restart your agent after it finishes.`,
-    "already-claimed": `an auto-update attempt for v${latest} is already reserved for today; restart if it installed, otherwise run \`npm install -g awwwards-mcp@latest\`.`,
+    "already-claimed": `an auto-update attempt for v${latest} is already reserved; restart if it installed, otherwise run \`npm install -g awwwards-mcp@latest\`.`,
     busy: `the auto-update cache is busy or unavailable; install manually with \`npm install -g awwwards-mcp@latest\`.`,
   };
   return `awwwards-mcp: update available — v${latest} (running v${current}).\nawwwards-mcp: ${messages[outcome]}`;
@@ -268,10 +263,16 @@ export function selfUpdateCommand(
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
     const npmCmd = join(dirname(execPath), "npm.cmd");
-    if (!isRegularFile(npmCmd)) return null;
+    const install = `install -g awwwards-mcp@${version}`;
     return {
       cmd: join(systemRoot, "System32", "cmd.exe"),
-      args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@${version}"`],
+      // Fall back to npm.cmd on PATH when the Node-adjacent shim is missing.
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        isRegularFile(npmCmd) ? `""${npmCmd}" ${install}"` : `npm ${install}`,
+      ],
       shell: false,
       // Without verbatim quoting Node adds another quote layer and cmd.exe
       // exits 1 before running npm, so the old spawn silently did nothing.
