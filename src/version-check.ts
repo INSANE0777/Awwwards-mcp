@@ -4,7 +4,7 @@
 //   - stdout is the JSON-RPC channel → every notice goes to stderr only
 //   - serving must never wait on this → fire-and-forget, 3s timeout,
 //     every failure swallowed (registry unreachable / package unpublished)
-//   - at most one registry hit per day per machine (state in the cache dir)
+//   - cache each successful registry check for 24 hours
 // Auto-update is strictly opt-in: AWWWARDS_AUTO_UPDATE=1 runs
 // `npm install -g awwwards-mcp@<latest>` detached, then asks the user to
 // restart their agent; without the env var, the notice just tells the agent.
@@ -15,26 +15,32 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  statSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
 const REGISTRY_URL = "https://registry.npmjs.org/awwwards-mcp/latest";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const AUTO_LOCK_MS = 60 * 1000;
 
 // npm/npx are .cmd shims on Windows. Spawning npm.cmd with shell:true emits
 // DEP0190 on modern Node, so run the validated install through cmd.exe's /c
 // form with shell:false. The registry-provided version is validated first, so
 // no shell syntax can reach the command line.
-const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const SAFE_VERSION =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 export function isSafeVersion(value: unknown): value is string {
-  return typeof value === "string" && SAFE_VERSION.test(value);
+  // npm's SemVer parser also bounds the length and the core numbers.
+  if (typeof value !== "string" || value.length > 256) return false;
+  const match = SAFE_VERSION.exec(value);
+  return match !== null
+    && match.slice(1, 4).every((part) => Number.isSafeInteger(Number(part)))
+    && !match[4]?.split(".").some((id) => /^0\d+$/.test(id));
 }
 
 export function parseVersion(v: string): [number, number, number] {
@@ -59,6 +65,9 @@ type CheckState = {
   autoAttemptedAt?: number;
 };
 
+type AutoClaim = "claimed" | "already-claimed" | "busy";
+type UpdateNotice = Exclude<AutoClaim, "claimed"> | "manual" | "spawned";
+
 function stateFile(): string {
   const cacheRoot =
     process.env.AWWWARDS_CACHE_DIR ?? join(homedir(), ".awwwards-mcp");
@@ -74,79 +83,61 @@ function readState(): CheckState | null {
   }
 }
 
-function writeState(state: CheckState): boolean {
+function writeState(state: CheckState): void {
+  const path = stateFile();
+  const temp = `${path}.${randomUUID()}.tmp`;
   try {
-    mkdirSync(dirname(stateFile()), { recursive: true, mode: 0o700 });
-    writeFileSync(stateFile(), JSON.stringify(state), { mode: 0o600 });
-    return true;
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(temp, JSON.stringify(state), { mode: 0o600 });
+    renameSync(temp, path);
   } catch {
-    // notification is best-effort; an unwritable cache dir is fine
-    return false;
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Cache writes are best-effort.
+    }
   }
 }
 
 export function buildUpdateNotice(
   current: string,
   latest: string,
-  autoUpdateEnabled: boolean,
-  willAttempt = autoUpdateEnabled,
+  outcome: UpdateNotice,
 ): string | null {
   if (!isSafeVersion(current) || !isSafeVersion(latest)) return null;
   if (compareVersions(latest, current) <= 0) return null;
-  const lines = [
-    `awwwards-mcp: update available — v${latest} (running v${current}).`,
-    autoUpdateEnabled
-      ? willAttempt
-        ? `awwwards-mcp: auto-update is enabled; attempting to install v${latest} in the background. Restart your agent after it finishes.`
-        : `awwwards-mcp: an auto-update attempt for v${latest} was already made; restart if it installed, otherwise run \`npm install -g awwwards-mcp@latest\`.`
-      : `awwwards-mcp: update with \`npm install -g awwwards-mcp@latest\` (or clear your npx cache), or set AWWWARDS_AUTO_UPDATE=1 to self-update on startup.`,
-  ];
-  return lines.join("\n");
+  const messages = {
+    manual: `update with \`npm install -g awwwards-mcp@latest\` (or clear your npx cache), or set AWWWARDS_AUTO_UPDATE=1 to self-update on startup.`,
+    spawned: `auto-update is enabled; attempting to install v${latest} in the background. Restart your agent after it finishes.`,
+    "already-claimed": `an auto-update attempt for v${latest} is already reserved for today; restart if it installed, otherwise run \`npm install -g awwwards-mcp@latest\`.`,
+    busy: `the auto-update cache is busy or unavailable; install manually with \`npm install -g awwwards-mcp@latest\`.`,
+  };
+  return `awwwards-mcp: update available — v${latest} (running v${current}).\nawwwards-mcp: ${messages[outcome]}`;
 }
 
-/**
- * Claim the one auto-update attempt for this version inside one daily
- * interval. The lock makes the read-check-write atomic across concurrent
- * MCP server startups sharing the same cache.
- */
-function claimAutoAttempt(version: string, base: CheckState): boolean {
-  if (!isSafeVersion(version)) return false;
-  const lockPath = `${stateFile()}.auto.lock`;
-  let fd: number | undefined;
-  try {
-    mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
-    try {
-      const stat = statSync(lockPath);
-      if (Date.now() - stat.mtimeMs > AUTO_LOCK_MS) unlinkSync(lockPath);
-    } catch {
-      // no stale lock
-    }
-    fd = openSync(lockPath, "wx", 0o600);
-  } catch {
-    return false;
+function claimAutoAttempt(version: string, state: CheckState | null): AutoClaim {
+  const day = Math.floor(Date.now() / CHECK_INTERVAL_MS);
+  if (
+    state?.autoAttemptedVersion === version &&
+    typeof state.autoAttemptedAt === "number" &&
+    Math.floor(state.autoAttemptedAt / CHECK_INTERVAL_MS) === day
+  ) {
+    return "already-claimed";
   }
+
+  const versionHash = createHash("sha256").update(version).digest("hex");
+  const path = `${stateFile()}.auto-${day}-${versionHash}`;
   try {
-    const fresh = readState() ?? base;
-    if (fresh.autoAttemptedVersion === version) return false;
-    return writeState({
-      ...fresh,
-      latest: version,
-      autoAttemptedVersion: version,
-      autoAttemptedAt: Date.now(),
-    });
-  } finally {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd);
-      } catch {
-        // best-effort unlock
-      }
-    }
-    try {
-      unlinkSync(lockPath);
-    } catch {
-      // already gone
-    }
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  } catch {
+    return "busy";
+  }
+  // Keep the exclusive claim even if the process dies before npm spawns.
+  try {
+    closeSync(openSync(path, "wx", 0o600));
+    return "claimed";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EEXIST" ? "already-claimed" : "busy";
   }
 }
 
@@ -155,24 +146,13 @@ function claimAutoAttempt(version: string, base: CheckState): boolean {
  * registry errors, timeouts, and unwritable state files are all swallowed.
  */
 export function checkForUpdate(currentVersion: string): void {
+  if (!isSafeVersion(currentVersion)) return;
   const auto = process.env.AWWWARDS_AUTO_UPDATE === "1";
-  // Skip the daily gate when auto-update is on but no latest is known yet?
-  // No: state gates the fetch itself, so a fresh install always has a shot.
   const state = readState();
   if (state && Date.now() - state.checkedAt < CHECK_INTERVAL_MS) {
-    if (!isSafeVersion(state.latest)) return;
-    if (compareVersions(state.latest, currentVersion) <= 0) return;
-    if (!auto) {
-      const notice = buildUpdateNotice(currentVersion, state.latest, false);
-      if (notice) console.error(notice);
-      return;
+    if (isSafeVersion(state.latest)) {
+      reportUpdate(currentVersion, state.latest, auto, state);
     }
-    // Within the interval: if opt-in was enabled after the check, make the
-    // one attempt this interval allows; later startups do not retry.
-    const result = runAutoUpdate(state.latest, state);
-    const notice = buildUpdateNotice(currentVersion, state.latest, true, result.started);
-    if (notice) console.error(notice);
-    if (result.failure) console.error(result.failure);
     return;
   }
 
@@ -186,40 +166,44 @@ export function checkForUpdate(currentVersion: string): void {
       const data = (await res.json()) as { version?: unknown };
       if (!isSafeVersion(data?.version)) return;
       const version = data.version;
-      const checkedAt = Date.now();
-      if (compareVersions(version, currentVersion) <= 0) {
-        writeState({ checkedAt, latest: version });
-        return;
+      const refreshed: CheckState = { checkedAt: Date.now(), latest: version };
+      // Carry forward reservations written by previous versions.
+      if (isSafeVersion(state?.autoAttemptedVersion) && typeof state.autoAttemptedAt === "number") {
+        refreshed.autoAttemptedVersion = state.autoAttemptedVersion;
+        refreshed.autoAttemptedAt = state.autoAttemptedAt;
       }
-      if (!auto) {
-        writeState({ checkedAt, latest: version });
-        const notice = buildUpdateNotice(currentVersion, version, false);
-        if (notice) console.error(notice);
-        return;
-      }
-      const result = runAutoUpdate(version, { checkedAt, latest: version });
-      const notice = buildUpdateNotice(currentVersion, version, true, result.started);
-      if (notice) console.error(notice);
-      if (result.failure) console.error(result.failure);
+      writeState(refreshed);
+      reportUpdate(currentVersion, version, auto, refreshed);
     } catch {
       // offline / timeout / JSON garbage — never surface, never block
     }
   })();
 }
 
-function runAutoUpdate(
+function reportUpdate(
+  current: string,
   version: string,
-  base: CheckState,
-): { started: boolean; failure?: string } {
-  if (!claimAutoAttempt(version, base)) return { started: false };
-  const child = startSelfUpdate(version);
-  if (!child) {
-    return {
-      started: false,
-      failure: `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${version}\``,
-    };
+  auto: boolean,
+  state: CheckState | null,
+): void {
+  if (compareVersions(version, current) <= 0) return;
+  const report = (outcome: UpdateNotice) => {
+    const notice = buildUpdateNotice(current, version, outcome);
+    if (notice) console.error(notice);
+  };
+  const claim = auto ? claimAutoAttempt(version, state) : "manual";
+  if (claim !== "claimed") {
+    report(claim);
+    return;
   }
-  return { started: true };
+  const child = startSelfUpdate(version);
+  if (child) {
+    child.once("spawn", () => report("spawned"));
+  } else {
+    console.error(
+      `awwwards-mcp: could not start the background self-update — install manually with \`npm install -g awwwards-mcp@${version}\``,
+    );
+  }
 }
 
 export function selfUpdateCommand(
