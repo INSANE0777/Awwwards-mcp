@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -117,7 +118,8 @@ describe("selfUpdateCommand", () => {
   it("prefers the npm next to node when PATH may be minimal", () => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-sibling-"));
     const npm = join(dir, "npm");
-    writeFileSync(npm, "", { mode: 0o755 });
+    writeFileSync(npm, "");
+    chmodSync(npm, 0o755);
     try {
       expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))).toMatchObject({
         cmd: npm,
@@ -148,7 +150,10 @@ describe("selfUpdateCommand", () => {
     "falls back to PATH when the sibling npm is not executable",
     () => {
       const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-mode-"));
-      writeFileSync(join(dir, "npm"), "", { mode: 0o644 });
+      const npm = join(dir, "npm");
+      writeFileSync(npm, "");
+      // Deterministic regardless of the runner's umask.
+      chmodSync(npm, 0o644);
       try {
         expect(selfUpdateCommand("1.2.3", "linux", join(dir, "node"))?.cmd).toBe("npm");
       } finally {
@@ -157,23 +162,45 @@ describe("selfUpdateCommand", () => {
     },
   );
 
-  it("falls back to PATH npm.cmd when the sibling is missing or not a file", () => {
+  it("resolves a missing sibling npm.cmd from absolute PATH entries only", () => {
     const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-    const fallback = {
-      cmd: join(root, "System32", "cmd.exe"),
-      args: ["/d", "/s", "/c", "npm install -g awwwards-mcp@1.2.3"],
-      shell: false,
-      windowsVerbatimArguments: true,
-    };
-    expect(
-      selfUpdateCommand("1.2.3", "win32", join(tmpdir(), "missing-node", "node.exe")),
-    ).toEqual(fallback);
-    const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-dir-"));
-    mkdirSync(join(dir, "npm.cmd"));
+    const pathDir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-path-"));
+    const missing = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-missing-"));
+    const npmCmd = join(pathDir, "npm.cmd");
+    const originalPath = process.env.PATH;
+    const missingNode = join(missing, "node.exe");
+    writeFileSync(npmCmd, "");
     try {
-      expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toEqual(fallback);
+      process.env.PATH = pathDir;
+      const fallback = {
+        cmd: join(root, "System32", "cmd.exe"),
+        args: ["/d", "/s", "/c", `""${npmCmd}" install -g awwwards-mcp@1.2.3"`],
+        shell: false,
+        windowsVerbatimArguments: true,
+      };
+      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toEqual(fallback);
+      const dir = mkdtempSync(join(tmpdir(), "awwwards-npm-cmd-dir-"));
+      mkdirSync(join(dir, "npm.cmd"));
+      try {
+        expect(selfUpdateCommand("1.2.3", "win32", join(dir, "node.exe"))).toEqual(fallback);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+
+      // Quoted entries are common on Windows and still absolute.
+      process.env.PATH = `"${pathDir}"`;
+      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toEqual(fallback);
+
+      // Empty and relative PATH entries resolve against the cwd; skip them.
+      process.env.PATH = `.${delimiter}${delimiter}`;
+      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
+      delete process.env.PATH;
+      expect(selfUpdateCommand("1.2.3", "win32", missingNode)).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      rmSync(pathDir, { recursive: true, force: true });
+      rmSync(missing, { recursive: true, force: true });
     }
   });
 
@@ -194,17 +221,14 @@ describe("selfUpdateCommand", () => {
       const originalPath = process.env.PATH;
       try {
         writeFileSync(join(dir, "node"), "");
-        writeFileSync(
-          join(dir, "npm"),
-          '#!/bin/sh\nprintf "%s\\n" "$*" > "${0%/*}/args.log"\n',
-          { mode: 0o755 },
-        );
+        const siblingNpm = join(dir, "npm");
+        const fallbackNpm = join(fallback, "npm");
+        writeFileSync(siblingNpm, '#!/bin/sh\nprintf "%s\\n" "$*" > "${0%/*}/args.log"\n');
+        // Deterministic regardless of the runner's umask.
+        chmodSync(siblingNpm, 0o755);
         // Keep every possible PATH lookup inside the fixture.
-        writeFileSync(
-          join(fallback, "npm"),
-          '#!/bin/sh\nprintf "%s\\n" "$*" > "${0%/*}/fallback.log"\n',
-          { mode: 0o755 },
-        );
+        writeFileSync(fallbackNpm, '#!/bin/sh\nprintf "%s\\n" "$*" > "${0%/*}/fallback.log"\n');
+        chmodSync(fallbackNpm, 0o755);
         process.env.PATH = fallback;
         process.execPath = join(dir, "node");
         const child = startSelfUpdate("1.2.3");
@@ -258,6 +282,64 @@ describe("selfUpdateCommand", () => {
       }
     },
     15000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "ignores a malicious npm.cmd in the working directory",
+    async () => {
+      const cwdDir = mkdtempSync(join(tmpdir(), "awwwards-npm-cwd-"));
+      const pathDir = mkdtempSync(join(tmpdir(), "awwwards-npm-cwd-path-"));
+      const missing = mkdtempSync(join(tmpdir(), "awwwards-npm-cwd-missing-"));
+      // A bare `npm` would find this one first: cmd.exe searches the cwd.
+      writeFileSync(
+        join(cwdDir, "npm.cmd"),
+        '@echo off\r\necho cwd > "%~dp0malicious.log"\r\nexit /b 0\r\n',
+      );
+      writeFileSync(
+        join(pathDir, "npm.cmd"),
+        '@echo off\r\necho %* > "%~dp0args.log"\r\nexit /b 0\r\n',
+      );
+      const script = `
+        import { once } from "node:events";
+        process.execPath = process.env.FIXTURE_NODE;
+        const { startSelfUpdate } = await import(${JSON.stringify(
+          new URL("../src/version-check.ts", import.meta.url).href,
+        )});
+        const timer = setTimeout(() => process.exit(3), 10000);
+        const child = startSelfUpdate("1.2.3");
+        if (!child) process.exit(2);
+        const [code] = await once(child, "exit");
+        clearTimeout(timer);
+        process.exit(code ?? 1);
+      `;
+      const { spawn: spawnNode } =
+        await vi.importActual<typeof import("node:child_process")>("node:child_process");
+      const worker = spawnNode(
+        nodeExecPath,
+        ["--experimental-strip-types", "--input-type=module", "--eval", script],
+        {
+          cwd: cwdDir,
+          env: { ...process.env, PATH: pathDir, FIXTURE_NODE: join(missing, "node.exe") },
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 15000,
+        },
+      );
+      const stderr: Buffer[] = [];
+      worker.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      try {
+        const [code] = await once(worker, "close");
+        expect(code, Buffer.concat(stderr).toString()).toBe(0);
+        expect(readFileSync(join(pathDir, "args.log"), "utf8")).toContain(
+          "install -g awwwards-mcp@1.2.3",
+        );
+        expect(existsSync(join(cwdDir, "malicious.log"))).toBe(false);
+      } finally {
+        rmSync(cwdDir, { recursive: true, force: true });
+        rmSync(pathDir, { recursive: true, force: true });
+        rmSync(missing, { recursive: true, force: true });
+      }
+    },
+    20000,
   );
 
   it.skipIf(process.platform !== "win32")(
@@ -386,7 +468,7 @@ describe("checkForUpdate", () => {
     start();
     expect(fakeSpawn).toHaveBeenCalledOnce();
     expect(fetchRegistry).toHaveBeenCalledTimes(2);
-    expect(notices()).toContain("already reserved");
+    expect(notices()).toContain("is already reserved;");
     expect(notices()).not.toContain("attempting to install");
   });
 
@@ -440,7 +522,7 @@ describe("checkForUpdate", () => {
     await drainRefresh();
     expect(checkedState()).toEqual({ checkedAt: now + 1, latest: "2.0.0+new" });
     expect(fakeSpawn).toHaveBeenCalledOnce();
-    expect(notices()).toContain("already reserved");
+    expect(notices()).toContain("is already reserved;");
   });
 
   it("honors a legacy attempt and never reclaims the same version", async () => {
@@ -453,7 +535,7 @@ describe("checkForUpdate", () => {
     vi.stubEnv("AWWWARDS_AUTO_UPDATE", "1");
     start();
     expect(checkedState().checkedAt).toBe(now);
-    expect(notices()).toContain("already reserved");
+    expect(notices()).toContain("is already reserved;");
     expect(fakeSpawn).not.toHaveBeenCalled();
 
     vi.mocked(Date.now).mockReturnValue(now + day / 2);
@@ -480,7 +562,7 @@ describe("checkForUpdate", () => {
     child.emit("error", new Error("fixture spawn failure"));
     expect(notices()).toContain("failed to start");
     start();
-    expect(notices()).toContain("already reserved");
+    expect(notices()).toContain("is already reserved;");
     expect(notices()).not.toContain("attempting to install");
     expect(fakeSpawn).toHaveBeenCalledOnce();
   });
@@ -567,7 +649,8 @@ describe("buildUpdateNotice", () => {
 
   it("does not claim a new attempt when this interval already tried", () => {
     const notice = buildUpdateNotice("1.0.0", "1.1.0", "already-claimed");
-    expect(notice).toContain("already reserved");
+    expect(notice).toContain("is already reserved;");
+    expect(notice).not.toContain("for today");
     expect(notice).not.toContain("attempting to install");
   });
 

@@ -23,7 +23,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -67,6 +67,23 @@ function isExecutableFile(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve npm.cmd through PATH only. A bare `npm` handed to cmd.exe would be
+ * searched in the inherited working directory first, so a project-local
+ * npm.cmd could run instead of the installed one.
+ */
+function findNpmOnPath(): string | null {
+  for (const entry of (process.env.PATH || "").split(delimiter)) {
+    // Windows PATH entries may be quoted; empty and relative entries resolve
+    // against the cwd, so never use those.
+    const dir = entry.replace(/^"(.*)"$/, "$1");
+    if (!dir || !isAbsolute(dir)) continue;
+    const candidate = join(dir, "npm.cmd");
+    if (isRegularFile(candidate)) return candidate;
+  }
+  return null;
 }
 
 export function parseVersion(v: string): [number, number, number] {
@@ -262,16 +279,17 @@ export function selfUpdateCommand(
   if (!isSafeVersion(version)) return null;
   if (platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-    const npmCmd = join(dirname(execPath), "npm.cmd");
-    const install = `install -g awwwards-mcp@${version}`;
+    const sibling = join(dirname(execPath), "npm.cmd");
+    // Prefer the Node-adjacent shim, then PATH; never a bare npm command.
+    const npmCmd = isRegularFile(sibling) ? sibling : findNpmOnPath();
+    if (!npmCmd) return null;
     return {
       cmd: join(systemRoot, "System32", "cmd.exe"),
-      // Fall back to npm.cmd on PATH when the Node-adjacent shim is missing.
       args: [
         "/d",
         "/s",
         "/c",
-        isRegularFile(npmCmd) ? `""${npmCmd}" ${install}"` : `npm ${install}`,
+        `""${npmCmd}" install -g awwwards-mcp@${version}"`,
       ],
       shell: false,
       // Without verbatim quoting Node adds another quote layer and cmd.exe
