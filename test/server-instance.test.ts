@@ -7,7 +7,7 @@ const toolNames = (server: unknown): string[] =>
   Object.keys((server as { _registeredTools?: Record<string, unknown> })._registeredTools ?? {});
 
 describe("server factory", () => {
-  it("returns a distinct server with 41 registrations and instructions per call", () => {
+  it("returns a distinct server with 42 registrations and instructions per call", () => {
     const savedProfile = process.env.AWWWARDS_MCP_PROFILE;
     const savedLegacy = process.env.AWARDS_MCP_PROFILE;
     const savedAtlas = process.env.AWWWARDS_MCP_ATLAS;
@@ -20,8 +20,8 @@ describe("server factory", () => {
       const second = createServer({ handlers, version: "0.0.0-test" });
 
       expect(second).not.toBe(first);
-      expect(toolNames(first)).toHaveLength(41);
-      expect(toolNames(second)).toHaveLength(41);
+      expect(toolNames(first)).toHaveLength(42);
+      expect(toolNames(second)).toHaveLength(42);
       expect(toolNames(second)).toEqual(toolNames(first));
 
       // Instructions live on the underlying protocol Server, not McpServer.

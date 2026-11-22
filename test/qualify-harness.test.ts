@@ -36,6 +36,7 @@ import {
   fixturePath,
   normalizeFixtureUrl,
 } from "../scripts/qualify/fixture.mjs";
+import { CORE_TOOL_NAMES as PROFILE_CORE_TOOL_NAMES } from "../src/tool-profile.js";
 
 const STARTED = "2026-01-01T00:00:00.000Z";
 const FINISHED = "2026-01-01T00:00:01.000Z";
@@ -56,7 +57,7 @@ function skip(id: string, required: boolean) {
 }
 
 function fail(id: string) {
-  return { id, group: "g", required: true, status: "FAIL", reason: "expected 45, got 41" };
+  return { id, group: "g", required: true, status: "FAIL", reason: "expected 46, got 42" };
 }
 
 // A realistic profile list: contract anchors followed by unique fillers.
@@ -106,7 +107,7 @@ describe("qualification report", () => {
     const report = reportWith([pass("artifact.pack"), fail("surface.full.flag_on"), skip("cli.reindex.refusal", true)]);
     expect(report.summary).toMatchObject({ fail: 1, status: "FAIL", exitCode: 1 });
     expect(report.summary.blockers).toEqual([
-      { id: "surface.full.flag_on", reason: "expected 45, got 41" },
+      { id: "surface.full.flag_on", reason: "expected 46, got 42" },
     ]);
     expect(report.summary.unqualified).toHaveLength(1);
   });
@@ -149,34 +150,41 @@ describe("qualification report", () => {
 
 describe("surface expectations", () => {
   it("freezes the flag-off and flag-on counts", () => {
-    expect(expectedCount(false, "full")).toBe(41);
-    expect(expectedCount(false, "core")).toBe(13);
+    expect(expectedCount(false, "full")).toBe(42);
+    expect(expectedCount(false, "core")).toBe(14);
     expect(expectedCount(false, "v2")).toBe(15);
-    expect(expectedCount(true, "full")).toBe(45);
-    expect(expectedCount(true, "core")).toBe(13);
+    expect(expectedCount(true, "full")).toBe(46);
+    expect(expectedCount(true, "core")).toBe(14);
     expect(expectedCount(true, "v2")).toBe(16);
   });
 
+  it("keeps the core anchors in step with the registered core profile", () => {
+    // Sorted comparison: reordering either list is noise, while a swapped or
+    // dropped core tool still fails here.
+    expect([...baselineToolsFor("core")].sort()).toEqual([...PROFILE_CORE_TOOL_NAMES].sort());
+    expect(baselineToolsFor("core")).toHaveLength(14);
+  });
+
   it("accepts the default surface and rejects an early Atlas tool", () => {
-    expect(analyzeSurface({ flagOn: false, profile: "full", names: surfaceNames("full", 41) }).ok).toBe(true);
+    expect(analyzeSurface({ flagOn: false, profile: "full", names: surfaceNames("full", 42) }).ok).toBe(true);
     const analysis = analyzeSurface({
       flagOn: false,
       profile: "full",
-      names: surfaceNames("full", 41, ["search_atlas"]),
+      names: surfaceNames("full", 42, ["search_atlas"]),
     });
     expect(analysis.ok).toBe(false);
     expect(analysis.problems.join("\n")).toMatch(/unexpected Atlas tool/);
   });
 
   it("requires the four full tools only when the flag is on", () => {
-    const enabled = surfaceNames("full", 45, [
+    const enabled = surfaceNames("full", 46, [
       "search_atlas",
       "get_atlas",
       "capture_atlas",
       "export_evidence_pack",
     ]);
     expect(analyzeSurface({ flagOn: true, profile: "full", names: enabled }).ok).toBe(true);
-    const missing = analyzeSurface({ flagOn: true, profile: "full", names: surfaceNames("full", 45) });
+    const missing = analyzeSurface({ flagOn: true, profile: "full", names: surfaceNames("full", 46) });
     expect(missing.ok).toBe(false);
     expect(missing.problems.join("\n")).toMatch(/missing Atlas tool: search_atlas/);
   });
@@ -184,7 +192,7 @@ describe("surface expectations", () => {
   it("adds only export_evidence_pack to v2 and nothing to core", () => {
     const v2 = surfaceNames("v2", 16, ["export_evidence_pack"]);
     expect(analyzeSurface({ flagOn: true, profile: "v2", names: v2 }).ok).toBe(true);
-    const core = surfaceNames("core", 13);
+    const core = surfaceNames("core", 14);
     core[core.length - 1] = "search_atlas";
     const analysis = analyzeSurface({ flagOn: true, profile: "core", names: core });
     expect(analysis.ok).toBe(false);
@@ -192,7 +200,7 @@ describe("surface expectations", () => {
   });
 
   it("rejects duplicate tool names", () => {
-    const list = surfaceNames("full", 41);
+    const list = surfaceNames("full", 42);
     list[list.length - 1] = list[0]!;
     const analysis = analyzeSurface({ flagOn: false, profile: "full", names: list });
     expect(analysis.duplicates).toEqual([list[0]]);
@@ -200,7 +208,7 @@ describe("surface expectations", () => {
   });
 
   it("rejects a swapped baseline tool even when the count matches", () => {
-    const list = surfaceNames("full", 41);
+    const list = surfaceNames("full", 42);
     list[0] = "filler_replacement";
     const analysis = analyzeSurface({ flagOn: false, profile: "full", names: list });
     expect(analysis.ok).toBe(false);
@@ -208,18 +216,18 @@ describe("surface expectations", () => {
   });
 
   it("requires flag-on to equal flag-off plus the Atlas tools", () => {
-    const off = surfaceNames("full", 41);
+    const off = surfaceNames("full", 42);
     const on = [...off, ...ATLAS_FULL_TOOLS];
     expect(analyzeSurface({ flagOn: true, profile: "full", names: on }).ok).toBe(true);
     expect(analyzeSurfaceDelta({ profile: "full", offNames: off, onNames: on }).ok).toBe(true);
   });
 
   it("rejects a non-anchor swap that the count and anchors cannot see", () => {
-    const off = surfaceNames("full", 41);
+    const off = surfaceNames("full", 42);
     const on = [...off, ...ATLAS_FULL_TOOLS];
     const filler = on.findIndex((name) => name.startsWith("filler_"));
     on[filler] = "non_anchor_replacement";
-    // Count (45) and the 13 anchors still pass; only the delta check catches it.
+    // Count (46) and the 14 anchors still pass; only the delta check catches it.
     expect(analyzeSurface({ flagOn: true, profile: "full", names: on }).ok).toBe(true);
     const delta = analyzeSurfaceDelta({ profile: "full", offNames: off, onNames: on });
     expect(delta.ok).toBe(false);
@@ -228,7 +236,7 @@ describe("surface expectations", () => {
   });
 
   it("keeps core identical across the flag and adds only export to v2", () => {
-    const core = surfaceNames("core", 13);
+    const core = surfaceNames("core", 14);
     expect(analyzeSurfaceDelta({ profile: "core", offNames: core, onNames: core }).ok).toBe(true);
     const v2Off = surfaceNames("v2", 15);
     const v2On = [...v2Off, "export_evidence_pack"];

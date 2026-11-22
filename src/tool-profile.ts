@@ -2,8 +2,9 @@
 // a response-byte ceiling. Kept out of the server factory so tests can
 // exercise it without starting the stdio server.
 
-// The 13 tool core an agent needs for the capture -> analyze -> build -> verify
-// loop. AWWWARDS_MCP_PROFILE=core registers only these; default full has all 41.
+// The 14 tool core an agent needs for the brief -> capture -> analyze -> build
+// -> verify loop, discovery included. AWWWARDS_MCP_PROFILE=core registers only
+// these; default full has all 42.
 export const CORE_TOOL_NAMES: readonly string[] = [
   "search_sites",
   "get_site_details",
@@ -18,6 +19,7 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   "get_annual_categories",
   "get_annual_nominees",
   "get_collections",
+  "shortlist_references",
 ];
 
 export const DEFAULT_MAX_RESPONSE_BYTES = 32_000_000;

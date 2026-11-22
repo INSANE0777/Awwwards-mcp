@@ -399,6 +399,8 @@ export interface A11yOpts {
   viewport?: ViewportName;
   /** Text-node sample cap (1..200; default 100). */
   limit?: number;
+  /** Route every browser connection through the public-network guard. */
+  proxyServer?: string;
 }
 
 export interface Rgba {
@@ -611,7 +613,14 @@ export async function analyzeAccessibility(
   }
   let browser: any;
   try {
-    browser = await chromium.launch();
+    browser = await chromium.launch(
+      opts.proxyServer
+        ? {
+            proxy: { server: opts.proxyServer, bypass: "<-loopback>" },
+            args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+          }
+        : {},
+    );
   } catch {
     return { error: A11Y_PLAYWRIGHT_HINT };
   }

@@ -1145,17 +1145,17 @@ describe("v2 scene_stub branch", () => {
     });
   });
 
-  it("keeps the profile counts at 41 full, 13 core and 15 v2", () => {
+  it("keeps the profile counts at 42 full, 14 core and 15 v2", () => {
     const names: string[] = [];
     registerAllTools({
       handlers: {} as never,
       tool: ((name: string) => names.push(name)) as never,
       registerTool: ((name: string) => names.push(name)) as never,
     }, { atlas: false });
-    expect(names).toHaveLength(41);
-    expect(new Set(names).size).toBe(41);
+    expect(names).toHaveLength(42);
+    expect(new Set(names).size).toBe(42);
     expect(names).toContain("build_scene_stub");
-    expect(CORE_TOOL_NAMES).toHaveLength(13);
+    expect(CORE_TOOL_NAMES).toHaveLength(14);
     expect(CORE_TOOL_NAMES).not.toContain("build_scene_stub");
     expect(V2_TOOL_NAMES).toHaveLength(15);
   });

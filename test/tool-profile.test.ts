@@ -37,7 +37,7 @@ function cliToolNames(atlas = false): string[] {
 }
 
 describe("tool profile", () => {
-  it("core profile registers only the 13 core tools and skips the rest", () => {
+  it("core profile registers only the 14 core tools and skips the rest", () => {
     const { server, regs } = fakeServer();
     const env = { AWWWARDS_MCP_PROFILE: "core" };
     const handler = async () => ({ content: [] });
@@ -59,10 +59,10 @@ describe("tool profile", () => {
     ).toBe(true);
   });
 
-  it("full profile (default) registers all 41 tools, unchanged", () => {
+  it("full profile (default) registers all 42 tools, unchanged", () => {
     const names = cliToolNames();
-    expect(names).toHaveLength(41);
-    expect(new Set(names).size).toBe(41);
+    expect(names).toHaveLength(42);
+    expect(new Set(names).size).toBe(42);
 
     const { server, regs } = fakeServer();
     for (const name of names) {
@@ -73,8 +73,8 @@ describe("tool profile", () => {
 
   it("core names are a subset of actual cli registrations (no typos)", () => {
     const names = cliToolNames();
-    expect(CORE_TOOL_NAMES).toHaveLength(13);
-    expect(new Set(CORE_TOOL_NAMES).size).toBe(13);
+    expect(CORE_TOOL_NAMES).toHaveLength(14);
+    expect(new Set(CORE_TOOL_NAMES).size).toBe(14);
     for (const name of CORE_TOOL_NAMES) expect(names).toContain(name);
     // Category discovery is core: the annual tools are unusable without it.
     expect(CORE_TOOL_NAMES).toContain("get_annual_categories");

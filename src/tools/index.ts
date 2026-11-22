@@ -48,6 +48,7 @@ import {
   registerSearchMotion,
 } from "./build.js";
 import { registerCaptureScene3d } from "./scene.js";
+import { registerShortlistReferences } from "./shortlist.js";
 import {
   registerCaptureAtlas,
   registerExportEvidencePack,
@@ -107,7 +108,9 @@ export function registerAllTools(
   registerSearchMotion(ctx);
   registerNewWinners(ctx);
   registerWatchSite(ctx);
-  // Experimental Atlas surface: appended so the historical 41 keep their order.
+  registerShortlistReferences(ctx);
+  // Experimental Atlas surface: appended after the 41 historical tools and
+  // shortlist so all of them keep their order.
   if (options.atlas ?? atlasEnabled()) {
     registerSearchAtlas(ctx);
     registerGetAtlas(ctx);

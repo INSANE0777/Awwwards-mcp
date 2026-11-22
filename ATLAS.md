@@ -6,7 +6,9 @@ Atlas is the section-level evidence layer for awwwards-mcp. It is **opt-in** and
 AWWWARDS_MCP_ATLAS=1
 ```
 
-It adds capture, segmentation, checkpoint evidence, publication, candidate section labels, local search and evidence packs to the existing SQLite cache. With `AWWWARDS_MCP_ATLAS=1` it also adds four experimental MCP tools (`search_atlas`, `get_atlas`, `capture_atlas`, `export_evidence_pack`) and their v2 branches. With the flag off, the surfaces stay at **41 full / 13 core / 15 v2**.
+It adds capture, segmentation, checkpoint evidence, publication, candidate section labels, local search and evidence packs to the existing SQLite cache. With `AWWWARDS_MCP_ATLAS=1` it also adds four experimental MCP tools (`search_atlas`, `get_atlas`, `capture_atlas`, `export_evidence_pack`) and their v2 branches. With the flag off, the surfaces stay at **42 full / 14 core / 15 v2**.
+
+`shortlist_references` is a stable v1 tool that does not depend on Atlas, F9 or evidence packs; Atlas remains experimental and off by default.
 
 ## Status
 
@@ -62,12 +64,12 @@ This is the operator-facing guide to the Phase 6 surface. `docs/atlas-spec.md` �
 
 | Profile | Flag off | Flag on |
 |---|---:|---:|
-| `full` (default) | 41 | 45 |
-| `core` | 13 | 13 |
+| `full` (default) | 42 | 46 |
+| `core` | 14 | 14 |
 | `v2` | 15 | 16 |
 
-- Flag on adds `search_atlas`, `get_atlas`, `capture_atlas` and `export_evidence_pack` to `full` (41 → 45). None is a `core` tool, so `core` stays 13. `v2` gains one tool, `export_evidence_pack` (15 → 16); the other Atlas operations are branches of existing v2 tools.
-- Flag off: the four tools are not registered. The v2 Atlas branches still validate their request shape but return `FEATURE_DISABLED` without network access or mutation, and the surface counts stay 41 / 13 / 15.
+- Flag on adds `search_atlas`, `get_atlas`, `capture_atlas` and `export_evidence_pack` to `full` (42 → 46). None is a `core` tool, so `core` stays 14. `v2` gains one tool, `export_evidence_pack` (15 → 16); the other Atlas operations are branches of existing v2 tools.
+- Flag off: the four tools are not registered. The v2 Atlas branches still validate their request shape but return `FEATURE_DISABLED` without network access or mutation, and the surface counts stay 42 / 14 / 15.
 - Atlas tables and files are additive and are not removed when the flag is turned off. Unsetting the flag is the operational rollback; an older binary ignores the additive tables and keeps using the legacy tools.
 - These are surface counts, not a claim about any one installed build. Verify them at release with `npm run protocol:smoke` (flag off) and `AWWWARDS_MCP_ATLAS=1 npm run protocol:smoke` (flag on), and never hard-code one count for both states.
 
@@ -1104,7 +1106,7 @@ Phase 6 tool surfaces, v2 branches and Atlas CLI actions are implemented and gat
 - real-page density and rights checks on the held-out corpus
 - component-pack and screenshot copy policy sign-off before any public distribution
 
-Until the flag is enabled, the surfaces stay 41 full / 13 core / 15 v2. With `AWWWARDS_MCP_ATLAS=1` they are 45 / 13 / 16.
+Until the flag is enabled, the surfaces stay 42 full / 14 core / 15 v2. With `AWWWARDS_MCP_ATLAS=1` they are 46 / 14 / 16.
 
 ## Verification
 

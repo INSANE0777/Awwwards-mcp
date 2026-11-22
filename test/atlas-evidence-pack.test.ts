@@ -3776,7 +3776,7 @@ describe("Atlas evidence packs", () => {
     expect(validateEvidencePack(built.directory).ok).toBe(true);
   });
 
-  it("keeps the public surfaces at 41 full, 13 core and 15 v2 when Atlas is off", () => {
+  it("keeps the public surfaces at 42 full, 14 core and 15 v2 when Atlas is off", () => {
     const registrations: string[] = [];
     registerAllTools(
       {
@@ -3786,9 +3786,9 @@ describe("Atlas evidence packs", () => {
       },
       { atlas: false },
     );
-    expect(registrations).toHaveLength(41);
-    expect(new Set(registrations).size).toBe(41);
-    expect(CORE_TOOL_NAMES).toHaveLength(13);
+    expect(registrations).toHaveLength(42);
+    expect(new Set(registrations).size).toBe(42);
+    expect(CORE_TOOL_NAMES).toHaveLength(14);
     expect(V2_TOOL_NAMES).toHaveLength(15);
     expect(registrations).not.toContain("export_evidence_pack");
   });

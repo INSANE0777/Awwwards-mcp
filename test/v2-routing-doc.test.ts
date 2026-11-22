@@ -90,6 +90,10 @@ const RETAINED: readonly string[] = [
   "analyze_network_capture",
 ];
 
+// 1.x tools with no v2 branch: v2 keeps its 15/16 surface and never registers
+// these, so they get neither a routing row nor a retained row.
+const V1_ONLY: readonly string[] = ["shortlist_references"];
+
 // The intended branch for every legacy operation. Multi-branch legacy tools
 // list each documented target in doc order; a valid-but-wrong branch (e.g.
 // DNA routed to hover) fails here even though the schema accepts it.
@@ -152,7 +156,9 @@ function fullToolNames(): string[] {
   return names;
 }
 const FULL_TOOL_NAMES = fullToolNames();
-const DERIVED_REPLACED = FULL_TOOL_NAMES.filter((name) => !RETAINED.includes(name));
+const DERIVED_REPLACED = FULL_TOOL_NAMES.filter(
+  (name) => !RETAINED.includes(name) && !V1_ONLY.includes(name),
+);
 
 type JsonSchema = {
   oneOf?: Array<{ properties?: Record<string, { const?: unknown }> }>;
@@ -235,6 +241,15 @@ describe("v2-routing.md", () => {
     expect(ROUTING_DOC).toContain(`All ${DERIVED_REPLACED.length} replaced`);
     expect(rows.map((row) => row.from).sort()).toEqual([...REPLACED_1X].sort());
     for (const name of REPLACED_1X) expect(ROUTING_DOC, name).toContain(name);
+  });
+
+  it("keeps v1-only tools registered in full/core and out of v2", () => {
+    for (const name of V1_ONLY) {
+      expect(FULL_TOOL_NAMES, name).toContain(name);
+      expect(CORE_TOOL_NAMES, name).toContain(name);
+      expect(V2_TOOL_NAMES, name).not.toContain(name);
+      expect(section("## Not available in v2"), name).toContain(name);
+    }
   });
 
   it("pins every legacy operation to its intended v2 branch", () => {
