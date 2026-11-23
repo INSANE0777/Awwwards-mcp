@@ -3,7 +3,7 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
-## Unreleased
+## v1.22.0 - 2026-11-23
 
 ### Reference shortlist
 
