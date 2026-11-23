@@ -616,6 +616,12 @@ export interface Handlers {
     checkpoints?: SceneCheckpointInput[];
     assetOrigins?: string[];
     adapters?: SceneAdapterName[];
+    emit?: "evidence" | "dossier";
+    clock?: "real" | "virtual";
+    samplePoints?: number[];
+    capturePasses?: boolean;
+    captureShaders?: boolean;
+    maxDrawCalls?: number;
     includeViewportShots?: boolean;
     signal?: AbortSignal;
   }): Promise<ToolResponse>;

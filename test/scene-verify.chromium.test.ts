@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { captureScene3d } from "../src/scene-capture.js";
-import type { SceneEvidence } from "../src/scene-capture.js";
+import type { SceneEvidence, SceneEvidenceV2 } from "../src/scene-capture.js";
 import { verifyScene3d } from "../src/scene-verify.js";
 
 // Real-browser regressions for the verify_build scene3d gate: a local fixture
@@ -525,6 +525,7 @@ if (!chromiumAvailable && REQUIRED) {
     let fixture: Fixture;
     let dir: string;
     let pack: SceneEvidence;
+    let dossierPack: SceneEvidenceV2;
     let webglPack: SceneEvidence | null = null;
     let webglSkipReason = "";
 
@@ -574,6 +575,21 @@ if (!chromiumAvailable && REQUIRED) {
       });
       if ("error" in result) throw new Error(result.error);
       pack = result;
+
+      // Persisted v2 dossier for the round-trip test below; the capture path is
+      // the prod writer, not a hand-built pack.
+      const dossierResult = await captureScene3d(`${fixture.origin}/reference.html`, {
+        allowPrivateOrigins: [fixture.origin],
+        sceneDir: dir,
+        includeViewportShots: false,
+        emit: "dossier",
+        samplePoints: [0, 0.5, 1],
+      });
+      if ("error" in dossierResult) throw new Error(dossierResult.error);
+      if (dossierResult.id !== "scene-evidence-v2") {
+        throw new Error(`dossier capture returned ${dossierResult.id}, not scene-evidence-v2`);
+      }
+      dossierPack = dossierResult;
 
       try {
         if (!(await webglReady())) {
@@ -684,6 +700,31 @@ if (!chromiumAvailable && REQUIRED) {
           expect(checkpoint.diffImage).toContain(join("verify"));
         }
         expect(result.limitations.join(" ")).toContain("Pixel comparison only");
+      },
+    );
+
+    it(
+      "a persisted v2 dossier pack round-trips through verify and compares every keyframe",
+      { timeout: 180_000 },
+      async () => {
+        const result = await verify("build-same.html", {
+          tolerances,
+          referenceCaptureId: dossierPack.captureId,
+        });
+        if ("error" in result) throw new Error(result.error);
+
+        // The old v1-only reader rejected this pack by id before any replay.
+        expect(result.limitations.join(" ")).not.toContain("not a scene-evidence-v1 pack");
+        expect(result.status).toBe("comparable");
+        expect(result.verdict).toBe("within-tolerance");
+        expect(result.requested).toBe(3);
+        expect(result.compared).toBe(3);
+        expect(result.keyframes).toEqual({ requested: 3, compared: 3 });
+        expect(result.checkpoints).toHaveLength(3);
+        for (const checkpoint of result.checkpoints) {
+          expect(checkpoint.status).toBe("comparable");
+          expect(checkpoint.changedPixelFraction).toBe(0);
+        }
       },
     );
 

@@ -187,6 +187,45 @@ const captureRequestSchema = z
       .max(10)
       .optional()
       .describe("Up to 10 checkpoints (default 6 evenly spaced ratios from 0 to 1)"),
+    emit: z
+      .enum(["evidence", "dossier"])
+      .optional()
+      .describe('Output shape: "evidence" (default, v1 pack) or "dossier" (scene-evidence-v2 dossier)'),
+    clock: z
+      .enum(["real", "virtual"])
+      .optional()
+      .describe(
+        'Timestamp source recorded only by dossiers: "real" (default) or "virtual". v1 accepts and ignores "real"; "virtual" requires emit:"dossier" and is rejected for v1 evidence output',
+      ),
+    samplePoints: z
+      .array(z.number().min(0).max(1))
+      .min(2)
+      .max(24)
+      .optional()
+      .describe(
+        "Ordered scroll ratios from 0 to 1 (2-24 for dossier, 2-10 otherwise, strictly increasing) used instead of checkpoints",
+      ),
+    capturePasses: z
+      .boolean()
+      .optional()
+      .describe(
+        "Accepted for forward compatibility; render passes are not captured yet (default false)",
+      ),
+    captureShaders: z
+      .boolean()
+      .optional()
+      .describe(
+        "Accepted for forward compatibility; shader programs are not captured yet (default false)",
+      ),
+    maxDrawCalls: z
+      .number()
+      .int()
+      .min(1)
+      .max(2000)
+      .optional()
+      .describe(
+        "Accepted for forward compatibility; no pass or shader capture consumes this budget yet (default 500)",
+      ),
     assetOrigins: z
       .array(sceneHttpUrlSchema)
       .max(8)
@@ -200,7 +239,45 @@ const captureRequestSchema = z
       .default(true)
       .describe("Save a full-viewport screenshot beside each clipped canvas frame"),
   })
-  .strict();
+  .strict()
+  .superRefine((request, ctx) => {
+    if (request.samplePoints !== undefined && request.checkpoints !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["samplePoints"],
+        message: "samplePoints cannot be combined with checkpoints; provide only one stop list",
+      });
+    }
+    if (request.clock === "virtual" && request.emit !== "dossier") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["clock"],
+        message: 'clock:"virtual" requires emit:"dossier"; virtual time is not recorded by v1 evidence packs',
+      });
+    }
+    if (
+      request.emit === "dossier" &&
+      request.checkpoints !== undefined &&
+      request.checkpoints.length < 2
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["checkpoints"],
+        message: 'emit:"dossier" requires at least 2 stops; provide at least 2 checkpoints or samplePoints',
+      });
+    }
+    if (
+      request.samplePoints !== undefined &&
+      request.emit !== "dossier" &&
+      request.samplePoints.length > 10
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["samplePoints"],
+        message: 'samplePoints accepts at most 10 values unless emit is "dossier"',
+      });
+    }
+  });
 
 const downloadRequestSchema = z
   .object({
@@ -238,6 +315,12 @@ export async function runSceneRequest(
       checkpoints: request.checkpoints,
       assetOrigins: request.assetOrigins,
       ...(request.adapters !== undefined ? { adapters: request.adapters } : {}),
+      ...(request.emit !== undefined ? { emit: request.emit } : {}),
+      ...(request.clock !== undefined ? { clock: request.clock } : {}),
+      ...(request.samplePoints !== undefined ? { samplePoints: request.samplePoints } : {}),
+      ...(request.capturePasses !== undefined ? { capturePasses: request.capturePasses } : {}),
+      ...(request.captureShaders !== undefined ? { captureShaders: request.captureShaders } : {}),
+      ...(request.maxDrawCalls !== undefined ? { maxDrawCalls: request.maxDrawCalls } : {}),
       includeViewportShots: request.includeViewportShots,
       ...(signal ? { signal } : {}),
     });
@@ -254,7 +337,7 @@ export async function runSceneRequest(
 export function registerCaptureScene3d(ctx: ToolContext): void {
   ctx.tool(
     "capture_scene_3d",
-    "Scene evidence in two strict operations. Passive capture and download_assets are stable; the adapters remain experimental. request.op:\"capture\" records a passive evidence pack for a WebGL/canvas page: at each checkpoint it scrolls the selected root, optionally moves the pointer, and saves a viewport screenshot plus a clipped canvas screenshot, with requested/actual scroll, canvas CSS rect/backing size/DPR and elapsed time. It also records a redacted inventory of the page's own responses (URL, MIME, size when declared, resource type, texture/model/HDR/shader/script/font/image guess, and an assetId per row) and passive framework hints (THREE.REVISION, BABYLON.Engine.Version, pc.version, matching script URLs, canvas count) without calling getContext or installing hooks. request.op:\"download_assets\" downloads up to 32 inventory assets from one capture: downloading is a licensing decision, so rights.basis (owned|licensed|permission) and rights.evidence are mandatory, are recorded with a timestamp in scene-captures/<captureId>/provenance.json, and are not verified by the server - do not download assets you may not use. It only fetches observed inventory URLs that carry no query string, fragment or credentials; there is no crawling, no guessed model or source-map URL and no credential use. Original bytes are written under scene-captures/<captureId>/assets with SHA-256 and an extension validated from MIME/magic (glb, gltf, bin, png, jpg, webp, ktx2, hdr, exr); unknown types are skipped unless allowUnknown saves them as .bin. Caps: 16 MiB per file, 64 MiB per run, 5 manual redirects, 1 request/second, one request at a time, 15s body deadline, 120s overall; every hop is DNS-validated and loopback/private/metadata/reserved addresses are refused. Honest scope: without the opt-in adapters no scene graph, camera, controls, shader source or geometry is recovered - frames show rendered output only. adapters are experimental and opt-in (at most two entries, each once): \"three\" reads objects reachable from window.THREE, window.scene/camera/renderer and window.app/experience/viewer/world after load (no heap crawl, no hooks, no network) and adds a bounded evidence.three summary (max 500 nodes, depth 20, 8 cameras, 8 lights, 32 materials, 200 texture URLs); \"spector\" needs the optional spectorjs package, installs its bundle as an init script before load and captures one WebGL frame into a bounded evidence.spector summary (command names/counts, context attributes, analyses, max 8 programs, 16 shaders, 64 KiB per shader source and 256 KiB of shader source total; command arguments, state, results, stack traces and memory are never transferred, and shader source is untrusted page text that is never executed). scene/camera/controls/geometry are marked available only for what three actually returned, shaders only when spector captured at least one source, and neither adapter promises scene recovery. Evidence is written to scene-captures/<captureId>/evidence.json plus PNG frames; responses are compact JSON with assetIds and downloadability, paths, hashes, counts, coverage and limitations, never inline image or asset bodies. The capture op requires the optional playwright dependency; download_assets does not.",
+    "Scene evidence in two strict operations. Passive capture and download_assets are stable; the adapters remain experimental. request.op:\"capture\" records a passive evidence pack for a WebGL/canvas page: at each checkpoint it scrolls the selected root, optionally moves the pointer, and saves a viewport screenshot plus a clipped canvas screenshot, with requested/actual scroll, canvas CSS rect/backing size/DPR and elapsed time. It also records a redacted inventory of the page's own responses (URL, MIME, size when declared, resource type, texture/model/HDR/shader/script/font/image guess, and an assetId per row) and passive framework hints (THREE.REVISION, BABYLON.Engine.Version, pc.version, matching script URLs, canvas count) without calling getContext or installing hooks. request.op:\"download_assets\" downloads up to 32 inventory assets from one capture: downloading is a licensing decision, so rights.basis (owned|licensed|permission) and rights.evidence are mandatory, are recorded with a timestamp in scene-captures/<captureId>/provenance.json, and are not verified by the server - do not download assets you may not use. It only fetches observed inventory URLs that carry no query string, fragment or credentials; there is no crawling, no guessed model or source-map URL and no credential use. Original bytes are written under scene-captures/<captureId>/assets with SHA-256 and an extension validated from MIME/magic (glb, gltf, bin, png, jpg, webp, ktx2, hdr, exr); unknown types are skipped unless allowUnknown saves them as .bin. Caps: 16 MiB per file, 64 MiB per run, 5 manual redirects, 1 request/second, one request at a time, 15s body deadline, 120s overall; every hop is DNS-validated and loopback/private/metadata/reserved addresses are refused. Honest scope: without the opt-in adapters no scene graph, camera, controls, shader source or geometry is recovered - frames show rendered output only. adapters are experimental and opt-in (at most two entries, each once): \"three\" reads objects reachable from window.THREE, window.scene/camera/renderer and window.app/experience/viewer/world after load (no heap crawl, no hooks, no network) and adds a bounded evidence.three summary (max 500 nodes, depth 20, 8 cameras, 8 lights, 32 materials, 200 texture URLs); \"spector\" needs the optional spectorjs package, installs its bundle as an init script before load and captures one WebGL frame into a bounded evidence.spector summary (command names/counts, context attributes, analyses, max 8 programs, 16 shaders, 64 KiB per shader source and 256 KiB of shader source total; command arguments, state, results, stack traces and memory are never transferred, and shader source is untrusted page text that is never executed). scene/camera/controls/geometry are marked available only for what three actually returned, shaders only when spector captured at least one source, and neither adapter promises scene recovery. Dossier: emit:\"dossier\" writes a scene-evidence-v2 dossier instead of the v1 pack, with 2-24 stops via samplePoints (2-10 via checkpoints), a conservative classification (R1-R4) and reasons, runtime/renderer evidence, the reachable Three graph, per-stop keyframes (camera, bounded transforms, SHA-256 of the canvas PNG), a metadata-only asset inventory with license unknown, bounded shader refs, coverage/blind spots and dossier.md. clock is recorded only by dossiers (v1 accepts and ignores clock:\"real\"), and virtual requires emit:\"dossier\"; capturePasses is accepted but renderer.passes is unavailable in 1.22 (no fake pass DAG), while captureShaders/maxDrawCalls are accepted for forward compatibility and not captured yet. workers are not inspected, OffscreenCanvas is not inspected; the renderer API is not probed, so renderer.api is usually \"unknown\" and WebGPU classification is not reached from capture, and a dossier is evidence only: no static or build_project replay. download_assets is unchanged and accepts a v1 or scene-evidence-v2 inventory. Evidence is written to scene-captures/<captureId>/evidence.json plus PNG frames; responses are compact JSON with assetIds and downloadability, paths, hashes, counts, coverage and limitations, never inline image or asset bodies. The capture op requires the optional playwright dependency; download_assets does not.",
     { request: sceneRequestSchema.describe("Exactly one scene operation: choose op and its fields") },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     (args: { request: SceneRequest }, sdkCtx?: { mcpReq?: { signal?: AbortSignal } }) =>

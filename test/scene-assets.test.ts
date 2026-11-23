@@ -47,14 +47,17 @@ interface InventoryRow {
 }
 
 /** Writes a minimal but real evidence.json into a fresh scene-captures root. */
-function captureWith(rows: InventoryRow[]): { root: string; dir: string } {
+function captureWith(
+  rows: InventoryRow[],
+  id: "scene-evidence-v1" | "scene-evidence-v2" = "scene-evidence-v1",
+): { root: string; dir: string } {
   const root = join(tmpDir(), "scene-captures");
   const dir = join(root, captureId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "evidence.json"),
     JSON.stringify({
-      id: "scene-evidence-v1",
+      id,
       captureId,
       resources: rows.map((row) => ({
         assetId: row.assetId,
@@ -269,6 +272,24 @@ describe("downloadSceneAssets transfers", () => {
     });
     // Nothing partial survives a successful publish.
     expect(readdirSync(join(dir, "assets")).filter((name) => name.includes(".partial-"))).toEqual([]);
+  });
+
+  it("accepts a scene-evidence-v2 pack and keeps captureId, resources and paths unchanged", async () => {
+    const { root, dir } = captureWith(
+      [{ assetId: "asset-1", url: "https://cdn.test/model" }],
+      "scene-evidence-v2",
+    );
+    const result = assetsOf(
+      await download(root, ["asset-1"], async () =>
+        hop(200, { "content-type": "image/png" }, [PNG]),
+      ),
+    );
+
+    expect(result.captureId).toBe(captureId);
+    expect(result).toMatchObject({ downloaded: 1, skipped: 0, totalBytes: PNG.length });
+    expect(result.files[0]?.assetId).toBe("asset-1");
+    expect(result.files[0]?.path).toBe(join(dir, "assets", "asset-1.png"));
+    expect(readFileSync(result.files[0]!.path).equals(PNG)).toBe(true);
   });
 
   it("rejects a body over the per-file cap without leaving a partial file", async () => {

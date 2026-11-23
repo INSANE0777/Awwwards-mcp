@@ -3,6 +3,15 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## Unreleased
+
+### 3D rebuild dossier (opt-in)
+
+- `capture_scene_3d` `op:"capture"` gains opt-in `emit:"dossier"`. It writes a `scene-evidence-v2` dossier (also copied to `evidence-v2.json`) with a conservative R1-R4 classification and reasons, runtime/renderer evidence, the reachable Three graph, per-stop keyframes (camera, bounded transforms, SHA-256 of the canvas PNG), a metadata-only asset inventory with `license:"unknown"`, bounded shader refs with `engine-stock`/`custom` origin, coverage/blind spots and a `dossier.md` operator summary. A dossier takes 2-24 stops from `samplePoints`, or 2-10 from `checkpoints`; `clock` is recorded only by dossiers (`"real"` is accepted and ignored on v1), and `virtual` requires the dossier.
+- `verify_build.scene3d` accepts a scene-evidence-v2 dossier, replays its 2-24 stops 1:1 and passes through `referenceClass`/`blindSpots`; keyframes are parity-checked metadata (`{requested, compared}`), not replayed camera/transforms, and the pixel verdict still never certifies the classification. `capture_scene_3d` `op:"download_assets"` (and `capture_page` `kind:"scene"`) reads a scene-evidence-v2 inventory unchanged. Typed guards accept both pack ids while validating keyframe/checkpoint parity and the scene-evidence-v2 coverage block before any browser work.
+- Evidence only: `capturePasses` still returns `passes: unavailable` in 1.22 (no fake pass DAG); `captureShaders`/`maxDrawCalls` are accepted for forward compatibility and not captured yet; workers are not inspected, `OffscreenCanvas` is not inspected; the renderer API is not probed, so `renderer.api` is usually unknown; static replay and `build_project` replay are not included.
+- No new tools, dependencies or counts: the surface remains 41/13/15 (45/13/16 with Atlas).
+
 ## v1.21.1 - 2026-11-20
 
 ### Auto-update actually runs
