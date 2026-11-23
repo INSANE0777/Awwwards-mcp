@@ -890,19 +890,15 @@ Install them with the [`skills` CLI](https://skills.sh):
 npx skills add INSANE0777/awwwards-skills
 ```
 
-Documented pairing: **`awwwards-mcp@1.22.0`** with [`skills-v2026.11.19`](https://github.com/INSANE0777/awwwards-skills/tree/skills-v2026.11.19).
-The skills tag predates `shortlist_references` and the 3D rebuild dossier and
-does not document them, so a matching skills tag follows separately. `1.21.1`
-was an auto-update hotfix with no tool, schema or skill-surface change. That
-earlier pairing was checked manually on **2026-11-19** against the tag: all nine
-routing copies were byte-identical to the `test/fixtures/v2-routing.md` shipped
-in 1.21.0, the skills structural validator passed, and 1.21 kept the
-**41 / 13 / 15** tool surface (**45 / 13 / 16** with `AWWWARDS_MCP_ATLAS=1`)
-from 1.20. That check does not cover 1.22: its surface is **42 / 14 / 15**
-(**46 / 14 / 16** with Atlas), and the "Not available in v2" row and the 42/14
-table must be mirrored to the skills repository. This is a one-time manual
-catalog/routing check, not an automated cross-repo test or a replay of every
-skill workflow; rerun it before a later release changes either side.
+Documented pairing: **`awwwards-mcp@1.22.0` + [`skills-v2026.11.23`](https://github.com/INSANE0777/awwwards-skills/tree/skills-v2026.11.23)**.
+The tag was checked manually on **2026-11-23**: all nine routing copies are
+byte-identical to the `test/fixtures/v2-routing.md` shipped in 1.22.0, the
+skills structural validator passes, and both local skill directories were
+refreshed from the tag. It covers **42 / 14 / 15** (**46 / 14 / 16** with
+`AWWWARDS_MCP_ATLAS=1`), `shortlist_references` in full/core, the 3D rebuild
+dossier, and the unchanged v2 surface. This is a one-time manual catalog/routing
+check, not an automated cross-repo test or a replay of every skill workflow;
+rerun it before a later release changes either side.
 
 The CLI detects your agents and lets you choose a project or user-level
 install, then links each skill into that agent's skills directory. Useful
