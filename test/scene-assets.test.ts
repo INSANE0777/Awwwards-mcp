@@ -12,7 +12,7 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   SCENE_ASSET_LIMITS,
@@ -288,8 +288,11 @@ describe("downloadSceneAssets transfers", () => {
     expect(result.captureId).toBe(captureId);
     expect(result).toMatchObject({ downloaded: 1, skipped: 0, totalBytes: PNG.length });
     expect(result.files[0]?.assetId).toBe("asset-1");
-    expect(realpathSync(result.files[0]!.path)).toBe(
-      realpathSync(join(dir, "assets", "asset-1.png")),
+    // Canonicalize both sides with the OS resolver: Windows 8.3 names such as
+    // RUNNER~1 vs runneradmin disagree under Node's JS realpath but not native.
+    const captureRoot = realpathSync.native(dir);
+    expect(relative(captureRoot, realpathSync.native(result.files[0]!.path))).toBe(
+      join("assets", "asset-1.png"),
     );
     expect(readFileSync(result.files[0]!.path).equals(PNG)).toBe(true);
   });
