@@ -411,6 +411,16 @@
             "openWorldHint": true
           },
           "outputSchema": false
+        },
+        {
+          "name": "shortlist_references",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true
+          },
+          "outputSchema": false
         }
       ],
       "core": [
@@ -540,6 +550,16 @@
             "readOnlyHint": true,
             "destructiveHint": false,
             "idempotentHint": true,
+            "openWorldHint": true
+          },
+          "outputSchema": false
+        },
+        {
+          "name": "shortlist_references",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
             "openWorldHint": true
           },
           "outputSchema": false
@@ -1111,6 +1131,16 @@
           "outputSchema": false
         },
         {
+          "name": "shortlist_references",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true
+          },
+          "outputSchema": false
+        },
+        {
           "name": "search_atlas",
           "annotations": {
             "readOnlyHint": true,
@@ -1281,6 +1311,16 @@
             "openWorldHint": true
           },
           "outputSchema": false
+        },
+        {
+          "name": "shortlist_references",
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true
+          },
+          "outputSchema": false
         }
       ],
       "v2": [
@@ -1447,5 +1487,5 @@
       ]
     }
   },
-  "package": "awwwards-mcp@1.20.0"
+  "package": "awwwards-mcp@1.21.1"
 }

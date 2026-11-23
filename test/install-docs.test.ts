@@ -1,15 +1,29 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { shortlistInputSchema } from "../src/shortlist/contracts.js";
 
 // Documentation guard: browser tools import playwright/ffmpeg-static from the
 // package's install location, so `npx` alone cannot support them. The README
 // must keep saying so, or users will file "playwright missing" bugs forever.
 const README = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const DEV = readFileSync(new URL("../README.dev.md", import.meta.url), "utf8");
+const CONTRIBUTING = readFileSync(new URL("../CONTRIBUTING.md", import.meta.url), "utf8");
+const CHANGELOG = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 const PKG = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as { scripts?: Record<string, string>; files?: string[] };
 const flatten = (text: string) => text.replace(/\s+/g, " ");
+
+// Isolates the unreleased notes: pins there must not be satisfied by an
+// already-shipped section's wording.
+const unreleasedSection = (text: string): string => {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "## Unreleased");
+  if (start === -1) throw new Error("CHANGELOG.md has no ## Unreleased section");
+  let end = start + 1;
+  while (end < lines.length && !lines[end].startsWith("## ")) end += 1;
+  return lines.slice(start + 1, end).join("\n");
+};
 
 describe("install documentation", () => {
   it("README warns that npx is the core no-browser path", () => {
@@ -34,7 +48,7 @@ describe("install documentation", () => {
     expect(text).toContain("npm run build && npm run smoke:browser");
     expect(text).toContain("127.0.0.1");
     expect(text).toContain("browser-smoke: pack + global install");
-    expect(text).toContain("browser-smoke: connected to awwwards-mcp, 41 tools");
+    expect(text).toContain("browser-smoke: connected to awwwards-mcp, 42 tools");
     expect(text).toContain("browser-smoke: analyze_page_structure -> 4 bands");
     expect(text).toContain("browser-smoke: capture_live_site -> image/png");
     expect(text).toContain("browser-smoke: PASS");
@@ -92,6 +106,193 @@ describe("install documentation", () => {
 
   it("does not ship the skills that moved to awwwards-skills", () => {
     expect(PKG.files).not.toContain("skills");
+  });
+
+  it("README describes the reference shortlist, artifacts and exact status rule", () => {
+    const text = flatten(README);
+    expect(text).toContain("`shortlist_references`");
+    expect(text).toContain("`limit` is 3–5 (default 5)");
+    expect(text).toContain("up to 5 Awwwards references labelled `recommend` or `consider`");
+    expect(text).toContain(
+      "Candidates that fail a hard constraint are listed separately under `excluded` with a reason and do not count toward the limit",
+    );
+    expect(text).not.toContain("labelled `recommend`, `consider` or `avoid`");
+    expect(text).toContain("Each criterion needs `query` or `tags`");
+    for (const artifact of [
+      "shortlist.md",
+      "shortlist.html",
+      "shortlist.json",
+      "reference-decision.json",
+    ]) {
+      expect(text).toContain(`\`${artifact}\``);
+    }
+    expect(text).toContain("an `assets/` directory when thumbnails or screenshots were written");
+    expect(text).toContain("it holds thumbnails plus full-page or viewport screenshots");
+    expect(text).toContain("`viewport` supports `desktop` and `mobile`");
+    expect(text).toContain("`shortlist.json` carries each candidate's artifact paths");
+    expect(text).toContain(
+      "`reference-decision.json` is a blank review template (`decision: null`) and is never overwritten on rerun",
+    );
+    expect(text).toContain("`reference-decision.new.json`");
+    expect(text).toContain("`screenshot-viewport` limitation");
+    expect(text).toContain(
+      "Accessibility stays `unknown` unless the host injects an accessibility peer; the shipped CLI does not, so the dossier records that limitation",
+    );
+    expect(text).toContain(
+      "`targetStack` is annotation-only; it never filters",
+    );
+    expect(text).toContain(
+      "Criteria are discovery queries: coverage means a returned candidate was surfaced by that criterion, not that a measured property matches it",
+    );
+    expect(text).toContain(
+      "`motionBudget` is a ceiling only; there is no minimum-motion or semantic-fit filter",
+    );
+    expect(text).toContain("`status` measures criterion coverage, not creative fitness");
+    expect(text).toContain("including `motionLevel`");
+    expect(text).toContain("are the fitness signal for the reviewer");
+    expect(text).toContain("`allow3d:\"none\"` excludes only a recognized 3D library");
+    expect(text).toContain(
+      "canvas scroll mode or raw WebGL is returned as `consider` with a 3D-unverified reason (`3d-unverified` in unknowns for raw WebGL), never claimed 3D-free",
+    );
+    expect(text).toContain(
+      "`motionBudget` is a real ceiling: `minimal` excludes any measured ScrollTrigger, scrub or pin; `scroll` allows triggers/scrubs but not pins; `expressive` allows pins",
+    );
+    expect(text).toContain(
+      "An explicit seed that no criterion surfaces has no criterion coverage, so it never covers a `must`; coverage comes from discovery hits on returned candidates, and a seed that is also surfaced by a criterion can cover it",
+    );
+    expect(text).toContain("`outDir` must be absolute");
+    expect(text).toContain("no hosting or telemetry");
+    expect(text).toContain("`must` criteria are coverage requirements, not per-candidate passes");
+    expect(text).toContain(
+      "Status describes the returned list after `limit`: `ok` only when every `must` criterion is covered by a `recommend` in that list; `partial` when a `must` criterion has only `consider`; `inconclusive` when a `must` criterion is uncovered, when no candidates are returned, or when all candidates were excluded",
+    );
+    expect(text).toContain(
+      "Precedence: if any `must` criterion is uncovered the result is `inconclusive`, even when another `must` criterion has only `consider`; `partial` requires every `must` criterion to have at least a `consider` and at least one `must` criterion to have no `recommend`",
+    );
+    expect(text).toContain(
+      "With no `must` criteria, `ok` needs at least one `recommend`, consider-only is `partial`, and an empty or all-excluded list is `inconclusive`",
+    );
+    expect(text).toContain(
+      "A covering `recommend` dropped by `limit` can change the status; the dossier always reflects the returned list",
+    );
+    expect(text).toContain(
+      "Unknown evidence on a non-required candidate does not by itself change the status, and every candidate lists its unknowns",
+    );
+    expect(text).not.toContain("never `ok`");
+    expect(text).toContain("adoption unproven");
+    expect(text).toContain("No taste score, no auto-pick");
+    expect(text).not.toContain("the suite's one local-write tool");
+    expect(text).toContain(
+      "One of two local-write tools: `build_project` writes the generated project, and `shortlist_references` writes its dossier",
+    );
+  });
+
+  it("README shortlist example parses through the tool schema", () => {
+    const section = README.slice(README.indexOf("### Reference shortlist"));
+    const block = /```json\r?\n([\s\S]*?)```/.exec(section);
+    expect(block).not.toBeNull();
+    const parsed = shortlistInputSchema.parse(JSON.parse(block?.[1] ?? "{}"));
+    expect(parsed.limit).toBe(4);
+    expect(parsed.criteria.find((criterion) => criterion.label === "Motion-led product pages")?.query).toBe(
+      "product",
+    );
+    expect(parsed.constraints.allow3d).toBe("any");
+  });
+
+  it("README marks shortlist_references as v1-only", () => {
+    const text = flatten(README);
+    expect(text).toContain("`shortlist_references`, which is v1-only with no v2 branch");
+  });
+
+  it("README scopes the skills mirror claim to the shipped pairing", () => {
+    const text = flatten(README);
+    expect(text).toContain(
+      "all nine routing copies were byte-identical to the `test/fixtures/v2-routing.md` shipped in 1.21.0",
+    );
+    expect(text).toContain(
+      "must be mirrored to the skills repository before this feature ships",
+    );
+    expect(text).not.toContain("all nine routing copies are byte-identical to this package's");
+  });
+
+  it("CHANGELOG Unreleased pins the reference-shortlist claims", () => {
+    const section = unreleasedSection(CHANGELOG);
+    expect(section).toContain("### Reference shortlist");
+    expect(section).not.toContain("## v1.21.1");
+
+    const text = flatten(section);
+    expect(text).toContain("up to 5");
+    expect(text).toContain("`limit` 3-5");
+    expect(text).toContain("`recommend` or `consider`");
+    expect(text).toContain(
+      "Candidates that fail a hard constraint are listed separately under `excluded` with a reason and do not count toward the limit",
+    );
+    expect(text).toContain(
+      "An explicit seed with no criterion surfacers never covers a `must`; coverage comes from discovery hits, and a seed also surfaced by a criterion can cover it",
+    );
+    expect(text).toContain(
+      "Status describes the returned list after `limit`: `ok` only when every `must` criterion is covered by a `recommend` in that list; `partial` when a `must` criterion has only `consider`; `inconclusive` when a `must` criterion is uncovered, when no candidates are returned, or when all candidates were excluded",
+    );
+    expect(text).toContain(
+      "With no `must` criteria, `ok` needs at least one `recommend`, consider-only is `partial`, and an empty or all-excluded list is `inconclusive`",
+    );
+    expect(text).toContain("the dossier reflects the returned list");
+    expect(text).toContain("an `assets/` directory when thumbnails or screenshots were written");
+    expect(text).toContain(
+      "Precedence: if any `must` criterion is uncovered the result is `inconclusive`, even when another `must` criterion has only `consider`; `partial` requires every `must` criterion to have at least a `consider` and at least one `must` criterion to have no `recommend`",
+    );
+    expect(text).toContain("blank review template (`decision: null`), never overwritten on rerun");
+    expect(text).toContain("`reference-decision.new.json` / `.new-N.json`");
+    expect(text).toContain("`screenshot-viewport` limitation");
+    expect(text).toContain(
+      "accessibility stays `unknown` unless the host injects an accessibility peer",
+    );
+    expect(text).toContain("adoption unproven");
+    expect(text).toContain(
+      "Honesty limits: criteria are discovery queries - coverage means a returned candidate was surfaced by that criterion, not that a measured property matches it",
+    );
+    expect(text).toContain(
+      "`motionBudget` is a ceiling only; there is no minimum-motion or semantic-fit filter",
+    );
+    expect(text).toContain("`targetStack` is annotation-only; it never filters");
+    expect(text).toContain("`status` measures criterion coverage, not creative fitness");
+    expect(text).toContain("including `motionLevel`");
+    expect(text).toContain(
+      "`allow3d:\"none\"` excludes only a recognized 3D library; a page whose only 3D signal is a canvas scroll mode or raw WebGL comes back as `consider` with a 3D-unverified reason (`3d-unverified` in unknowns for raw WebGL), never claimed 3D-free",
+    );
+    expect(text).toContain(
+      "`motionBudget` is a real ceiling: `minimal` excludes any measured ScrollTrigger, scrub or pin; `scroll` allows triggers/scrubs but not pins; `expressive` allows pins",
+    );
+    expect(text).not.toContain("never `ok`");
+    expect(text).not.toContain("labelled `recommend`, `consider` or `avoid`");
+
+    expect(text).toContain("**42 full / 14 core / 15 v2**");
+    expect(text).toContain("**46 / 14 / 16**");
+  });
+
+  it("README.dev and CONTRIBUTING pin the current surface counts", () => {
+    const dev = flatten(DEV);
+    expect(dev).toContain("`core` registers only the 14 build-loop tools");
+    expect(dev).toContain("`full` keeps all 42 (46 with `AWWWARDS_MCP_ATLAS=1`)");
+    expect(dev).toContain("the 15-tool consolidated surface (16 with Atlas)");
+    expect(dev).toContain(
+      "`build` (project/stubs/manifest/stack), `shortlist` (discovery/evidence/dossier), `atlas` (ingest/collector/search/components/states/evidence packs)",
+    );
+    expect(dev).toContain("47-method `Handlers` object");
+    expect(dev).toContain("`shortlist/` | ~1,020");
+    expect(dev).toContain(
+      "The 41 historical `tool()` / `registerTool()` registrations",
+    );
+    expect(dev).toContain("`tools/shortlist.ts` is the 42nd registration");
+
+    const contributing = flatten(CONTRIBUTING);
+    expect(contributing).toContain(
+      "42 base MCP tool registrations (46 with AWWWARDS_MCP_ATLAS=1)",
+    );
+    expect(contributing).not.toContain("AWWARDS_MCP_ATLAS");
+    expect(contributing).toContain("**46 full / 14 core / 16 v2**");
+    expect(contributing).toContain("**42 full / 14 core / 15 v2**");
+    expect(contributing).toContain("shortlist, atlas");
   });
 
   it("README.dev documents the supported layout and the entry guard", () => {

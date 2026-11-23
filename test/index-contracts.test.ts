@@ -308,7 +308,7 @@ describe("index output contracts", () => {
 
   it("advertises outputSchema only on the contracted tools", async () => {
     const full = await listedTools(undefined);
-    expect(full).toHaveLength(41);
+    expect(full).toHaveLength(42);
     expect(pilotNames(full)).toEqual([
       "create_design_brief",
       "get_index_stats",
@@ -317,7 +317,7 @@ describe("index output contracts", () => {
     ]);
 
     const core = await listedTools("core");
-    expect(core).toHaveLength(13);
+    expect(core).toHaveLength(14);
     expect(pilotNames(core)).toEqual(["verify_build"]);
 
     const v2 = await listedTools("v2");

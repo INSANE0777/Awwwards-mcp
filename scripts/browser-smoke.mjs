@@ -210,7 +210,7 @@ try {
     const tools = listed.tools ?? [];
     const toolNames = tools.map((tool) => tool.name);
     const atlas = process.env.AWWWARDS_MCP_ATLAS === "1";
-    const expected = atlas ? 45 : 41;
+    const expected = atlas ? 46 : 42;
     if (tools.length !== expected) {
       fail(`expected ${expected} tools (AWWWARDS_MCP_ATLAS=${atlas ? "1" : "off"}), got ${tools.length}`);
     }

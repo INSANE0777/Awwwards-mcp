@@ -36,10 +36,17 @@ describe("Atlas documentation", () => {
     expect(ATLAS_DOC).toContain("AWWWARDS_MCP_ATLAS=1");
 
     for (const doc of [README_DOC, ATLAS_DOC]) {
-      expect(doc).toContain("| `full` (default) | 41 | 45 |");
-      expect(doc).toContain("| `core` | 13 | 13 |");
+      expect(doc).toContain("| `full` (default) | 42 | 46 |");
+      expect(doc).toContain("| `core` | 14 | 14 |");
       expect(doc).toContain("| `v2` | 15 | 16 |");
     }
+  });
+
+  it("keeps the stable shortlist tool outside the Atlas boundary", () => {
+    expect(ATLAS_DOC).toContain(
+      "`shortlist_references` is a stable v1 tool that does not depend on Atlas, F9 or evidence packs",
+    );
+    expect(ATLAS_DOC).toContain("Atlas remains experimental and off by default");
   });
 
   it("documents the approved document-flow fixture and disclaims stale reports", () => {
@@ -309,17 +316,18 @@ describe("Atlas documentation", () => {
   });
 
   it("adds flag-on counts to every unconditional README surface statement", () => {
-    expect(README_DOC).toContain("`full` keeps all 41 (45 with `AWWWARDS_MCP_ATLAS=1`)");
+    expect(README_DOC).toContain("`full` keeps all 42 (46 with `AWWWARDS_MCP_ATLAS=1`)");
     expect(README_DOC).toContain(
       "15-tool consolidated surface (16 with `AWWWARDS_MCP_ATLAS=1`)",
     );
     expect(README_DOC).toContain(
-      "`full` = 41, `core` = 13, `v2` = 15 (45 / 13 / 16 with `AWWWARDS_MCP_ATLAS=1`)",
+      "`full` = 42, `core` = 14, `v2` = 15 (46 / 14 / 16 with `AWWWARDS_MCP_ATLAS=1`)",
     );
-    expect(README_DOC).toContain("**41 / 13 / 15** tool surface (**45 / 13 / 16** with");
-    expect(README_DOC).toContain("default 41-tool surface (45 with");
+    expect(README_DOC).toContain("the flag-off 42 / 14 / 15 surface is unchanged");
+    expect(README_DOC).toContain("`full` = 46 and `v2` = 16, `core` stays 14");
+    expect(README_DOC).toContain("default 42-tool surface (46 with");
     expect(README_DOC).toContain("15 tools (16 with `AWWWARDS_MCP_ATLAS=1`)");
-    expect(README_DOC).toContain("the same check reports 45 tools");
+    expect(README_DOC).toContain("the same check reports 46 tools");
   });
 
   it("uses the exact Atlas flag name", () => {

@@ -273,6 +273,8 @@ export async function captureMotionDnaUnified(
     waitStrategy?: WaitStrategy;
     viewport?: ViewportName;
     reducedMotion?: boolean;
+    /** Route every browser connection through the public-network guard. */
+    proxyServer?: string;
     loader?: () => Promise<any>;
   } = {},
 ): Promise<UnifiedMotionDna> {
@@ -284,7 +286,15 @@ export async function captureMotionDnaUnified(
   }
   let browser: any;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch(
+      opts.proxyServer
+        ? {
+            headless: true,
+            proxy: { server: opts.proxyServer, bypass: "<-loopback>" },
+            args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+          }
+        : { headless: true },
+    );
   } catch {
     throw new Error(CAPTURE_INSTALL_HINT);
   }

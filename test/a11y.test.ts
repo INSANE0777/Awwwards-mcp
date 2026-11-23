@@ -265,6 +265,19 @@ describe("analyzeAccessibility", () => {
     expect(page.evaluate.mock.calls[0][1]).toEqual({ limit: 100 });
   });
 
+  it("launches Chromium with the guard proxy when one is set", async () => {
+    const { loader, chromium } = fakePlaywright();
+    await analyzeAccessibility(
+      "https://example.com/",
+      { proxyServer: "http://127.0.0.1:9" },
+      loader,
+    );
+    expect(chromium.launch).toHaveBeenCalledWith({
+      proxy: { server: "http://127.0.0.1:9", bypass: "<-loopback>" },
+      args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+    });
+  });
+
   it("degrades to the install hint when playwright is missing", async () => {
     const result = await analyzeAccessibility("https://example.com/", {}, async () => {
       throw new Error("Cannot find module 'playwright'");

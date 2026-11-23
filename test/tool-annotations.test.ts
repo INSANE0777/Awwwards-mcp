@@ -34,9 +34,10 @@ describe("tool annotations", () => {
     // cannot be expressed as a raw parameter shape. All registrations go
     // through the guarded tool()/registerTool() wrappers in server-instance.ts.
     const calls = src.match(/^\s*(?:ctx\.)?(?:tool|registerTool)\(/gm) ?? [];
-    // 41 historical tools + 4 Phase 6A Atlas tools (registered only when the
-    // runtime flag is on; the source contract is still four hints each).
-    expect(calls.length).toBe(45);
+    // 41 historical tools + shortlist_references + 4 Phase 6A Atlas tools
+    // (registered only when the runtime flag is on; the source contract is
+    // still four hints each).
+    expect(calls.length).toBe(46);
 
     // Slice out each balanced-parens registration block and require the
     // four hint keys with explicit boolean values inside it.

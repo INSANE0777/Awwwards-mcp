@@ -21,6 +21,9 @@ import {
 } from "../scripts/protocol-smoke.mjs";
 
 type Catalog = ReturnType<typeof projectCatalog>;
+const PKG = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { name: string; version: string };
 const baseline = JSON.parse(
   readFileSync(new URL("../scripts/fixtures/protocol-catalog.json", import.meta.url), "utf8"),
 ) as { package: string; surfaces: Record<string, Record<string, Catalog>> };
@@ -39,16 +42,16 @@ function tool(name: string, overrides: Record<string, unknown> = {}) {
 
 describe("protocol catalog baseline", () => {
   it("pins both Atlas states and all three profile counts", () => {
-    expect(baseline.package).toBe("awwwards-mcp@1.20.0");
+    expect(baseline.package).toBe(`${PKG.name}@${PKG.version}`);
     expect(Object.keys(baseline.surfaces).sort()).toEqual(["off", "on"]);
     expect(Object.fromEntries(Object.entries(baseline.surfaces.off).map(([k, v]) => [k, v.length]))).toEqual({
-      full: 41,
-      core: 13,
+      full: 42,
+      core: 14,
       v2: 15,
     });
     expect(Object.fromEntries(Object.entries(baseline.surfaces.on).map(([k, v]) => [k, v.length]))).toEqual({
-      full: 45,
-      core: 13,
+      full: 46,
+      core: 14,
       v2: 16,
     });
   });
@@ -162,14 +165,13 @@ describe("candidate CLI path", () => {
   it("dumps a current-package catalog atomically for every off surface", () => {
     const dir = mkdtempSync(join(tmpdir(), "awwwards-smoke-dump-"));
     const out = join(dir, "catalog.json");
-    const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
     try {
       const result = runSmokeArgs(["dist/cli.js", "--dump-catalog", out]);
       expect(result.status).toBe(0);
       const document = JSON.parse(readFileSync(out, "utf8"));
-      expect(document.package).toBe(`${pkg.name}@${pkg.version}`);
-      expect(document.surfaces.off.full).toHaveLength(41);
-      expect(document.surfaces.off.core).toHaveLength(13);
+      expect(document.package).toBe(`${PKG.name}@${PKG.version}`);
+      expect(document.surfaces.off.full).toHaveLength(42);
+      expect(document.surfaces.off.core).toHaveLength(14);
       expect(document.surfaces.off.v2).toHaveLength(15);
       expect(readdirSync(dir).filter((name) => name.includes(".tmp-"))).toEqual([]);
     } finally {

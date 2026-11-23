@@ -48,7 +48,7 @@ const MODERN = "2026-07-28";
 const LEGACY = "2025-06-18";
 const ATLAS = process.env.AWWWARDS_MCP_ATLAS === "1";
 const PKG = JSON.parse(readFileSync("package.json", "utf8"));
-const SURFACES = { full: ATLAS ? 45 : 41, core: 13, v2: ATLAS ? 16 : 15 };
+const SURFACES = { full: ATLAS ? 46 : 42, core: 14, v2: ATLAS ? 16 : 15 };
 const ATLAS_FLAT = ["search_atlas", "get_atlas", "capture_atlas", "export_evidence_pack"];
 const ANNOTATIONS = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
 const BUDGET = 200;
@@ -865,7 +865,7 @@ async function overBudgetSession(era) {
 }
 
 // Baseline-catalog maintenance: list only, once per era, and require both eras
-// to return the same catalog. The file is generated from a 1.20 checkout; the
+// to return the same catalog. The file is generated from this checkout; the
 // normal run never writes it.
 async function dumpCatalog() {
   const state = ATLAS ? "on" : "off";

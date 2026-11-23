@@ -55,8 +55,8 @@ src/
   awwwards.ts   HTTP client: 1 req/s limiter, BlockedError on 403/429
   cache.ts      SQLite cache at ~/.awwwards-mcp/ or AWWWARDS_CACHE_DIR (node:sqlite)
   server.ts     Thin facade: re-exports public types + createHandlers
-  server/       Handler domains: awards, data, capture, motion, audit, build, atlas
-  tools/        41 base MCP tool registrations (45 with AWWARDS_MCP_ATLAS=1)
+  server/       Handler domains: awards, data, capture, motion, audit, build, shortlist, atlas
+  tools/        42 base MCP tool registrations (46 with AWWWARDS_MCP_ATLAS=1)
   atlas/        Atlas ingest, collector, search, components, states and evidence packs
   capture.ts    Optional playwright: capture_live_site
   structure.ts  Optional playwright: analyze_page_structure
@@ -83,10 +83,10 @@ Hard constraints the codebase enforces (keep them in new code):
   `node:sqlite`. Don't add anything needing compilation.
 - **playwright stays optional**: every browser-backed tool must fail with an
   install hint when playwright or Chromium is absent, never crash the server.
-- **Atlas is opt-in**: `AWWARDS_MCP_ATLAS=1` adds four tools and changes the
-  surface to **45 / 13 / 16**. Keep the default **41 / 13 / 15**, keep Atlas
-  off by default, and do not present candidate labels or the F9 component gate
-  as settled.
+- **Atlas is opt-in**: `AWWWARDS_MCP_ATLAS=1` adds four tools and changes the
+  surface to **46 full / 14 core / 16 v2**. Keep the default **42 full /
+  14 core / 15 v2**, keep Atlas off by default, and do not present candidate
+  labels or the F9 component gate as settled.
 
 ## How to create a PR
 

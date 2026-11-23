@@ -108,12 +108,71 @@ export function buildStack(input: { html?: string; motionDna?: unknown } = {}): 
 }
 
 // One polite fetch: neutral UA, bounded by an AbortController timer so a hung
-// origin cannot wedge a tool call. Errors never throw — they surface as
+// origin cannot wedge a tool call. Errors never throw - they surface as
 // { error } so the MCP tool layer can render them as clean isError responses.
+// With proxyServer set, the HTML is fetched through Playwright so redirects and
+// subresources stay pinned to the public-network guard; that path has no plain
+// fetch fallback because bypassing the guard would defeat the boundary. The
+// browser launch is heavier than one fetch, so a multi-site dossier can hit its
+// best-effort budget and return partial stack evidence rather than unguarded
+// HTML.
+async function proxyHtml(
+  url: string,
+  opts: { timeoutMs?: number; proxyServer: string; loader?: () => Promise<any> },
+): Promise<string | { error: string }> {
+  let chromium: any;
+  try {
+    ({ chromium } = await (opts.loader ?? (() => import("playwright" as string)))());
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  let browser: any;
+  try {
+    browser = await chromium.launch({
+      proxy: { server: opts.proxyServer, bypass: "<-loopback>" },
+      args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  try {
+    const page = await browser.newPage();
+    const response = await page.goto(url, {
+      waitUntil: "load",
+      timeout: opts.timeoutMs ?? 15000,
+    });
+    if (response && typeof response.ok === "function" && !response.ok()) {
+      return { error: `HTTP ${response.status()} fetching ${url}` };
+    }
+    return String(await page.content());
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try {
+      await browser.close();
+    } catch {
+      /* browser close is best effort */
+    }
+  }
+}
+
 export async function analyzeStack(
   url: string,
-  opts?: { timeoutMs?: number; fetchFn?: typeof fetch },
+  opts?: {
+    timeoutMs?: number;
+    fetchFn?: typeof fetch;
+    proxyServer?: string;
+    loader?: () => Promise<any>;
+  },
 ): Promise<StackFingerprint | { error: string }> {
+  if (opts?.proxyServer) {
+    const html = await proxyHtml(url, {
+      timeoutMs: opts.timeoutMs,
+      proxyServer: opts.proxyServer,
+      loader: opts.loader,
+    });
+    return typeof html === "string" ? buildStack({ html }) : html;
+  }
   const fetchFn = opts?.fetchFn ?? fetch;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts?.timeoutMs ?? 15000);

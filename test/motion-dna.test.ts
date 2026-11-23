@@ -154,12 +154,14 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
   function fakeLoader(dispatch: (fn: unknown) => unknown) {
     const evaluates: unknown[] = [];
     const newPageArgs: unknown[] = [];
+    const launchArgs: unknown[] = [];
     let launches = 0;
     let newPages = 0;
     let closes = 0;
     const loader = async () => ({
       chromium: {
-        launch: async () => {
+        launch: async (opts: unknown) => {
+          launchArgs.push(opts);
           launches++;
           return {
             newPage: async (pageOpts: unknown) => {
@@ -181,7 +183,7 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
         },
       },
     });
-    return { loader, evaluates, newPageArgs, counts: () => ({ launches, newPages, closes }) };
+    return { loader, evaluates, newPageArgs, launchArgs, counts: () => ({ launches, newPages, closes }) };
   }
 
   it("one launch, two snippet evaluates (motion first, census second), one close", async () => {
@@ -245,6 +247,23 @@ describe("captureMotionDnaUnified (C2, offline DI)", () => {
     expect(pageOpts.reducedMotion).toBe("reduce");
     expect(pageOpts.viewport).toEqual({ width: 390, height: 844 });
     expect(pageOpts.deviceScaleFactor).toBe(3);
+  });
+
+  it("launches Chromium with the guard proxy when one is set", async () => {
+    const fake = fakeLoader((fn) => {
+      if (fn === MOTION_SNIPPET) return scan;
+      if (fn === SCROLL_CENSUS_SNIPPET) return scrollScan;
+      return undefined;
+    });
+    await captureMotionDnaUnified("https://example.com", {
+      loader: fake.loader,
+      proxyServer: "http://127.0.0.1:9",
+    });
+    expect(fake.launchArgs[0]).toEqual({
+      headless: true,
+      proxy: { server: "http://127.0.0.1:9", bypass: "<-loopback>" },
+      args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+    });
   });
 
   it("error contract: rejects like captureMotionDna and still closes the browser", async () => {
