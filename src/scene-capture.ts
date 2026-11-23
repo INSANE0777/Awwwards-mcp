@@ -7,7 +7,7 @@
 // bundle as an init script before load and captures one WebGL frame with
 // command counts, context attributes, analyses and capped shader source. See
 // limitations in every pack.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
@@ -18,12 +18,24 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { CAPTURE_INSTALL_HINT } from "./capture.js";
 import { coverageFrom, type EvidenceCoverage } from "./coverage.js";
+import {
+  buildSceneDossier,
+  capBlindSpots,
+  renderSceneDossierMarkdown,
+  SCENE_DOSSIER_LIMITS,
+  type SceneClass,
+  type SceneDossier,
+} from "./scene-dossier.js";
 import { installSnippetShims } from "./structure.js";
 import { resolveViewport, type ViewportName } from "./viewport.js";
 
 export const SCENE_LIMITS = {
   timeoutMs: 60_000,
   maxCheckpoints: 10,
+  /** Dossier stops are allowed past the v1 verify ceiling. */
+  maxDossierStops: 24,
+  /** Fixed time a virtual clock is paused at after navigation. */
+  virtualClockPauseMs: 60_000,
   defaultCheckpoints: 6,
   defaultWaitMs: 400,
   maxWaitMs: 2_000,
@@ -46,6 +58,8 @@ export const SCENE_LIMITS = {
   // re-applied on the returned values.
   threeProbeTimeoutMs: 3_000,
   maxThreeNodes: 500,
+  // Per-stop keyframe projection: camera plus a bounded transform snapshot.
+  maxKeyframeNodes: 200,
   maxThreeDepth: 20,
   maxThreeCameras: 8,
   maxThreeLights: 8,
@@ -126,6 +140,29 @@ export interface SceneCheckpointResult {
   stable: boolean;
   /** Why the frame is unstable; present only when stable is false. */
   stabilityReason?: string;
+  files: { canvas: string; viewport?: string };
+}
+
+/** Timestamp source recorded with a v2 dossier pack. */
+export type SceneClock = "real" | "virtual";
+
+/** Transform-only projection of one reachable three node for a keyframe. */
+export interface SceneKeyframeNode {
+  uuid: string | null;
+  position: [number, number, number] | null;
+  quaternion: [number, number, number, number] | null;
+  scale: [number, number, number] | null;
+}
+
+/** Per-stop camera, transform and frame evidence; dossier packs only. */
+export interface SceneKeyframe {
+  index: number;
+  scrollRatio: number;
+  pointer: { x: number; y: number } | null;
+  camera: SceneThreeCamera | null;
+  nodes: SceneKeyframeNode[];
+  frameHash: string;
+  stable: boolean;
   files: { canvas: string; viewport?: string };
 }
 
@@ -340,11 +377,36 @@ export interface SceneEvidence {
   limitations: string[];
 }
 
+/**
+ * Dossier pack. The id differs from v1 so a v1-only reader (notably
+ * scene-verify) rejects the pack instead of replaying it with v1 rules.
+ */
+export interface SceneEvidenceV2 extends Omit<SceneEvidence, "id"> {
+  id: "scene-evidence-v2";
+  keyframes: SceneKeyframe[];
+  clock: SceneClock;
+}
+
 export interface SceneCaptureOptions {
   canvasSelector?: string;
   scrollRoot?: string;
   viewport?: ViewportName;
   checkpoints?: SceneCheckpointInput[];
+  /**
+   * Opt-in output shape. "dossier" selects the v2 dossier writer (default
+   * "evidence", the v1 evidence pack).
+   */
+  emit?: "evidence" | "dossier";
+  /** Dossier-only timestamp source; "virtual" requires emit:"dossier". */
+  clock?: "real" | "virtual";
+  /** Ordered scroll ratios (0..1) used instead of checkpoints; sorted-input required. */
+  samplePoints?: number[];
+  /** Accepted for forward compatibility; render passes are not captured yet. */
+  capturePasses?: boolean;
+  /** Accepted for forward compatibility; shader programs are not captured yet. */
+  captureShaders?: boolean;
+  /** Accepted for forward compatibility; no pass or shader capture consumes it yet. */
+  maxDrawCalls?: number;
   assetOrigins?: string[];
   includeViewportShots?: boolean;
   /**
@@ -378,7 +440,7 @@ export interface SceneCaptureOptions {
 export type CaptureSceneFn = (
   url: string,
   opts?: SceneCaptureOptions,
-) => Promise<SceneEvidence | { error: string }>;
+) => Promise<SceneEvidence | SceneEvidenceV2 | { error: string }>;
 
 // ---- SSRF gate -----------------------------------------------------------
 // The primary boundary is a loopback HTTP proxy: Chromium is launched with it
@@ -1186,8 +1248,68 @@ export async function fetchSceneBinaryResponse(
 
 // ---- checkpoints and assets ---------------------------------------------
 
+export function normalizeSamplePoints(
+  raw: unknown,
+  max: number,
+): { points: number[] } | { error: string } {
+  if (!Array.isArray(raw)) {
+    return { error: "samplePoints must be an array of numbers." };
+  }
+  if (raw.length < 2) {
+    return { error: "samplePoints must contain at least 2 values." };
+  }
+  if (raw.length > max) {
+    return { error: `samplePoints accepts at most ${max} values.` };
+  }
+  const points: number[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const value = raw[i];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+      return { error: `samplePoints[${i}] must be a finite number between 0 and 1.` };
+    }
+    const rounded = Math.round(value * 10_000) / 10_000;
+    const point = rounded === 0 ? 0 : rounded;
+    const previous = points[points.length - 1];
+    if (previous !== undefined && point <= previous) {
+      return {
+        error: `samplePoints[${i}] must be greater than samplePoints[${i - 1}] after rounding to 4 decimals.`,
+      };
+    }
+    points.push(point);
+  }
+  return { points };
+}
+
+// Shared verify schedule budget. scene-verify builds its deadline from these
+// values, and dossier capture refuses a stop list that could never fit them.
+export const SCENE_VERIFY_BUDGET_CONSTANTS = {
+  floorMs: 15_000,
+  headroomMs: 10_000,
+  maxMs: 45_000,
+} as const;
+
+export function sceneCheckpointWaitTotalMs(
+  checkpoints: ReadonlyArray<{ waitMs?: number }> | undefined,
+): number {
+  return (checkpoints ?? []).reduce(
+    (sum, checkpoint) =>
+      sum + Math.max(0, Math.min(SCENE_LIMITS.maxWaitMs, Number(checkpoint?.waitMs) || 0)),
+    0,
+  );
+}
+
+export function sceneScheduleFitsVerifyBudget(
+  checkpoints: ReadonlyArray<{ waitMs?: number }> | undefined,
+): boolean {
+  return (
+    sceneCheckpointWaitTotalMs(checkpoints) + SCENE_VERIFY_BUDGET_CONSTANTS.headroomMs <=
+    SCENE_VERIFY_BUDGET_CONSTANTS.maxMs
+  );
+}
+
 export function normalizeSceneCheckpoints(
   input?: SceneCheckpointInput[],
+  max: number = SCENE_LIMITS.maxCheckpoints,
 ): { checkpoints: SceneCheckpoint[] } | { error: string } {
   const raw: SceneCheckpointInput[] =
     input ??
@@ -1197,9 +1319,9 @@ export function normalizeSceneCheckpoints(
   if (!Array.isArray(raw) || raw.length === 0) {
     return { error: "Scene capture needs at least one checkpoint." };
   }
-  if (raw.length > SCENE_LIMITS.maxCheckpoints) {
+  if (raw.length > max) {
     return {
-      error: `Scene capture accepts at most ${SCENE_LIMITS.maxCheckpoints} checkpoints (received ${raw.length}).`,
+      error: `Scene capture accepts at most ${max} checkpoints (received ${raw.length}).`,
     };
   }
   const checkpoints: SceneCheckpoint[] = [];
@@ -1338,7 +1460,7 @@ function passiveCapabilityReasons(): Record<SceneCapabilityName, SceneCapability
  * Scene/camera/controls/geometry come only from three; shader source comes only
  * from spector and is "available" only when at least one shader was captured.
  */
-function sceneCapabilityReasons(
+export function sceneCapabilityReasons(
   three?: SceneThreeEvidence,
   spector?: SceneSpectorEvidence,
 ): Record<SceneCapabilityName, SceneCapabilityCoverage> {
@@ -2221,6 +2343,213 @@ export const SCENE_THREE_PROBE = function (arg: SceneThreeProbeCaps): SceneThree
     cameras,
     lights,
     controls,
+  };
+};
+
+export interface SceneKeyframeProbeCaps {
+  maxNodes: number;
+  maxDepth: number;
+  maxUuidChars: number;
+}
+
+export const SCENE_KEYFRAME_PROBE_CAPS: SceneKeyframeProbeCaps = {
+  maxNodes: SCENE_LIMITS.maxKeyframeNodes,
+  maxDepth: SCENE_LIMITS.maxThreeDepth,
+  maxUuidChars: SCENE_LIMITS.maxThreeUuidChars,
+};
+
+export interface SceneKeyframeProbeResult {
+  available: boolean;
+  camera: SceneThreeCamera | null;
+  nodes: SceneKeyframeNode[];
+  /** True when the node walk stopped at the 200-node cap. */
+  truncated: boolean;
+}
+
+/**
+ * In-page keyframe projection. It follows the same fixed globals and guarded
+ * reads as SCENE_THREE_PROBE but copies only the camera and node transforms, so
+ * one probe per stop stays cheap.
+ */
+export const SCENE_KEYFRAME_PROBE = function (arg: SceneKeyframeProbeCaps): SceneKeyframeProbeResult {
+  const g = globalThis as any;
+  const safeGet = (target: any, key: string): any => {
+    try {
+      if (!target || (typeof target !== "object" && typeof target !== "function")) return undefined;
+      return target[key];
+    } catch {
+      return undefined;
+    }
+  };
+  const num = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const text = (value: unknown, max: number): string | null => {
+    if (typeof value !== "string" || value.length === 0) return null;
+    return value.slice(0, max);
+  };
+  const vec = (value: any, keys: string[]): number[] | null => {
+    try {
+      if (!value || typeof value !== "object") return null;
+      const out: number[] = [];
+      for (let i = 0; i < keys.length; i++) {
+        const n = num(safeGet(value, keys[i]!));
+        if (n === null) return null;
+        out.push(n);
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  };
+  const cameraRecord = (camera: any): any => {
+    try {
+      if (!camera || typeof camera !== "object") return null;
+      let matrixWorld: number[] | null = null;
+      const elements = safeGet(safeGet(camera, "matrixWorld"), "elements");
+      if (elements && typeof elements === "object") {
+        const length = num(safeGet(elements, "length")) ?? 0;
+        if (length >= 16) {
+          const out: number[] = [];
+          for (let i = 0; i < 16; i++) {
+            const n = num(safeGet(elements, String(i)));
+            if (n === null) {
+              out.length = 0;
+              break;
+            }
+            out.push(n);
+          }
+          if (out.length === 16) matrixWorld = out;
+        }
+      }
+      return {
+        type: text(safeGet(camera, "type"), 64) ?? "unknown",
+        fov: num(safeGet(camera, "fov")),
+        near: num(safeGet(camera, "near")),
+        far: num(safeGet(camera, "far")),
+        matrixWorld,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const candidates: any[] = [];
+  const push = (value: any): void => {
+    if (!value || typeof value !== "object") return;
+    if (candidates.length < 24 && candidates.indexOf(value) === -1) candidates.push(value);
+  };
+  push(safeGet(g, "scene"));
+  push(safeGet(g, "camera"));
+  push(safeGet(g, "renderer"));
+  push(safeGet(g, "controls"));
+  for (let i = 0; i < 4; i++) {
+    const key = ["app", "experience", "viewer", "world"][i]!;
+    const holder = safeGet(g, key);
+    push(holder);
+    if (holder && typeof holder === "object") {
+      push(safeGet(holder, "scene"));
+      push(safeGet(holder, "camera"));
+      push(safeGet(holder, "renderer"));
+      push(safeGet(holder, "controls"));
+    }
+  }
+
+  let camera: any = null;
+  for (let i = 0; i < candidates.length; i++) {
+    if (safeGet(candidates[i], "isCamera") === true) {
+      camera = cameraRecord(candidates[i]);
+      if (camera) break;
+    }
+  }
+
+  let root: any = null;
+  for (let i = 0; i < candidates.length; i++) {
+    if (safeGet(candidates[i], "isScene") === true) {
+      root = candidates[i];
+      break;
+    }
+  }
+  if (!root) {
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      if (safeGet(candidate, "isCamera") === true || safeGet(candidate, "isLight") === true) continue;
+      if (Array.isArray(safeGet(candidate, "children")) && typeof safeGet(candidate, "traverse") === "function") {
+        root = candidate;
+        break;
+      }
+    }
+  }
+
+  const nodes: any[] = [];
+  const nodeRecord = (object: any): any => {
+    try {
+      return {
+        uuid: text(safeGet(object, "uuid"), arg.maxUuidChars),
+        position: vec(safeGet(object, "position"), ["x", "y", "z"]),
+        quaternion: vec(safeGet(object, "quaternion"), ["x", "y", "z", "w"]),
+        scale: vec(safeGet(object, "scale"), ["x", "y", "z"]),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  let truncated = false;
+  if (root) {
+    const visited: any[] = [];
+    const queue: Array<{ object: any; depth: number }> = [{ object: root, depth: 0 }];
+    while (queue.length > 0 && nodes.length < arg.maxNodes) {
+      const item = queue.shift()!;
+      const object = item.object;
+      if (!object || typeof object !== "object") continue;
+      if (visited.indexOf(object) !== -1) continue;
+      visited.push(object);
+      const record = nodeRecord(object);
+      if (record) nodes.push(record);
+      if (!camera && safeGet(object, "isCamera") === true) {
+        camera = cameraRecord(object);
+      }
+      let children: any = null;
+      try {
+        children = safeGet(object, "children");
+      } catch {
+        children = null;
+      }
+      if (!Array.isArray(children)) continue;
+      const length = num(safeGet(children, "length")) ?? 0;
+      if (item.depth >= arg.maxDepth) {
+        if (length > 0) truncated = true;
+        continue;
+      }
+      const limit = length < arg.maxNodes ? length : arg.maxNodes;
+      // Children beyond this pass are never examined, so the walk is partial.
+      if (length > limit) truncated = true;
+      for (let i = 0; i < limit; i++) {
+        let child: any = null;
+        try {
+          child = safeGet(children, String(i));
+        } catch {
+          continue;
+        }
+        if (!child || typeof child !== "object") continue;
+        // Already-visited duplicates never enter the queue.
+        if (visited.indexOf(child) !== -1) continue;
+        if (queue.length >= arg.maxNodes) {
+          truncated = true;
+          break;
+        }
+        queue.push({ object: child, depth: item.depth + 1 });
+      }
+    }
+    // Any queued remainder means the snapshot stopped before the whole walk.
+    truncated = queue.length > 0 || truncated;
+  }
+
+  return {
+    available: camera !== null || nodes.length > 0,
+    camera,
+    nodes,
+    truncated,
   };
 };
 
@@ -3314,6 +3643,81 @@ const settle = async (page: any, ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
+interface SceneKeyframeProjection {
+  camera: SceneThreeCamera | null;
+  nodes: SceneKeyframeNode[];
+  truncated: boolean;
+}
+
+const finiteVector = (value: unknown, length: number): number[] | null => {
+  if (!Array.isArray(value) || value.length !== length) return null;
+  const out: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isFinite(item)) return null;
+    out.push(item);
+  }
+  return out;
+};
+
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+function keyframeCameraFromProbe(value: unknown): SceneThreeCamera | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  return {
+    type: boundedText(raw.type, SCENE_LIMITS.maxThreeTypeChars) ?? "unknown",
+    fov: finiteNumber(raw.fov),
+    near: finiteNumber(raw.near),
+    far: finiteNumber(raw.far),
+    matrixWorld: finiteVector(raw.matrixWorld, 16),
+  };
+}
+
+function keyframeNodesFromProbe(value: unknown): SceneKeyframeNode[] {
+  if (!Array.isArray(value)) return [];
+  const nodes: SceneKeyframeNode[] = [];
+  for (const row of value.slice(0, SCENE_LIMITS.maxKeyframeNodes)) {
+    if (!row || typeof row !== "object") continue;
+    const raw = row as Record<string, unknown>;
+    nodes.push({
+      uuid: boundedText(raw.uuid, SCENE_LIMITS.maxThreeUuidChars),
+      position: finiteVector(raw.position, 3) as [number, number, number] | null,
+      quaternion: finiteVector(raw.quaternion, 4) as [number, number, number, number] | null,
+      scale: finiteVector(raw.scale, 3) as [number, number, number] | null,
+    });
+  }
+  return nodes;
+}
+
+/** One guarded keyframe probe; null means the probe itself failed. */
+async function probeThreeKeyframe(page: any): Promise<SceneKeyframeProjection | null> {
+  if (typeof page?.evaluate !== "function") return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const work = Promise.resolve()
+    .then(() => page.evaluate(SCENE_KEYFRAME_PROBE, SCENE_KEYFRAME_PROBE_CAPS))
+    .catch(() => ({ error: "the in-page keyframe probe failed" }));
+  const timeout = new Promise<{ error: string }>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ error: "the in-page keyframe probe exceeded its time budget" }),
+      SCENE_LIMITS.threeProbeTimeoutMs,
+    );
+    timer.unref?.();
+  });
+  let raw: any;
+  try {
+    raw = await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (!raw || typeof raw !== "object" || "error" in raw) return null;
+  return {
+    camera: keyframeCameraFromProbe(raw.camera),
+    nodes: keyframeNodesFromProbe(raw.nodes),
+    truncated: raw.truncated === true,
+  };
+}
+
 const messageOf = (err: unknown): string =>
   err instanceof Error ? err.message.replace(/\s+/g, " ").trim() : String(err);
 
@@ -3459,11 +3863,86 @@ function capabilityLimitations(
   return limitations;
 }
 
+export const SCENE_KEYFRAME_BUDGET_LIMITATION =
+  "keyframe transform snapshots were truncated to fit the 2 MiB evidence budget";
+
+/**
+ * Fits a v2 pack into the evidence budget by binary-searching the largest
+ * global keyframe node limit whose exact persisted serialization fits. Cameras,
+ * hashes, checkpoints and resources are never trimmed; a pack that still
+ * overflows with no nodes left stays over budget for the caller's hard error.
+ */
+export function fitSceneEvidenceV2<T extends SceneEvidenceV2>(
+  evidence: T,
+  maxBytes: number = SCENE_LIMITS.maxMetadataBytes,
+): T {
+  const sizeOf = (value: SceneEvidenceV2): number =>
+    Buffer.byteLength(JSON.stringify(value, null, 1), "utf8");
+  if (sizeOf(evidence) <= maxBytes) return evidence;
+  const longest = evidence.keyframes.reduce(
+    (max, keyframe) => Math.max(max, keyframe.nodes.length),
+    0,
+  );
+  if (longest === 0) return evidence;
+  const limitations = evidence.limitations.includes(SCENE_KEYFRAME_BUDGET_LIMITATION)
+    ? evidence.limitations
+    : [...evidence.limitations, SCENE_KEYFRAME_BUDGET_LIMITATION];
+  const coverageLimitations = evidence.coverage.limitations.includes(
+    SCENE_KEYFRAME_BUDGET_LIMITATION,
+  )
+    ? evidence.coverage.limitations
+    : [...evidence.coverage.limitations, SCENE_KEYFRAME_BUDGET_LIMITATION];
+  // The spread preserves T's extra dossier fields across a trim.
+  const atLimit = (limit: number): T =>
+    ({
+      ...evidence,
+      keyframes: evidence.keyframes.map((keyframe) =>
+        keyframe.nodes.length > limit
+          ? { ...keyframe, nodes: keyframe.nodes.slice(0, limit) }
+          : keyframe,
+      ),
+      limitations,
+      coverage: { ...evidence.coverage, limitations: coverageLimitations, status: "partial" },
+    }) as T;
+  let low = 0;
+  let high = longest;
+  let best = atLimit(0);
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = atLimit(mid);
+    if (sizeOf(candidate) <= maxBytes) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return best;
+}
+
 export async function captureScene3d(
   url: string,
   opts: SceneCaptureOptions = {},
-): Promise<SceneEvidence | { error: string }> {
+): Promise<SceneEvidence | SceneEvidenceV2 | { error: string }> {
   if (opts.signal?.aborted) return { error: "Scene capture cancelled by the client." };
+  // Virtual time is only recorded by a v2 dossier; silently falling back to the
+  // real clock would mislabel the pack.
+  if (opts.clock === "virtual" && opts.emit !== "dossier") {
+    return { error: 'clock:"virtual" requires emit:"dossier".' };
+  }
+  // A dossier below two stops cannot be verified, so it is refused before any
+  // browser or network work.
+  if (
+    opts.emit === "dossier" &&
+    opts.samplePoints === undefined &&
+    Array.isArray(opts.checkpoints) &&
+    opts.checkpoints.length < 2
+  ) {
+    return {
+      error:
+        'emit:"dossier" requires at least 2 stops; provide at least 2 checkpoints or samplePoints.',
+    };
+  }
   const startedAt = Date.now();
   const timeoutMs = Math.min(opts.timeoutMs ?? SCENE_LIMITS.timeoutMs, SCENE_LIMITS.timeoutMs);
   const deadline = startedAt + timeoutMs;
@@ -3555,7 +4034,7 @@ export async function captureScene3d(
     throw new Error("capture cancelled after the deadline");
   };
 
-  const acquire = async (): Promise<SceneEvidence | { error: string }> => {
+  const acquire = async (): Promise<SceneEvidence | SceneEvidenceV2 | { error: string }> => {
     const allowed = await gate.allows(url);
     await ensureLive();
     if (!allowed) {
@@ -3565,9 +4044,40 @@ export async function captureScene3d(
           "private, metadata or reserved address, or the URL is not http(s).",
       };
     }
-    const normalized = normalizeSceneCheckpoints(opts.checkpoints);
-    if ("error" in normalized) return normalized;
-    const checkpoints = normalized.checkpoints;
+    // Dossier packs always carry the v2 id and clock. Tagging them v2 is the
+    // fail-closed mechanism: a v1-only reader (scene-verify) rejects the id
+    // instead of replaying a pack with more stops than v1 accepts.
+    const dossier = opts.emit === "dossier";
+    const clockMode: SceneClock = dossier && opts.clock === "virtual" ? "virtual" : "real";
+    let checkpoints: SceneCheckpoint[];
+    if (opts.samplePoints !== undefined) {
+      const sample = normalizeSamplePoints(
+        opts.samplePoints,
+        dossier ? SCENE_LIMITS.maxDossierStops : SCENE_LIMITS.maxCheckpoints,
+      );
+      if ("error" in sample) return sample;
+      checkpoints = sample.points.map((scrollRatio) => ({
+        scrollRatio,
+        pointer: null,
+        waitMs: SCENE_LIMITS.defaultWaitMs,
+      }));
+    } else {
+      const normalized = normalizeSceneCheckpoints(
+        opts.checkpoints,
+        dossier ? SCENE_LIMITS.maxDossierStops : SCENE_LIMITS.maxCheckpoints,
+      );
+      if ("error" in normalized) return normalized;
+      checkpoints = normalized.checkpoints;
+    }
+    if (dossier && !sceneScheduleFitsVerifyBudget(checkpoints)) {
+      const waitsMs = sceneCheckpointWaitTotalMs(checkpoints);
+      return {
+        error:
+          `emit:"dossier" schedules ${waitsMs}ms of checkpoint waits plus ` +
+          `${SCENE_VERIFY_BUDGET_CONSTANTS.headroomMs}ms verify headroom, above the ` +
+          `${SCENE_VERIFY_BUDGET_CONSTANTS.maxMs}ms verify budget; reduce waitMs or stops.`,
+      };
+    }
     const assetOrigins = normalizeSceneAssetOrigins(opts.assetOrigins);
     if ("error" in assetOrigins) return assetOrigins;
     const assetOriginList = assetOrigins.origins;
@@ -3652,6 +4162,29 @@ export async function captureScene3d(
       const page = own(await context.newPage());
       await ensureLive();
       primaryPage = page;
+      // The virtual clock is installed before navigation and ticks with real
+      // time during load; it is paused at a fixed instant before keyframe work.
+      if (clockMode === "virtual") {
+        const clock = page.clock;
+        if (
+          !clock ||
+          typeof clock.install !== "function" ||
+          typeof clock.runFor !== "function" ||
+          typeof clock.pauseAt !== "function"
+        ) {
+          return { error: "virtual clock is unavailable in this Playwright build" };
+        }
+        await clock.install({ time: new Date(0) });
+        await ensureLive();
+      }
+      const waitScene = async (ms: number): Promise<void> => {
+        if (ms <= 0) return;
+        if (clockMode === "virtual") {
+          await page.clock.runFor(ms);
+          return;
+        }
+        await settle(page, ms);
+      };
       // The probe calls named helpers; tsx/esbuild keepNames injects __name
       // references that must exist in the page before navigation.
       if (wantThree || wantSpector) await installSnippetShims(page);
@@ -3691,7 +4224,7 @@ export async function captureScene3d(
         timeout: Math.max(1, Math.min(45_000, deadline - Date.now())),
       });
       await ensureLive();
-      await settle(page, Math.min(1_500, Math.max(0, deadline - Date.now())));
+      await waitScene(Math.min(1_500, Math.max(0, deadline - Date.now())));
       await ensureLive();
 
       const picked = (await page.evaluate(SCENE_CANVAS_PICK, {
@@ -3842,7 +4375,18 @@ export async function captureScene3d(
         return join(finalDir, name);
       };
 
+      // Spector's one-shot capture needs a live page frame, so the clock stays
+      // unpaused through load and the spector probe. Pause at a fixed instant
+      // before any checkpoint wait so keyframe time is deterministic.
+      if (clockMode === "virtual") {
+        await page.clock.pauseAt(new Date(SCENE_LIMITS.virtualClockPauseMs));
+        await ensureLive();
+      }
+
       const frames: SceneCheckpointResult[] = [];
+      const keyframes: SceneKeyframe[] = [];
+      const keyframeLimitations: string[] = [];
+      let keyframeNodesCapped = false;
       for (let index = 0; index < checkpoints.length; index++) {
         if (cancelled || Date.now() > deadline) {
           throw new Error(
@@ -3871,7 +4415,7 @@ export async function captureScene3d(
         let actual = Number.isFinite(immediate) && immediate >= 0 ? immediate : 0;
         const arrivalDeadline = Math.min(deadline, Date.now() + 1_500);
         while (Math.abs(actual - requestedTop) > 1 && Date.now() < arrivalDeadline) {
-          await settle(page, 50);
+          await waitScene(50);
           actual =
             Number(await page.evaluate(SCENE_READ, { scrollRoot: scrollRoot ?? "" })) || 0;
           await ensureLive();
@@ -3890,7 +4434,7 @@ export async function captureScene3d(
         }
 
         const settleMs = Math.min(checkpoint.waitMs, Math.max(0, deadline - Date.now()));
-        await settle(page, settleMs);
+        await waitScene(settleMs);
         await ensureLive();
 
         const after = (await page.evaluate(SCENE_PROBE, {
@@ -3929,6 +4473,18 @@ export async function captureScene3d(
         }
 
         const stem = `frame-${PAD(index + 1)}`;
+        // Keyframe state is sampled immediately before the frame, so it is as
+        // close as possible to what the screenshot shows. Wall-clock-animated
+        // pages can still move between this read and the screenshot.
+        let keyframeProjection: SceneKeyframeProjection | null = null;
+        if (dossier && wantThree) {
+          keyframeProjection = await probeThreeKeyframe(page);
+          await ensureLive();
+          if (keyframeProjection?.truncated) keyframeNodesCapped = true;
+          if (!keyframeProjection) {
+            keyframeLimitations.push(`keyframe ${index}: three probe failed`);
+          }
+        }
         const canvasShot = await page.screenshot({ clip });
         await ensureLive();
         const canvasFile = await writeImage(`${stem}-canvas.png`, canvasShot);
@@ -3995,6 +4551,7 @@ export async function captureScene3d(
             err instanceof Error ? err.message : String(err),
           )})`;
         }
+        const files = { canvas: canvasFile, ...(viewportFile ? { viewport: viewportFile } : {}) };
         frames.push({
           index,
           requestedScrollRatio: checkpoint.scrollRatio,
@@ -4017,8 +4574,39 @@ export async function captureScene3d(
           },
           stable,
           ...(stabilityReason ? { stabilityReason } : {}),
-          files: { canvas: canvasFile, ...(viewportFile ? { viewport: viewportFile } : {}) },
+          files,
         });
+        if (dossier) {
+          let frameHash = "";
+          try {
+            // The published path does not exist until the staged rename; hash
+            // the staged bytes that path will name.
+            frameHash = createHash("sha256")
+              .update(await readFile(join(stagingDir, `${stem}-canvas.png`)))
+              .digest("hex");
+          } catch {
+            keyframeLimitations.push(
+              `keyframe ${index}: the canvas frame could not be read for hashing`,
+            );
+          }
+          const camera: SceneThreeCamera | null = keyframeProjection?.camera ?? null;
+          const nodes: SceneKeyframeNode[] = keyframeProjection?.nodes ?? [];
+          keyframes.push({
+            index,
+            scrollRatio: checkpoint.scrollRatio,
+            pointer: checkpoint.pointer,
+            camera,
+            nodes,
+            frameHash,
+            stable,
+            files,
+          });
+        }
+      }
+      if (keyframeNodesCapped) {
+        keyframeLimitations.push(
+          `keyframe transform snapshots are capped at ${SCENE_LIMITS.maxKeyframeNodes} nodes`,
+        );
       }
 
       const collected = (await Promise.all(pendingResources)).filter(
@@ -4046,6 +4634,17 @@ export async function captureScene3d(
       const resourcesTruncated = resourceTotal > SCENE_LIMITS.maxResources || budgetHit;
       if (three) linkThreeAssets(three, retained);
       const limitations = capabilityLimitations(gate.blocked, resourcesTruncated, budgetHit, adapters.adapters);
+      limitations.push(...keyframeLimitations);
+      if (dossier && wantThree && clockMode === "real") {
+        limitations.push(
+          "Keyframe camera and transform snapshots are sampled immediately before each frame screenshot; on wall-clock-animated pages they can still describe a slightly earlier moment than the captured frame.",
+        );
+      }
+      if (clockMode === "virtual") {
+        limitations.push(
+          "The virtual clock is paused before keyframe capture, but only page JavaScript time is frozen: CSS compositor animations, network timing, workers and iframes are not frozen by it.",
+        );
+      }
       if (wantThree) {
         limitations.push(
           three?.available
@@ -4069,8 +4668,7 @@ export async function captureScene3d(
         capabilities: sceneCapabilityReasons(three, spector),
       };
 
-      const evidence: SceneEvidence = {
-        id: "scene-evidence-v1",
+      const base = {
         // The page URL is redacted too: query strings can carry tokens.
         url: redactSceneUrl(url),
         captureId,
@@ -4094,6 +4692,36 @@ export async function captureScene3d(
         coverage,
         limitations,
       };
+      let evidence: SceneEvidence | SceneDossier;
+      let dossierMarkdown: string | null = null;
+      if (dossier) {
+        const v2: SceneEvidenceV2 = {
+          id: "scene-evidence-v2",
+          ...base,
+          keyframes,
+          clock: clockMode,
+        };
+        const draft = buildSceneDossier(v2, {
+          three,
+          spector,
+          frameworkHints,
+          canvasCount: canvases,
+          // The capture has no renderer-API probe; the dossier never invents one.
+          rendererApi: "unknown",
+          resources: retained.map((resource) => ({ url: resource.url })),
+          scriptUrls: retained
+            .filter((resource) => resource.classification === "script")
+            .map((resource) => resource.url),
+        });
+        // Budget fitting only trims keyframe nodes; dossier-only fields stay.
+        const fitted = fitSceneEvidenceV2(draft);
+        evidence = fitted;
+        // Render from the fitted pack, so a trimmed dossier summary agrees with
+        // the bytes on disk.
+        dossierMarkdown = renderSceneDossierMarkdown(fitted);
+      } else {
+        evidence = { id: "scene-evidence-v1", ...base };
+      }
 
       if (cancelled) throw new Error("capture cancelled after the deadline");
       const json = JSON.stringify(evidence, null, 1);
@@ -4102,7 +4730,21 @@ export async function captureScene3d(
           `scene evidence metadata exceeded the ${SCENE_LIMITS.maxMetadataBytes / (1024 * 1024)} MiB limit`,
         );
       }
+      if (
+        dossierMarkdown !== null &&
+        Buffer.byteLength(dossierMarkdown, "utf8") > SCENE_LIMITS.maxMetadataBytes
+      ) {
+        throw new Error(
+          `scene dossier summary exceeded the ${SCENE_LIMITS.maxMetadataBytes / (1024 * 1024)} MiB limit`,
+        );
+      }
       await writeFile(join(stagingDir, "evidence.json"), json, { mode: 0o600 });
+      if (dossierMarkdown !== null) {
+        // Same bytes under the v2 name for readers that prefer the explicit
+        // filename, and the operator summary beside both packs.
+        await writeFile(join(stagingDir, "evidence-v2.json"), json, { mode: 0o600 });
+        await writeFile(join(stagingDir, "dossier.md"), dossierMarkdown, { mode: 0o600 });
+      }
       // Publish only a complete pack: frames and metadata appear together.
       await rename(stagingDir, finalDir);
       // From here the published directory is the cleanup target: an abort
@@ -4178,7 +4820,7 @@ export type SceneSpectorSummary = Omit<SceneSpectorEvidence, "programs"> & {
 };
 
 export interface SceneEvidenceSummary {
-  id: SceneEvidence["id"];
+  id: SceneEvidence["id"] | SceneEvidenceV2["id"];
   url: string;
   captureId: string;
   capturedAt: number;
@@ -4216,13 +4858,22 @@ export interface SceneEvidenceSummary {
   spector: SceneSpectorSummary | null;
   blockedRequests: SceneEvidence["blockedRequests"];
   assetOrigins: string[];
-  paths: SceneEvidence["paths"];
-  coverage: SceneCoverage;
+  paths: SceneEvidence["paths"] & { dossier?: string };
+  coverage: SceneCoverage & { blindSpots?: string[] };
   limitations: string[];
+  /** Present only for v2 dossier packs; never synthesised for v1. */
+  clock?: SceneClock;
+  /** v2 only: conservative class and its redacted reasons. */
+  class?: SceneClass;
+  classReasons?: string[];
+  /** v2 only: keyframe count, never the transform snapshots. */
+  keyframes?: { length: number };
 }
 
 /** Drops the full resource rows (they live in evidence.json) and keeps counts. */
-export function summarizeSceneEvidence(evidence: SceneEvidence): SceneEvidenceSummary {
+export function summarizeSceneEvidence(
+  evidence: SceneEvidence | SceneEvidenceV2,
+): SceneEvidenceSummary {
   const byClassification: Record<SceneResourceClass, number> = {
     texture: 0,
     model: 0,
@@ -4243,7 +4894,7 @@ export function summarizeSceneEvidence(evidence: SceneEvidence): SceneEvidenceSu
     .slice(0, 20)
     .map(([origin, count]) => ({ origin, count }));
 
-  return {
+  const summary: SceneEvidenceSummary = {
     id: evidence.id,
     url: evidence.url,
     captureId: evidence.captureId,
@@ -4313,5 +4964,41 @@ export function summarizeSceneEvidence(evidence: SceneEvidence): SceneEvidenceSu
     paths: evidence.paths,
     coverage: evidence.coverage,
     limitations: evidence.limitations,
+    ...(evidence.id === "scene-evidence-v2" ? { clock: evidence.clock } : {}),
   };
+  if (evidence.id === "scene-evidence-v2") {
+    const dossier = evidence as SceneEvidenceV2 & Partial<SceneDossier>;
+    // Only the count is summarized; transform snapshots and shader source stay
+    // in evidence.json.
+    summary.keyframes = { length: evidence.keyframes.length };
+    if (
+      dossier.class === "R1" ||
+      dossier.class === "R2" ||
+      dossier.class === "R3" ||
+      dossier.class === "R4"
+    ) {
+      summary.class = dossier.class;
+    }
+    if (Array.isArray(dossier.classReasons)) {
+      summary.classReasons = dossier.classReasons
+        .filter((reason): reason is string => typeof reason === "string")
+        .map((reason) =>
+          reason
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, SCENE_DOSSIER_LIMITS.maxClassReasonChars),
+        );
+    }
+    const blindSpots = (evidence.coverage as { blindSpots?: unknown } | undefined)?.blindSpots;
+    if (Array.isArray(blindSpots)) {
+      summary.coverage = {
+        ...evidence.coverage,
+        blindSpots: capBlindSpots(blindSpots).blindSpots,
+      };
+    }
+    if (typeof dossier.paths?.dossier === "string") {
+      summary.paths = { ...evidence.paths, dossier: dossier.paths.dossier };
+    }
+  }
+  return summary;
 }

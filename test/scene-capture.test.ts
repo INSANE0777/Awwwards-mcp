@@ -5,24 +5,29 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { downloadSceneAssets } from "../src/scene-assets.js";
+import { buildSceneDossier } from "../src/scene-dossier.js";
 import {
   SCENE_CANVAS_PICK,
   SCENE_HINTS,
+  SCENE_KEYFRAME_PROBE,
   SCENE_PROBE,
   SCENE_READ,
   SCENE_SCROLL,
   SCENE_SPECTOR_PROBE,
   SCENE_THREE_PROBE,
   SCENE_LIMITS,
+  SCENE_KEYFRAME_BUDGET_LIMITATION,
   SPECTOR_INSTALL_HINT,
   THREE_PROBE_CAPS,
   captureScene3d,
   classifySceneResource,
   createSceneUrlGate,
+  fitSceneEvidenceV2,
   isPrivateAddress,
   loadSpectorBundle,
   normalizeSceneAdapters,
   normalizeSceneAssetOrigins,
+  normalizeSamplePoints,
   normalizeSceneCheckpoints,
   normalizeScenePrivateOrigins,
   parseConnectAuthority,
@@ -82,6 +87,7 @@ function fakePage(opts: {
   probe?: (arg: any, call: number) => Record<string, unknown>;
   hints?: Record<string, unknown>;
   three?: Record<string, unknown> | (() => Record<string, unknown>);
+  keyframe?: Record<string, unknown> | (() => Record<string, unknown>);
   spector?: Record<string, unknown> | (() => any);
   responses?: ResponseLike[];
   image?: Buffer;
@@ -176,6 +182,11 @@ function fakePage(opts: {
             controls: null,
           }
         );
+      }
+      if (fn === SCENE_KEYFRAME_PROBE) {
+        if (typeof opts.keyframe === "function") return opts.keyframe();
+        if (opts.keyframe) return opts.keyframe;
+        throw new Error(`unexpected evaluate ${name}`);
       }
       if (fn === SCENE_SPECTOR_PROBE) {
         if (typeof opts.spector === "function") return opts.spector();
@@ -423,6 +434,47 @@ describe("normalizeSceneCheckpoints", () => {
     expect(
       normalizeSceneCheckpoints(Array.from({ length: 11 }, () => ({ scrollRatio: 0 }))),
     ).toHaveProperty("error");
+  });
+});
+
+describe("normalizeSamplePoints", () => {
+  it("normalizes ordered sample points", () => {
+    expect(normalizeSamplePoints([0, 0.25, 1], 24)).toEqual({ points: [0, 0.25, 1] });
+  });
+
+  it("rounds to four decimals before ordering checks", () => {
+    expect(normalizeSamplePoints([0, 0.123456], 24)).toEqual({ points: [0, 0.1235] });
+    expect(normalizeSamplePoints([0, 0.50001, 0.50004], 24)).toHaveProperty("error");
+  });
+
+  it("rejects unordered, duplicate, out-of-range and non-finite sample points", () => {
+    for (const raw of [[0, 0.5, 0.5], [0.5, 0.25], [-0.1, 0.5], [0, 1.1], [0, Number.NaN]]) {
+      expect(normalizeSamplePoints(raw, 24)).toHaveProperty("error");
+    }
+    expect(normalizeSamplePoints([0, Number.POSITIVE_INFINITY], 24)).toHaveProperty("error");
+    expect(normalizeSamplePoints([0, "0.5"], 24)).toHaveProperty("error");
+    expect(normalizeSamplePoints("0,0.5,1", 24)).toHaveProperty("error");
+  });
+
+  it("rejects fewer than 2 and more than the max sample points", () => {
+    expect(normalizeSamplePoints([0], 24)).toHaveProperty("error");
+    expect(normalizeSamplePoints(Array.from({ length: 25 }, (_, i) => i / 24), 24)).toHaveProperty("error");
+  });
+
+  it("normalizes negative zero sample points to zero", () => {
+    const result = normalizeSamplePoints([-0, 1], 24);
+    expect(result).toEqual({ points: [0, 1] });
+    if (!("points" in result)) throw new Error(result.error);
+    expect(Object.is(result.points[0], 0)).toBe(true);
+  });
+
+  it("reports one sentence without echoing the offending input", () => {
+    const result = normalizeSamplePoints([0, 1.23456], 24);
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error).toMatch(/^[^.!?]+\.$/);
+      expect(result.error).not.toContain("1.23456");
+    }
   });
 });
 
@@ -1427,6 +1479,265 @@ describe("captureScene3d", () => {
     });
     expect(badRatio).toHaveProperty("error");
     expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("uses dossier samplePoints as capture stops with default wait and no pointer", async () => {
+    const dir = tmpDir();
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage().loader,
+      resolveHost,
+      sceneDir: dir,
+      emit: "dossier",
+      samplePoints: [0, 0.5, 1],
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.checkpoints.map((frame) => frame.requestedScrollRatio)).toEqual([0, 0.5, 1]);
+    expect(result.checkpoints.map((frame) => frame.waitMs)).toEqual(
+      result.checkpoints.map(() => SCENE_LIMITS.defaultWaitMs),
+    );
+    expect(result.checkpoints.map((frame) => frame.pointer)).toEqual([null, null, null]);
+  });
+
+  it("rejects more than 10 sample points outside dossier mode before launch", async () => {
+    const loader = vi.fn(fakePage().loader);
+    const result = await captureScene3d("https://example.com", {
+      loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      samplePoints: Array.from({ length: 11 }, (_, i) => i / 10),
+    });
+
+    expect("error" in result && result.error).toMatch(/samplePoints accepts at most 10 values/);
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("accepts 24 sample points when emit is dossier", async () => {
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage().loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      samplePoints: Array.from(
+        { length: SCENE_LIMITS.maxDossierStops },
+        (_, i) => i / (SCENE_LIMITS.maxDossierStops - 1),
+      ),
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.checkpoints).toHaveLength(SCENE_LIMITS.maxDossierStops);
+    expect(result.checkpoints[0]!.requestedScrollRatio).toBe(0);
+    expect(result.checkpoints[SCENE_LIMITS.maxDossierStops - 1]!.requestedScrollRatio).toBe(1);
+    // Dossier packs are v2 from the first stop, with one keyframe per stop.
+    expect((result as any).id).toBe("scene-evidence-v2");
+    expect((result as any).keyframes).toHaveLength(SCENE_LIMITS.maxDossierStops);
+  });
+
+  it("rejects a dossier with fewer than 2 stops before launching", async () => {
+    const loader = vi.fn(fakePage().loader);
+    const result = await captureScene3d("https://example.com", {
+      loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      checkpoints: [{ scrollRatio: 0 }],
+    });
+    expect(result).toEqual({
+      error: 'emit:"dossier" requires at least 2 stops; provide at least 2 checkpoints or samplePoints.',
+    });
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("rejects a dossier wait schedule that cannot fit the verify budget", async () => {
+    const loader = vi.fn(fakePage().loader);
+    const checkpoints = Array.from({ length: SCENE_LIMITS.maxDossierStops }, (_, index) => ({
+      scrollRatio: index / (SCENE_LIMITS.maxDossierStops - 1),
+      waitMs: SCENE_LIMITS.maxWaitMs,
+    }));
+    const result = await captureScene3d("https://example.com", {
+      loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      checkpoints,
+    });
+    expect("error" in result).toBe(true);
+    if (!("error" in result)) return;
+    expect(result.error).toMatch(/above the 45000ms verify budget/);
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("accepts a 24-stop dossier whose waits fit the verify budget", async () => {
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage().loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      checkpoints: Array.from({ length: SCENE_LIMITS.maxDossierStops }, (_, index) => ({
+        scrollRatio: index / (SCENE_LIMITS.maxDossierStops - 1),
+      })),
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.checkpoints).toHaveLength(SCENE_LIMITS.maxDossierStops);
+    expect((result as any).id).toBe("scene-evidence-v2");
+  });
+
+  it("persists dossier.md, evidence.json and evidence-v2.json from one pack", async () => {
+    const dir = tmpDir();
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage({
+        responses: [
+          response({
+            url: "https://cdn.example.com/app.js?token=secret",
+            mime: "text/javascript",
+            type: "script",
+          }),
+        ],
+      }).loader,
+      resolveHost,
+      sceneDir: dir,
+      emit: "dossier",
+      samplePoints: [0, 1],
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    const dossier = result as any;
+    expect(dossier.id).toBe("scene-evidence-v2");
+    expect(dossier.class).toBe("R2");
+    expect(dossier.classReasons.length).toBeGreaterThan(0);
+    expect(dossier.runtime).toMatchObject({ engine: "three", via: "global", confidence: "low" });
+    expect(dossier.renderer).toMatchObject({ api: "unknown", dpr: 2 });
+    expect(dossier.shaders).toMatchObject({ status: "unavailable" });
+    expect(dossier.coverage.blindSpots).toEqual(
+      expect.arrayContaining(["workers are not inspected", "OffscreenCanvas is not inspected"]),
+    );
+    expect(dossier.paths.dossier.endsWith("dossier.md")).toBe(true);
+    expect(dossier.keyframes).toHaveLength(2);
+    expect(dossier.clock).toBe("real");
+
+    const evidenceBytes = readFileSync(result.paths.evidence);
+    const saved = JSON.parse(evidenceBytes.toString("utf8"));
+    expect(saved.id).toBe("scene-evidence-v2");
+    expect(saved.class).toBe(dossier.class);
+    expect(saved.classReasons).toEqual(dossier.classReasons);
+    expect(saved.runtime).toEqual(dossier.runtime);
+    expect(saved.renderer).toEqual(dossier.renderer);
+    expect(saved.shaders).toEqual(dossier.shaders);
+    expect(saved.coverage.blindSpots).toEqual(dossier.coverage.blindSpots);
+    expect(saved.paths.dossier).toBe(dossier.paths.dossier);
+    expect(saved.keyframes).toHaveLength(2);
+    expect(saved.clock).toBe("real");
+    // Token-bearing URLs never persist, even in the dossier fields.
+    expect(evidenceBytes.toString("utf8")).not.toContain("token=secret");
+    expect(readFileSync(join(result.paths.dir, "evidence-v2.json")).equals(evidenceBytes)).toBe(
+      true,
+    );
+
+    const markdown = readFileSync(dossier.paths.dossier, "utf8");
+    expect(markdown).toContain("# Scene dossier");
+    expect(markdown).toContain("Class: R2");
+    expect(markdown).toContain("workers are not inspected");
+    expect(markdown).toContain("| # | scrollRatio | camera | frame hash | stable |");
+    expect(markdown).toContain("no asset bodies were downloaded");
+
+    const summary = summarizeSceneEvidence(result);
+    expect(summary.id).toBe("scene-evidence-v2");
+    expect(summary.class).toBe("R2");
+    expect(summary.classReasons).toEqual(dossier.classReasons);
+    expect(summary.keyframes).toEqual({ length: 2 });
+    expect(summary.coverage.blindSpots).toEqual(dossier.coverage.blindSpots);
+    expect(summary.paths.dossier).toBe(dossier.paths.dossier);
+  });
+
+  it("fails closed when a virtual clock is unavailable", async () => {
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage().loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      clock: "virtual",
+      samplePoints: [0, 1],
+    });
+    expect(result).toEqual({ error: "virtual clock is unavailable in this Playwright build" });
+  });
+
+  it("rejects a virtual clock without dossier output before launching", async () => {
+    const loader = vi.fn(fakePage().loader);
+    const dir = tmpDir();
+    for (const emit of [undefined, "evidence"] as const) {
+      const result = await captureScene3d("https://example.com", {
+        loader,
+        resolveHost,
+        sceneDir: dir,
+        clock: "virtual",
+        ...(emit ? { emit } : {}),
+      });
+      expect(result).toEqual({ error: 'clock:"virtual" requires emit:"dossier".' });
+    }
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("records keyframe probe failures as limitations with empty camera and nodes", async () => {
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage().loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      samplePoints: [0, 1],
+      adapters: ["three"],
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    const keyframes = (result as any).keyframes;
+    expect(keyframes.every((keyframe: any) => keyframe.camera === null)).toBe(true);
+    expect(keyframes.every((keyframe: any) => keyframe.nodes.length === 0)).toBe(true);
+    expect(result.limitations).toEqual(
+      expect.arrayContaining(["keyframe 0: three probe failed", "keyframe 1: three probe failed"]),
+    );
+  });
+
+  it("records the 200-node keyframe snapshot cap as a limitation", async () => {
+    const nodes = Array.from({ length: SCENE_LIMITS.maxKeyframeNodes }, (_, index) => ({
+      uuid: `node-${index}`,
+      position: [index, 0, 0],
+      quaternion: [0, 0, 0, 1],
+      scale: [1, 1, 1],
+    }));
+    const result = await captureScene3d("https://example.com", {
+      loader: fakePage({
+        keyframe: {
+          available: true,
+          truncated: true,
+          camera: {
+            type: "PerspectiveCamera",
+            fov: 50,
+            near: 0.1,
+            far: 100,
+            matrixWorld: Array.from({ length: 16 }, () => 0),
+          },
+          nodes,
+        },
+      }).loader,
+      resolveHost,
+      sceneDir: tmpDir(),
+      emit: "dossier",
+      samplePoints: [0, 1],
+      adapters: ["three"],
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    const keyframes = (result as any).keyframes;
+    expect(keyframes[0].nodes).toHaveLength(SCENE_LIMITS.maxKeyframeNodes);
+    expect(keyframes[0].camera?.matrixWorld).toHaveLength(16);
+    expect(result.limitations).toContain(
+      `keyframe transform snapshots are capped at ${SCENE_LIMITS.maxKeyframeNodes} nodes`,
+    );
   });
 
   it("fails clearly when the selector matches nothing or the page has no canvas", async () => {
@@ -3098,5 +3409,288 @@ describe("CONNECT authority and origin exemptions", () => {
       socket.destroy();
       await proxy.close();
     }
+  });
+});
+
+function syntheticV2Evidence(nodesPerKeyframe: number): any {
+  const stops = SCENE_LIMITS.maxDossierStops;
+  const keyframes = Array.from({ length: stops }, (_, index) => ({
+    index,
+    scrollRatio: index / (stops - 1),
+    pointer: null,
+    camera: {
+      type: "PerspectiveCamera",
+      fov: 50,
+      near: 0.1,
+      far: 100,
+      matrixWorld: Array.from({ length: 16 }, () => index),
+    },
+    nodes: Array.from({ length: nodesPerKeyframe }, () => ({
+      uuid: "u".repeat(SCENE_LIMITS.maxThreeUuidChars),
+      position: [1.2345678901234567e300, 2.3456789012345678e299, 3.4567890123456789e298],
+      quaternion: [0.123456789012345, 0.223456789012345, 0.323456789012345, 0.923456789012345],
+      scale: [1.2345678901234567e200, 1.3456789012345678e201, 1.4567890123456789e202],
+    })),
+    frameHash: String(index).padStart(64, "a"),
+    stable: true,
+    files: { canvas: `/tmp/canvas-${index}.png`, viewport: `/tmp/viewport-${index}.png` },
+  }));
+  const checkpoints = Array.from({ length: stops }, (_, index) => ({
+    index,
+    requestedScrollRatio: index / (stops - 1),
+    requestedScrollTop: index * 100,
+    actualScrollTop: index * 100,
+    scrollRange: 2100,
+    scrollRoot: "window",
+    scrollRootFound: true,
+    pointer: null,
+    pointerPx: null,
+    waitMs: 400,
+    elapsedMs: 400,
+    canvas: { rect: { x: 0, y: 0, width: 1440, height: 900 }, backing: { width: 1440, height: 900 }, dpr: 1 },
+    stable: true,
+    files: { canvas: `/tmp/canvas-${index}.png`, viewport: `/tmp/viewport-${index}.png` },
+  }));
+  return {
+    id: "scene-evidence-v2",
+    url: "https://example.com/",
+    captureId: "scene-test",
+    capturedAt: 0,
+    viewport: { name: "desktop", width: 1440, height: 900 },
+    canvas: { requestedSelector: null, usedSelector: "#scene", canvases: 1 },
+    frameworkHints: {
+      three: { detected: true, version: null, scripts: [] },
+      babylon: { detected: false, version: null, scripts: [] },
+      playcanvas: { detected: false, version: null, scripts: [] },
+      canvasCount: 1,
+    },
+    checkpoints,
+    keyframes,
+    clock: "real",
+    resources: [
+      {
+        assetId: "asset-1",
+        url: "https://example.com/texture.png",
+        origin: "https://example.com",
+        mime: "image/png",
+        bytes: null,
+        resourceType: "image",
+        classification: "texture",
+        discovery: "response",
+        assetOrigin: false,
+        download: { status: "skipped", reason: "test fixture" },
+      },
+    ],
+    resourceTotal: 1,
+    resourcesTruncated: false,
+    blockedRequests: { count: 0, samples: [] },
+    assetOrigins: [],
+    paths: { dir: "/tmp/scene", evidence: "/tmp/scene/evidence.json", framesDir: "/tmp/scene" },
+    coverage: { collected: stops, excluded: 0, truncated: false, limitations: [], capabilities: {} },
+    limitations: [],
+  };
+}
+
+describe("fitSceneEvidenceV2", () => {
+  it("trims keyframe nodes to fit the 2 MiB evidence budget", () => {
+    const evidence = syntheticV2Evidence(SCENE_LIMITS.maxKeyframeNodes);
+    const sizeOf = (value: any) => Buffer.byteLength(JSON.stringify(value, null, 1), "utf8");
+    expect(sizeOf(evidence)).toBeGreaterThan(SCENE_LIMITS.maxMetadataBytes);
+
+    const fitted = fitSceneEvidenceV2(evidence);
+    expect(sizeOf(fitted)).toBeLessThanOrEqual(SCENE_LIMITS.maxMetadataBytes);
+    expect(
+      fitted.limitations.filter((row) => row === SCENE_KEYFRAME_BUDGET_LIMITATION),
+    ).toHaveLength(1);
+    expect(fitted.coverage.status).toBe("partial");
+    expect(fitted.coverage.limitations).toContain(SCENE_KEYFRAME_BUDGET_LIMITATION);
+    // Every keyframe keeps its camera, hash and files; only nodes are trimmed.
+    expect(fitted.keyframes.map((keyframe) => keyframe.camera)).toEqual(
+      evidence.keyframes.map((keyframe) => keyframe.camera),
+    );
+    expect(fitted.keyframes.map((keyframe) => keyframe.frameHash)).toEqual(
+      evidence.keyframes.map((keyframe) => keyframe.frameHash),
+    );
+    expect(fitted.keyframes.some((keyframe) => keyframe.nodes.length < SCENE_LIMITS.maxKeyframeNodes)).toBe(
+      true,
+    );
+    // Binary search keeps the largest fitting global limit: halving would have
+    // stopped at 100 nodes instead of the fitting boundary.
+    const fittedLimit = Math.max(...fitted.keyframes.map((keyframe) => keyframe.nodes.length));
+    expect(fitted.keyframes.every((keyframe) => keyframe.nodes.length === fittedLimit)).toBe(true);
+    expect(fittedLimit).toBeGreaterThan(150);
+    const oversized = {
+      ...fitted,
+      keyframes: fitted.keyframes.map((keyframe) => ({
+        ...keyframe,
+        nodes: [...keyframe.nodes, evidence.keyframes[keyframe.index].nodes[fittedLimit]],
+      })),
+    };
+    expect(sizeOf(oversized)).toBeGreaterThan(SCENE_LIMITS.maxMetadataBytes);
+    // The input pack is not mutated.
+    expect(
+      evidence.keyframes.every(
+        (keyframe: any) => keyframe.nodes.length === SCENE_LIMITS.maxKeyframeNodes,
+      ),
+    ).toBe(true);
+    expect(fitted.checkpoints).toEqual(evidence.checkpoints);
+    expect(fitted.resources).toEqual(evidence.resources);
+    expect(fitted.clock).toBe("real");
+  });
+
+  it("preserves dossier fields when the budget fit trims keyframe nodes", () => {
+    const evidence = syntheticV2Evidence(SCENE_LIMITS.maxKeyframeNodes);
+    const dossier = buildSceneDossier(evidence, {
+      frameworkHints: evidence.frameworkHints,
+      canvasCount: 1,
+      rendererApi: "unknown",
+      resources: [],
+      scriptUrls: [],
+    });
+    expect(
+      Buffer.byteLength(JSON.stringify(dossier, null, 1), "utf8"),
+    ).toBeGreaterThan(SCENE_LIMITS.maxMetadataBytes);
+
+    const fitted = fitSceneEvidenceV2(dossier);
+    expect(fitted).not.toBe(dossier);
+    expect(fitted.keyframes.some((keyframe) => keyframe.nodes.length < SCENE_LIMITS.maxKeyframeNodes)).toBe(
+      true,
+    );
+    // Generic fitting keeps the dossier overlay, not just the v2 base.
+    expect(fitted.class).toBe(dossier.class);
+    expect(fitted.classReasons).toEqual(dossier.classReasons);
+    expect(fitted.runtime).toEqual(dossier.runtime);
+    expect(fitted.renderer).toEqual(dossier.renderer);
+    expect(fitted.assets).toEqual(dossier.assets);
+    expect(fitted.shaders).toEqual(dossier.shaders);
+    expect(fitted.paths.dossier).toBe(dossier.paths.dossier);
+    expect(fitted.coverage.blindSpots).toEqual(dossier.coverage.blindSpots);
+  });
+
+  it("leaves an over-budget pack with no trimmable nodes for the hard error", () => {
+    const evidence = syntheticV2Evidence(0);
+    evidence.limitations = ["x".repeat(SCENE_LIMITS.maxMetadataBytes + 1)];
+    const fitted = fitSceneEvidenceV2(evidence);
+    expect(fitted).toBe(evidence);
+    expect(fitted.keyframes.every((keyframe: any) => keyframe.nodes.length === 0)).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(fitted, null, 1), "utf8")).toBeGreaterThan(
+      SCENE_LIMITS.maxMetadataBytes,
+    );
+  });
+
+  it("summarizes a v2 pack with clock and a keyframe count", () => {
+    const summary = summarizeSceneEvidence(syntheticV2Evidence(0));
+    expect(summary.id).toBe("scene-evidence-v2");
+    expect(summary.clock).toBe("real");
+    expect(summary.keyframes).toEqual({ length: SCENE_LIMITS.maxDossierStops });
+  });
+
+  it("keeps the v1 summary free of v2-only fields", () => {
+    const v1 = {
+      ...syntheticV2Evidence(0),
+      id: "scene-evidence-v1",
+    };
+    delete (v1 as any).keyframes;
+    delete (v1 as any).clock;
+    const summary = summarizeSceneEvidence(v1);
+    expect(summary.id).toBe("scene-evidence-v1");
+    expect("keyframes" in summary).toBe(false);
+    expect("class" in summary).toBe(false);
+    expect("classReasons" in summary).toBe(false);
+    expect("blindSpots" in summary.coverage).toBe(false);
+    expect("dossier" in summary.paths).toBe(false);
+    expect("clock" in summary).toBe(false);
+  });
+
+  it("summarizes a v2 dossier with class, blind spots and dossier path", () => {
+    const dossier = buildSceneDossier(
+      {
+        ...syntheticV2Evidence(0),
+        coverage: {
+          ...(syntheticV2Evidence(0) as any).coverage,
+          collected: SCENE_LIMITS.maxDossierStops,
+          excluded: 0,
+          limitations: [],
+          capabilities: {},
+          blindSpots: ["workers are not inspected", "OffscreenCanvas is not inspected"],
+        },
+        paths: { dir: "/tmp", evidence: "/tmp/evidence.json", framesDir: "/tmp" },
+        three: {
+          id: "three-adapter-v1",
+          available: true,
+          reason: "ok",
+          revision: "170",
+          scene: { nodes: [], truncated: false, total: 0 },
+          camera: {
+            type: "PerspectiveCamera",
+            fov: 50,
+            near: 0.1,
+            far: 100,
+            matrixWorld: null,
+          },
+          cameras: [],
+          lights: [],
+          controls: null,
+          coverage: {
+            scene: true,
+            geometry: false,
+            camera: true,
+            controls: false,
+            lights: false,
+            materials: false,
+          },
+        },
+        spector: {
+          id: "spector-adapter-v1",
+          available: true,
+          reason: "ok",
+          version: "1.0",
+          canvas: null,
+          context: null,
+          commands: {
+            total: 0,
+            drawCalls: 0,
+            byName: [],
+            statuses: { unknown: 0, unused: 0, disabled: 0, redundant: 0, valid: 0, deprecated: 0 },
+          },
+          programs: [
+            {
+              programStatus: { LINK_STATUS: true, VALIDATE_STATUS: true, infoLog: null },
+              shaders: [
+                { type: "vertex", source: "SECRET_SOURCE", length: 13, truncated: false },
+              ],
+            },
+          ],
+          analyses: [],
+          limits: {
+            maxPrograms: 10,
+            maxShaders: 20,
+            maxShaderChars: 1_000,
+            maxTotalShaderChars: 10_000,
+            maxCommandNames: 20,
+            programsTruncated: false,
+            shadersTruncated: false,
+          },
+        },
+      } as any,
+      {
+        frameworkHints: syntheticV2Evidence(0).frameworkHints,
+        canvasCount: 1,
+        rendererApi: "webgl2",
+        resources: [],
+        scriptUrls: [],
+      },
+    );
+    const summary = summarizeSceneEvidence(dossier);
+    expect(summary.id).toBe("scene-evidence-v2");
+    expect(summary.class).toBe("R1");
+    expect(summary.classReasons?.length).toBeGreaterThan(0);
+    expect(summary.keyframes).toEqual({ length: SCENE_LIMITS.maxDossierStops });
+    expect(summary.coverage.blindSpots).toEqual([
+      "workers are not inspected",
+      "OffscreenCanvas is not inspected",
+    ]);
+    expect(summary.paths.dossier).toBe(join("/tmp", "dossier.md"));
+    expect(JSON.stringify(summary)).not.toContain("SECRET_SOURCE");
   });
 });

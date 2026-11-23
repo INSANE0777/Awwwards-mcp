@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   SCENE_LIMITS,
+  SCENE_KEYFRAME_PROBE,
+  SCENE_KEYFRAME_PROBE_CAPS,
   SCENE_PROBE,
   SCENE_SCROLL,
   SCENE_SPECTOR_PROBE,
@@ -108,6 +111,40 @@ window.scene = scene;
 window.camera = camera;
 window.renderer = renderer;
 window.app = { scene, camera, renderer };
+window.__sceneReady = true;
+</script>
+</body></html>`;
+
+// One full-viewport canvas whose camera x follows scrollY, so every dossier
+// stop must record a different camera matrix and a different frame hash.
+const KEYFRAME_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:3000px;background:#0b0d12}
+#scene{position:fixed;left:0;top:0;width:100vw;height:100vh;display:block}
+</style></head><body>
+<canvas id="scene"></canvas>
+<script type="module">
+import * as THREE from "/three.module.js";
+const canvas = document.getElementById("scene");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(window.innerWidth, window.innerHeight, false);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b4dff);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 0, 3);
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1), new THREE.MeshBasicMaterial({ color: 0xffaa00 })));
+const render = () => {
+  // Time-dependent as well as scroll-dependent: an unpaused virtual clock
+  // (wall time) would produce different matrices between two captures.
+  camera.position.x = window.scrollY / 1000 + (Date.now() % 1000) / 10000;
+  camera.updateMatrixWorld();
+  renderer.render(scene, camera);
+  requestAnimationFrame(render);
+};
+window.scene = scene;
+window.camera = camera;
+render();
 window.__sceneReady = true;
 </script>
 </body></html>`;
@@ -275,6 +312,11 @@ async function startFixtures(): Promise<Fixture> {
     if (path === "/adapter.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(ADAPTER_HTML);
+      return;
+    }
+    if (path === "/keyframe.html") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(KEYFRAME_HTML);
       return;
     }
     if (path === "/loop.html") {
@@ -474,6 +516,30 @@ if (!chromiumAvailable && REQUIRED) {
           expect(result.checkpoints).toHaveLength(2);
           expect(result.checkpoints[1].actualScrollTop).toBeGreaterThan(0);
           expect(result.canvas.canvases).toBe(1);
+          // v1 output is byte-compatible: id stays the first key and the v2
+          // fields are absent.
+          const savedV1 = JSON.parse(readFileSync(result.paths.evidence, "utf8"));
+          expect(Object.keys(savedV1)[0]).toBe("id");
+          expect(Object.keys(savedV1)).toEqual([
+            "id",
+            "url",
+            "captureId",
+            "capturedAt",
+            "viewport",
+            "canvas",
+            "frameworkHints",
+            "checkpoints",
+            "resources",
+            "resourceTotal",
+            "resourcesTruncated",
+            "blockedRequests",
+            "assetOrigins",
+            "paths",
+            "coverage",
+            "limitations",
+          ]);
+          expect(savedV1).not.toHaveProperty("keyframes");
+          expect(savedV1).not.toHaveProperty("clock");
           expect(fixture.pageHits).toEqual(
             expect.arrayContaining(["/scene-redirect", "/scene.html", "/three.module.js"]),
           );
@@ -623,6 +689,253 @@ if (!chromiumAvailable && REQUIRED) {
           expect(result.coverage.capabilities.camera.status).toBe("available");
           expect(result.coverage.capabilities.controls.status).toBe("unknown");
           expect(result.coverage.capabilities.shaders.status).toBe("unavailable");
+        } finally {
+          await fixture.close();
+        }
+      },
+    );
+
+    it(
+      "reports truncation when the keyframe probe drops children",
+      { timeout: 90_000 },
+      async () => {
+        const browser = await chromium!.launch({ args: ["--enable-unsafe-swiftshader"] });
+        try {
+          const page = await browser.newPage();
+          await page.goto("about:blank");
+
+          // 10k references to one child: the duplicate cannot exhaust the queue
+          // silently, and the child-count cap is reported.
+          await page.evaluate(() => {
+            const child = {
+              uuid: "child",
+              position: { x: 1, y: 2, z: 3 },
+              quaternion: { x: 0, y: 0, z: 0, w: 1 },
+              scale: { x: 1, y: 1, z: 1 },
+            };
+            (window as any).scene = {
+              isScene: true,
+              uuid: "root",
+              position: { x: 0, y: 0, z: 0 },
+              quaternion: { x: 0, y: 0, z: 0, w: 1 },
+              scale: { x: 1, y: 1, z: 1 },
+              children: Array.from({ length: 10_000 }, () => child),
+            };
+          });
+          const duplicates = await page.evaluate(
+            SCENE_KEYFRAME_PROBE,
+            SCENE_KEYFRAME_PROBE_CAPS,
+          );
+          expect(duplicates.truncated).toBe(true);
+          expect(duplicates.nodes).toHaveLength(2);
+
+          // 10k unique children: the 200-node cap reports truncation too.
+          await page.evaluate(() => {
+            const makeChild = (index: number) => ({
+              uuid: `child-${index}`,
+              position: { x: index, y: 0, z: 0 },
+              quaternion: { x: 0, y: 0, z: 0, w: 1 },
+              scale: { x: 1, y: 1, z: 1 },
+            });
+            (window as any).scene = {
+              isScene: true,
+              uuid: "root",
+              position: { x: 0, y: 0, z: 0 },
+              quaternion: { x: 0, y: 0, z: 0, w: 1 },
+              scale: { x: 1, y: 1, z: 1 },
+              children: Array.from({ length: 10_000 }, (_, index) => makeChild(index)),
+            };
+          });
+          const unique = await page.evaluate(
+            SCENE_KEYFRAME_PROBE,
+            SCENE_KEYFRAME_PROBE_CAPS,
+          );
+          expect(unique.truncated).toBe(true);
+          expect(unique.nodes).toHaveLength(SCENE_LIMITS.maxKeyframeNodes);
+
+          // A complete small tree stays untruncated.
+          await page.evaluate(() => {
+            const child = (uuid: string) => ({
+              uuid,
+              position: { x: 0, y: 0, z: 0 },
+              quaternion: { x: 0, y: 0, z: 0, w: 1 },
+              scale: { x: 1, y: 1, z: 1 },
+            });
+            (window as any).scene = {
+              isScene: true,
+              uuid: "root",
+              position: { x: 0, y: 0, z: 0 },
+              quaternion: { x: 0, y: 0, z: 0, w: 1 },
+              scale: { x: 1, y: 1, z: 1 },
+              children: [child("a"), child("b")],
+            };
+          });
+          const complete = await page.evaluate(
+            SCENE_KEYFRAME_PROBE,
+            SCENE_KEYFRAME_PROBE_CAPS,
+          );
+          expect(complete.truncated).toBe(false);
+          expect(complete.nodes).toHaveLength(3);
+        } finally {
+          await browser.close();
+        }
+      },
+    );
+
+    it(
+      "records camera keyframes per dossier stop",
+      { timeout: 90_000 },
+      async () => {
+        const fixture = await startFixtures();
+        try {
+          const result = await captureScene3d(`${fixture.origin}/keyframe.html`, {
+            loader,
+            emit: "dossier",
+            samplePoints: [0, 0.5, 1],
+            adapters: ["three"],
+            allowPrivateOrigins: [fixture.origin],
+            sceneDir: sceneDir(),
+          });
+          expect("error" in result).toBe(false);
+          if ("error" in result) throw new Error(result.error);
+          expect(result.id).toBe("scene-evidence-v2");
+          const keyframes = (result as any).keyframes;
+          expect(keyframes).toHaveLength(3);
+          expect(keyframes[0].camera.matrixWorld).not.toEqual(keyframes[2].camera.matrixWorld);
+          expect(keyframes[0].nodes.length).toBeGreaterThan(0);
+          for (const node of keyframes[0].nodes) {
+            for (const vector of [node.position, node.quaternion, node.scale]) {
+              if (vector !== null) expect(vector.every(Number.isFinite)).toBe(true);
+            }
+          }
+          const hashes = keyframes.map((keyframe: any) => keyframe.frameHash);
+          expect(new Set(hashes).size).toBe(keyframes.length);
+          for (const keyframe of keyframes) {
+            expect(keyframe.frameHash).toMatch(/^[0-9a-f]{64}$/);
+            // The hash is of the clipped canvas file itself, not a synthetic value.
+            expect(keyframe.frameHash).toBe(
+              createHash("sha256").update(readFileSync(keyframe.files.canvas)).digest("hex"),
+            );
+          }
+          // The persisted pack carries the same v2 id, so a v1-only verify
+          // rejects it by id instead of replaying it as a v1 reference.
+          const saved = JSON.parse(readFileSync(result.paths.evidence, "utf8"));
+          expect(saved.id).toBe("scene-evidence-v2");
+          expect(saved.clock).toBe("real");
+          expect(saved.keyframes).toHaveLength(3);
+          // The v2 dossier is assembled and persisted beside the pack.
+          expect(result.paths.dossier.endsWith("dossier.md")).toBe(true);
+          expect(saved.paths.dossier).toBe(result.paths.dossier);
+          expect(saved.class).toBe("R1");
+          expect(saved.classReasons.length).toBeGreaterThan(0);
+          expect(saved.runtime).toMatchObject({
+            engine: "three",
+            via: "adapter",
+            confidence: "high",
+          });
+          expect(saved.renderer).toMatchObject({ api: "unknown", dpr: expect.any(Number) });
+          expect(saved.shaders).toMatchObject({ status: "unavailable" });
+          expect(saved.coverage.workersInspected).toBe(false);
+          expect(saved.coverage.offscreenInspected).toBe(false);
+          expect(saved.coverage.truncatedDraws).toBe(false);
+          expect(saved.coverage.blindSpots).toEqual(
+            expect.arrayContaining([
+              "workers are not inspected",
+              "OffscreenCanvas is not inspected",
+            ]),
+          );
+          // The keyframe read is taken just before the screenshot and says so.
+          expect(result.limitations.join(" ")).toContain(
+            "sampled immediately before each frame screenshot",
+          );
+          const evidenceBytes = readFileSync(result.paths.evidence);
+          expect(
+            readFileSync(join(result.paths.dir, "evidence-v2.json")).equals(evidenceBytes),
+          ).toBe(true);
+          const markdown = readFileSync(result.paths.dossier, "utf8");
+          expect(markdown).toContain("# Scene dossier");
+          expect(markdown).toContain("Class: R1");
+          expect(markdown).toContain("workers are not inspected");
+          expect(markdown).toContain("| # | scrollRatio | camera | frame hash | stable |");
+          expect(markdown).not.toContain('"source"');
+        } finally {
+          await fixture.close();
+        }
+      },
+    );
+
+    it(
+      "advances a virtual clock deterministically for dossier keyframes",
+      { timeout: 120_000 },
+      async () => {
+        const fixture = await startFixtures();
+        const capture = () =>
+          captureScene3d(`${fixture.origin}/keyframe.html`, {
+            loader,
+            emit: "dossier",
+            clock: "virtual",
+            samplePoints: [0, 0.5, 1],
+            adapters: ["three"],
+            allowPrivateOrigins: [fixture.origin],
+            sceneDir: sceneDir(),
+            includeViewportShots: false,
+          });
+        try {
+          const first = await capture();
+          expect("error" in first).toBe(false);
+          if ("error" in first) throw new Error(first.error);
+          const second = await capture();
+          expect("error" in second).toBe(false);
+          if ("error" in second) throw new Error(second.error);
+
+          expect((first as any).clock).toBe("virtual");
+          expect((second as any).clock).toBe("virtual");
+          const matrices = (result: any) =>
+            result.keyframes.map((keyframe: any) => keyframe.camera.matrixWorld);
+          const hashes = (result: any) =>
+            result.keyframes.map((keyframe: any) => keyframe.frameHash);
+          expect(matrices(first)).toEqual(matrices(second));
+          expect(hashes(first)).toEqual(hashes(second));
+          expect(new Set(hashes(first)).size).toBe(3);
+          expect(hashes(first).every((hash: string) => /^[0-9a-f]{64}$/.test(hash))).toBe(true);
+          expect(first.limitations.join(" ")).toMatch(/CSS compositor animations/);
+          expect(first.limitations.join(" ")).not.toContain(
+            "sampled immediately before each frame screenshot",
+          );
+          const saved = JSON.parse(readFileSync(first.paths.evidence, "utf8"));
+          expect(saved.id).toBe("scene-evidence-v2");
+          expect(saved.clock).toBe("virtual");
+        } finally {
+          await fixture.close();
+        }
+      },
+    );
+
+    it(
+      "captures a spector frame while a dossier virtual clock is installed",
+      { timeout: 120_000 },
+      async () => {
+        const fixture = await startFixtures();
+        try {
+          const result = await captureScene3d(`${fixture.origin}/loop.html`, {
+            loader,
+            emit: "dossier",
+            clock: "virtual",
+            samplePoints: [0, 1],
+            adapters: ["spector"],
+            allowPrivateOrigins: [fixture.origin],
+            sceneDir: sceneDir(),
+            includeViewportShots: false,
+          });
+          expect("error" in result).toBe(false);
+          if ("error" in result) throw new Error(result.error);
+          expect((result as any).clock).toBe("virtual");
+          // The one-shot spector frame is captured before the clock is paused;
+          // a paused clock would never deliver the frame it waits for.
+          expect(result.spector?.available, result.spector?.reason).toBe(true);
+          expect(result.spector?.reason ?? "").not.toMatch(/time budget|timed out|timeout/i);
+          expect(result.limitations.join(" ")).not.toMatch(/spector.*(timed out|time budget)/i);
+          expect((result as any).keyframes).toHaveLength(2);
         } finally {
           await fixture.close();
         }

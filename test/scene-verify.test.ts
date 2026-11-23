@@ -86,6 +86,34 @@ function writeScenePack(
   return { sceneDir, captureDir, evidencePath, framePath };
 }
 
+/** The same fixture relabelled as v2 with one keyframe per checkpoint. */
+function writeV2ScenePack(
+  sceneDir: string,
+  count: number,
+  mutate: (evidence: any) => void = () => {},
+): ScenePack {
+  return writeScenePack(sceneDir, (evidence) => {
+    const template = evidence.checkpoints[0];
+    evidence.checkpoints = Array.from({ length: count }, (_, index) => ({
+      ...template,
+      index,
+    }));
+    evidence.keyframes = evidence.checkpoints.map((row: any, index: number) => ({
+      index,
+      scrollRatio: row.requestedScrollRatio,
+      pointer: row.pointer,
+      camera: null,
+      nodes: [],
+      frameHash: "0".repeat(64),
+      stable: true,
+      files: { canvas: row.files.canvas },
+    }));
+    evidence.id = "scene-evidence-v2";
+    evidence.clock = "real";
+    mutate(evidence);
+  });
+}
+
 const sceneVerifyArgs = (pack: ScenePack) => ({
   buildUrl: "https://build.test/",
   referenceCaptureId: SCENE_ID,
@@ -458,6 +486,7 @@ function fakeSceneBrowser(
     hangClose?: boolean;
     compare?: boolean;
     onWait?: (ms: number) => Promise<void>;
+    changedPixelFraction?: number;
   } = {},
 ): {
   loader: () => Promise<any>;
@@ -487,7 +516,7 @@ function fakeSceneBrowser(
           ? {
               width: 600,
               height: 400,
-              changedPixelFraction: 0,
+              changedPixelFraction: opts.changedPixelFraction ?? 0,
               meanAbsoluteChannelError: 0,
               referenceColors: 12,
               buildColors: 12,
@@ -534,6 +563,334 @@ function fakeSceneBrowser(
   const chromium = { launch: vi.fn(async () => browser) };
   return { loader: async () => ({ chromium }), closed, waits };
 }
+
+describe("verifyScene3d v2 packs", () => {
+  const v2Args = (pack: ScenePack) => ({
+    ...sceneVerifyArgs(pack),
+    tolerances: { pixelThreshold: 0.05, maxChangedFraction: 0.02 },
+  });
+
+  it("accepts a v2 pack whose keyframes mirror checkpoints and reports its class", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.class = "R1";
+        // The v2 design keeps blind spots on coverage, not at the top level.
+        evidence.coverage.blindSpots = [
+          "workers are not inspected",
+          42,
+          "OffscreenCanvas is not inspected",
+        ];
+      });
+      const fake = fakeSceneBrowser({ compare: true });
+      const result = await verifyScene3d({ ...v2Args(pack), loader: fake.loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("comparable");
+      expect(result.verdict).toBe("within-tolerance");
+      expect(result.referenceClass).toBe("R1");
+      expect(result.blindSpots).toEqual([
+        "workers are not inspected",
+        "OffscreenCanvas is not inspected",
+      ]);
+      expect(result.keyframes).toEqual({ requested: 2, compared: 2 });
+      expect(result.checkpoints).toHaveLength(2);
+      expect(result.checkpoints.every((cp) => cp.status === "comparable")).toBe(true);
+      // Keyframe transforms are context, never a compared input.
+      expect(result.limitations.join(" ")).toContain(
+        "verification compares rendered frames, not the recorded transforms",
+      );
+      expect(result.limitations.join(" ")).toContain(
+        "never derives or compares a camera angle",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts 24 keyframes and compares all of them", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 24);
+      const fake = fakeSceneBrowser({ compare: true });
+      const result = await verifyScene3d({ ...v2Args(pack), loader: fake.loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("comparable");
+      expect(result.requested).toBe(24);
+      expect(result.compared).toBe(24);
+      expect(result.keyframes).toEqual({ requested: 24, compared: 24 });
+      expect(result.checkpoints).toHaveLength(24);
+      expect(result.checkpoints.every((cp) => cp.status === "comparable")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects 25 keyframes above the dossier cap before any browser work", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 25);
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain("above the 24 supported");
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a v2 wait schedule that cannot fit the verify budget", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 24, (evidence) => {
+        for (const checkpoint of evidence.checkpoints) checkpoint.waitMs = 2_000;
+      });
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain("above the 45000ms verify budget");
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a v2 pack with fewer than 2 keyframes", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 1);
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain("below the 2");
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still rejects a v1 pack with 11 checkpoints at the v1 cap", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeScenePack(dir, (evidence) => {
+        const template = evidence.checkpoints[0];
+        evidence.checkpoints = Array.from({ length: 11 }, (_, index) => ({
+          ...template,
+          index,
+        }));
+      });
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain("above the 10 supported");
+      expect("keyframes" in result).toBe(false);
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a v2 keyframe that does not mirror its checkpoint", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.keyframes[1].scrollRatio = 0.2;
+      });
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain(
+        "keyframe with a scroll ratio that does not match checkpoint 1",
+      );
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a v2 keyframe whose frame path differs from its checkpoint", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.keyframes[1].files.canvas = "/etc/passwd";
+      });
+      const lookup = vi.fn();
+      const result = await verifyScene3d({
+        ...sceneVerifyArgs(pack),
+        resolveHost: lookup,
+        loader: vi.fn(),
+      });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain(
+        "keyframe with a frame path that does not match checkpoint 1",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a v2 keyframe whose pointer differs from its checkpoint", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.keyframes[1].pointer = { x: 0.5, y: 0.5 };
+      });
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain(
+        "keyframe with a pointer that does not match checkpoint 1",
+      );
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a v2 pack whose keyframe count differs from its checkpoints", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.keyframes.pop();
+      });
+      const loader = vi.fn(fakeSceneBrowser().loader);
+      const result = await verifyScene3d({ ...v2Args(pack), loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.limitations.join(" ")).toContain("has 1 keyframes for 2 checkpoints");
+      expect(loader).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a v2 pack without a coverage block before replay", async () => {
+    for (const corrupt of ["missing", "null"] as const) {
+      const dir = tempDir();
+      try {
+        const pack = writeV2ScenePack(dir, 2, (evidence) => {
+          if (corrupt === "missing") delete evidence.coverage;
+          else evidence.coverage = null;
+        });
+        const loader = vi.fn(fakeSceneBrowser().loader);
+        const result = await verifyScene3d({ ...v2Args(pack), loader });
+        expect("error" in result).toBe(false);
+        if ("error" in result) return;
+
+        expect(result.status).toBe("inconclusive");
+        expect(result.verdict).toBe("inconclusive");
+        expect(result.limitations.join(" ")).toContain("no usable coverage block");
+        expect(result.limitations.join(" ")).not.toContain("verification failed");
+        expect(loader).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("optional-chains missing blind spots and caps the pass-through at 20 x 200", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.coverage.blindSpots = Array.from(
+          { length: 25 },
+          (_, index) => `${index}:` + "x".repeat(300),
+        );
+      });
+      const fake = fakeSceneBrowser({ compare: true });
+      const result = await verifyScene3d({ ...v2Args(pack), loader: fake.loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.blindSpots).toHaveLength(20);
+      expect(result.blindSpots!.every((row) => row.length <= 200)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const nullDir = tempDir();
+    try {
+      const pack = writeV2ScenePack(nullDir, 2, (evidence) => {
+        evidence.coverage.blindSpots = null;
+      });
+      const fake = fakeSceneBrowser({ compare: true });
+      const result = await verifyScene3d({ ...v2Args(pack), loader: fake.loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+      expect(result.status).toBe("comparable");
+      expect("blindSpots" in result).toBe(false);
+    } finally {
+      rmSync(nullDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the v1 successful result shape free of v2 fields", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeScenePack(dir);
+      const fake = fakeSceneBrowser({ compare: true });
+      const result = await verifyScene3d({ ...v2Args(pack), loader: fake.loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.status).toBe("comparable");
+      expect(result.verdict).toBe("within-tolerance");
+      expect("keyframes" in result).toBe(false);
+      expect("referenceClass" in result).toBe(false);
+      expect("blindSpots" in result).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let an R1 class upgrade an outside-tolerance verdict", async () => {
+    const dir = tempDir();
+    try {
+      const pack = writeV2ScenePack(dir, 2, (evidence) => {
+        evidence.class = "R1";
+      });
+      const fake = fakeSceneBrowser({ compare: true, changedPixelFraction: 0.5 });
+      const result = await verifyScene3d({ ...v2Args(pack), loader: fake.loader });
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.referenceClass).toBe("R1");
+      expect(result.status).toBe("comparable");
+      expect(result.verdict).toBe("outside-tolerance");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("verifyScene3d watchdog", () => {
   it("a never-settling comparator stops at the deadline, closes resources and still returns the legacy report", async () => {

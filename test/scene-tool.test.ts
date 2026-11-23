@@ -8,7 +8,7 @@ import { Cache } from "../src/cache.js";
 import type { SceneEvidence } from "../src/scene-capture.js";
 import type { SceneAssetsResult } from "../src/scene-assets.js";
 import { createHandlers, type ToolResponse } from "../src/server.js";
-import { registerCaptureScene3d } from "../src/tools/scene.js";
+import { registerCaptureScene3d, sceneRequestSchema } from "../src/tools/scene.js";
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -177,6 +177,117 @@ describe("registerCaptureScene3d", () => {
     expect("signal" in ctx.handlers.capture_scene_3d.mock.calls[1]![0]).toBe(false);
   });
 
+  it("accepts dossier fields and rejects checkpoints with samplePoints", () => {
+    const parsed = sceneRequestSchema.safeParse({
+      op: "capture",
+      url: "https://example.com",
+      viewport: "desktop",
+      emit: "dossier",
+      clock: "virtual",
+      samplePoints: [0, 0.5, 1],
+      capturePasses: true,
+      captureShaders: true,
+      maxDrawCalls: 300,
+    });
+    expect(parsed.success).toBe(true);
+
+    const both = sceneRequestSchema.safeParse({
+      op: "capture",
+      url: "https://example.com",
+      viewport: "desktop",
+      emit: "dossier",
+      checkpoints: [{ scrollRatio: 0 }],
+      samplePoints: [0, 1],
+    });
+    expect(both.success).toBe(false);
+  });
+
+  it("rejects out-of-range dossier fields", () => {
+    const capture = (extra: Record<string, unknown>) =>
+      sceneRequestSchema.safeParse({ op: "capture", url, viewport: "desktop", ...extra });
+    expect(capture({ emit: "atlas" }).success).toBe(false);
+    expect(capture({ clock: "fake" }).success).toBe(false);
+    expect(capture({ samplePoints: [0] }).success).toBe(false);
+    expect(capture({ samplePoints: [0, 1.1] }).success).toBe(false);
+    expect(capture({ samplePoints: Array.from({ length: 25 }, (_, i) => i / 24) }).success).toBe(false);
+    expect(capture({ samplePoints: Array.from({ length: 11 }, (_, i) => i / 10) }).success).toBe(false);
+    expect(
+      capture({ emit: "evidence", samplePoints: Array.from({ length: 11 }, (_, i) => i / 10) })
+        .success,
+    ).toBe(false);
+    expect(
+      capture({ emit: "dossier", samplePoints: Array.from({ length: 11 }, (_, i) => i / 10) })
+        .success,
+    ).toBe(true);
+    expect(capture({ maxDrawCalls: 0 }).success).toBe(false);
+    expect(capture({ maxDrawCalls: 2001 }).success).toBe(false);
+    expect(capture({ maxDrawCalls: 1.5 }).success).toBe(false);
+  });
+
+  it("rejects a virtual clock unless emit is dossier", () => {
+    const capture = (extra: Record<string, unknown>) =>
+      sceneRequestSchema.safeParse({ op: "capture", url, viewport: "desktop", ...extra });
+
+    const missingEmit = capture({ clock: "virtual" });
+    expect(missingEmit.success).toBe(false);
+    const message = missingEmit.success ? "" : (missingEmit.error.issues[0]?.message ?? "");
+    expect(message).toContain('emit:"dossier"');
+
+    expect(capture({ emit: "evidence", clock: "virtual" }).success).toBe(false);
+    expect(capture({ emit: "dossier", clock: "virtual", samplePoints: [0, 1] }).success).toBe(true);
+    // A real clock remains valid on either output shape.
+    expect(capture({ clock: "real" }).success).toBe(true);
+    expect(capture({ emit: "dossier", clock: "real" }).success).toBe(true);
+  });
+
+  it("rejects a dossier with fewer than 2 checkpoint stops", () => {
+    const capture = (extra: Record<string, unknown>) =>
+      sceneRequestSchema.safeParse({ op: "capture", url, viewport: "desktop", ...extra });
+
+    const one = capture({ emit: "dossier", checkpoints: [{ scrollRatio: 0 }] });
+    expect(one.success).toBe(false);
+    const message = one.success ? "" : (one.error.issues[0]?.message ?? "");
+    expect(message).toContain("at least 2 stops");
+
+    expect(capture({ emit: "dossier", checkpoints: [{ scrollRatio: 0 }, { scrollRatio: 1 }] }).success).toBe(
+      true,
+    );
+    // v1 evidence keeps its one-stop minimum.
+    expect(capture({ checkpoints: [{ scrollRatio: 0 }] }).success).toBe(true);
+    expect(capture({ emit: "evidence", checkpoints: [{ scrollRatio: 0 }] }).success).toBe(true);
+  });
+
+  it("forwards every dossier field to capture_scene_3d", async () => {
+    const ctx = fakeCtx({ capture_scene_3d: vi.fn().mockResolvedValue(ok()) });
+    registerCaptureScene3d(ctx);
+    const schema = z.object(ctx.tool.mock.calls[0][2]);
+    const request = schema.parse({
+      request: {
+        op: "capture",
+        url,
+        emit: "dossier",
+        clock: "virtual",
+        samplePoints: [0, 0.5, 1],
+        capturePasses: true,
+        captureShaders: true,
+        maxDrawCalls: 300,
+      },
+    });
+
+    await ctx.tool.mock.calls[0][4](request);
+
+    expect(ctx.handlers.capture_scene_3d).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emit: "dossier",
+        clock: "virtual",
+        samplePoints: [0, 0.5, 1],
+        capturePasses: true,
+        captureShaders: true,
+        maxDrawCalls: 300,
+      }),
+    );
+  });
+
   it("rejects bad capture fields, bad rights, bad ids and unknown ops", () => {
     const ctx = fakeCtx({});
     registerCaptureScene3d(ctx);
@@ -284,6 +395,24 @@ describe("capture_scene_3d handler", () => {
     expect(seen[0].opts).not.toHaveProperty("adapters");
     await handlers.capture_scene_3d({ url, adapters: ["three"] });
     expect(seen[1].opts).toMatchObject({ adapters: ["three"] });
+
+    await handlers.capture_scene_3d({
+      url,
+      emit: "dossier",
+      clock: "virtual",
+      samplePoints: [0, 0.5, 1],
+      capturePasses: true,
+      captureShaders: true,
+      maxDrawCalls: 300,
+    });
+    expect(seen[2].opts).toMatchObject({
+      emit: "dossier",
+      clock: "virtual",
+      samplePoints: [0, 0.5, 1],
+      capturePasses: true,
+      captureShaders: true,
+      maxDrawCalls: 300,
+    });
 
     // Text-only: no inline image block ever reaches the MCP response.
     expect(result.content).toHaveLength(1);

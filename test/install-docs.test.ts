@@ -1,18 +1,36 @@
 import { existsSync, readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { registerCaptureScene3d } from "../src/tools/scene.js";
 import { shortlistInputSchema } from "../src/shortlist/contracts.js";
 
 // Documentation guard: browser tools import playwright/ffmpeg-static from the
 // package's install location, so `npx` alone cannot support them. The README
 // must keep saying so, or users will file "playwright missing" bugs forever.
 const README = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+const CHANGELOG = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 const DEV = readFileSync(new URL("../README.dev.md", import.meta.url), "utf8");
 const CONTRIBUTING = readFileSync(new URL("../CONTRIBUTING.md", import.meta.url), "utf8");
-const CHANGELOG = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 const PKG = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as { scripts?: Record<string, string>; files?: string[] };
 const flatten = (text: string) => text.replace(/\s+/g, " ");
+
+// Use the registered description, not a copy in this test, so a doc change is
+// checked against what the tool actually advertises.
+const toolCtx = { tool: vi.fn() } as any;
+registerCaptureScene3d(toolCtx);
+const TOOL_DESCRIPTION = String(toolCtx.tool.mock.calls[0]?.[1] ?? "");
+
+// Claims are compared after case, dash, quote and Markdown-emphasis folding:
+// R1–R4 and R1-R4, or `usually "unknown"` and usually unknown, are the same
+// claim. Prohibited phrases are folded the same way.
+const normalize = (text: string) =>
+  flatten(text)
+    .toLowerCase()
+    .replace(/[–—]/g, "-")
+    .replace(/[`*"'“”]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
 // Isolates the unreleased notes: pins there must not be satisfied by an
 // already-shipped section's wording.
@@ -300,5 +318,81 @@ describe("install documentation", () => {
     expect(flatten(DEV)).toContain("isCliEntry");
     expect(flatten(DEV)).toContain("exits 0 silently");
     expect(flatten(DEV)).toContain("awwwards-skills repository");
+  });
+});
+
+describe("3D dossier documentation claims", () => {
+  const docs = {
+    README: normalize(README),
+    CHANGELOG: normalize(CHANGELOG),
+    "capture_scene_3d description": normalize(TOOL_DESCRIPTION),
+  };
+  // Required claims must survive case, dash, quote and Markdown folding.
+  const requiredClaims = [
+    "scene-evidence-v2",
+    "r1-r4",
+    "workers are not inspected",
+    "offscreencanvas is not inspected",
+    "renderer api is not probed",
+    "usually unknown",
+  ];
+  const prohibitedClaims = [
+    "recreate any 3d website",
+    "clone any 3d",
+    "source-equivalent",
+    "any 3d site",
+    "detects webgpu",
+    "webgpu detection",
+  ];
+
+  it("carries the required dossier claims in README, changelog and tool description", () => {
+    for (const [source, text] of Object.entries(docs)) {
+      for (const claim of requiredClaims) {
+        expect(text, `${source} must contain ${claim}`).toContain(claim);
+      }
+    }
+    for (const sceneClass of ["r1", "r2", "r3", "r4"]) {
+      expect(docs.README, `README must name ${sceneClass}`).toContain(sceneClass);
+    }
+  });
+
+  it("keeps every prohibited claim out of all three documented surfaces", () => {
+    for (const [source, text] of Object.entries(docs)) {
+      for (const claim of prohibitedClaims) {
+        expect(text, `${source} must not contain ${claim}`).not.toContain(claim);
+      }
+    }
+  });
+
+  it("README states the dossier scope and its limits", () => {
+    const text = docs.README;
+    expect(text).toContain("not a general 3d-site rebuilder");
+    expect(text).toContain("does not recover application source");
+    expect(text).toContain("static replay and a build_project replay are not in 1.22");
+    expect(text).toContain("opt-in on capture_scene_3d only");
+    expect(text).toContain("emit:dossier");
+    expect(text).toContain("dossier.md");
+    expect(text).toContain("evidence-v2.json");
+    expect(text).toContain("no completion claim");
+    expect(text).toContain("build_motion kind:scene_stub");
+    expect(text).toContain("capture_page kind:scene");
+    expect(text).toContain("precedence: r3 > r1 > r4 (webgpu without hooks) > r2 (canvas) > r4 fallback");
+    expect(text).toContain("no r1 or r3 evidence");
+    expect(text).toContain("keyframes are parity-checked metadata");
+    expect(text).toContain("camera/transforms are not replayed");
+    expect(text).not.toContain("keyframes replayed");
+    expect(text).not.toMatch(/(?:^|[\s(])v2 dossier/);
+    expect(text).not.toMatch(/(?:^|[\s(])v2 inventory/);
+
+    const start = README.indexOf("### 3D rebuild dossier");
+    const end = README.indexOf("### Opt-in Three adapter");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const dossier = normalize(README.slice(start, end));
+    expect(dossier).toContain("unhookedwebgpu");
+    expect(dossier).toContain("stays false in 1.22");
+    expect(dossier).toContain("no completion claim");
+    expect(dossier).not.toContain("class verdict");
+    expect(dossier).not.toContain("f9");
   });
 });

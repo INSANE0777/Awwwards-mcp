@@ -280,7 +280,7 @@ async function readInventory(
     return { error: `scene capture ${captureId} evidence.json is not valid JSON.` };
   }
   if (
-    evidence?.id !== "scene-evidence-v1" ||
+    (evidence?.id !== "scene-evidence-v1" && evidence?.id !== "scene-evidence-v2") ||
     evidence.captureId !== captureId ||
     !Array.isArray(evidence.resources)
   ) {

@@ -269,6 +269,12 @@ export async function capture_scene_3d(ctx: HandlerContext, args: {
   checkpoints?: { scrollRatio: number; pointer?: { x: number; y: number }; waitMs?: number }[];
   assetOrigins?: string[];
   adapters?: SceneAdapterName[];
+  emit?: "evidence" | "dossier";
+  clock?: "real" | "virtual";
+  samplePoints?: number[];
+  capturePasses?: boolean;
+  captureShaders?: boolean;
+  maxDrawCalls?: number;
   includeViewportShots?: boolean;
   signal?: AbortSignal;
 }): Promise<ToolResponse> {
@@ -284,6 +290,12 @@ export async function capture_scene_3d(ctx: HandlerContext, args: {
       checkpoints: args.checkpoints,
       assetOrigins: args.assetOrigins,
       ...(args.adapters !== undefined ? { adapters: args.adapters } : {}),
+      ...(args.emit !== undefined ? { emit: args.emit } : {}),
+      ...(args.clock !== undefined ? { clock: args.clock } : {}),
+      ...(args.samplePoints !== undefined ? { samplePoints: args.samplePoints } : {}),
+      ...(args.capturePasses !== undefined ? { capturePasses: args.capturePasses } : {}),
+      ...(args.captureShaders !== undefined ? { captureShaders: args.captureShaders } : {}),
+      ...(args.maxDrawCalls !== undefined ? { maxDrawCalls: args.maxDrawCalls } : {}),
       includeViewportShots: args.includeViewportShots,
       sceneDir: join(ctx.cache.rootDir, "scene-captures"),
       ...(args.signal ? { signal: args.signal } : {}),

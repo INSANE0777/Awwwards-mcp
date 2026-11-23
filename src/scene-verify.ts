@@ -19,17 +19,22 @@ import {
   SCENE_LIMITS,
   SCENE_PROBE,
   SCENE_SCROLL,
+  SCENE_VERIFY_BUDGET_CONSTANTS,
   defaultSceneResolveHost,
   createSceneUrlGate,
   normalizeScenePrivateOrigins,
   redactSceneError,
   sceneCanvasClip,
+  sceneCheckpointWaitTotalMs,
+  sceneScheduleFitsVerifyBudget,
   startSceneProxy,
   type SceneCheckpointResult,
   type SceneEvidence,
+  type SceneEvidenceV2,
   type SceneNetworkGuard,
   type SceneRect,
 } from "./scene-capture.js";
+import { capBlindSpots, type SceneClass } from "./scene-dossier.js";
 import { resolveViewport } from "./viewport.js";
 
 export const SCENE_VERIFY_LIMITS = {
@@ -41,11 +46,11 @@ export const SCENE_VERIFY_LIMITS = {
   /** Shared bound for closing all run resources; not a per-resource budget. */
   closeGraceMs: 3_000,
   /** Floor for the whole-run deadline (page acquisition + comparator decode). */
-  timeoutMs: 15_000,
+  timeoutMs: SCENE_VERIFY_BUDGET_CONSTANTS.floorMs,
   /** Headroom over replayed checkpoint waits for acquisition, shots and comparison. */
-  replayHeadroomMs: 10_000,
+  replayHeadroomMs: SCENE_VERIFY_BUDGET_CONSTANTS.headroomMs,
   /** Hard cap for a computed whole-run deadline. */
-  maxTimeoutMs: 45_000,
+  maxTimeoutMs: SCENE_VERIFY_BUDGET_CONSTANTS.maxMs,
 } as const;
 
 export interface Scene3dVerifyBudget {
@@ -64,11 +69,7 @@ export function sceneVerifyBudget(
   checkpoints: ReadonlyArray<{ waitMs?: number }> | undefined,
   overrideMs?: number,
 ): Scene3dVerifyBudget {
-  const waitsMs = (checkpoints ?? []).reduce(
-    (sum, checkpoint) =>
-      sum + Math.max(0, Math.min(SCENE_LIMITS.maxWaitMs, Number(checkpoint?.waitMs) || 0)),
-    0,
-  );
+  const waitsMs = sceneCheckpointWaitTotalMs(checkpoints);
   const override = Math.round(Number(overrideMs) || 0);
   if (override > 0) {
     return { timeoutMs: override, waitsMs, basis: "an explicit timeoutMs override" };
@@ -118,6 +119,12 @@ export interface Scene3dVerifyResult {
   checkpoints: Scene3dVerifyCheckpoint[];
   coverage: EvidenceCoverage;
   limitations: string[];
+  /** Present only for scene-evidence-v2 packs: keyframes replayed 1:1. */
+  keyframes?: { requested: number; compared: number };
+  /** The v2 pack's class, passed through; it never upgrades a pixel verdict. */
+  referenceClass?: SceneClass;
+  /** The v2 pack's own blind spots, passed through when it carries them. */
+  blindSpots?: string[];
 }
 
 export interface Scene3dVerifyRequest extends Scene3dVerifyOptions {
@@ -290,7 +297,7 @@ const defaultSceneDir = (): string =>
 async function readReferencePack(
   dir: string,
   captureId: string,
-): Promise<{ evidence: SceneEvidence } | { error: string }> {
+): Promise<{ evidence: SceneEvidence | SceneEvidenceV2 } | { error: string }> {
   const path = join(dir, "evidence.json");
   let entry;
   try {
@@ -301,14 +308,19 @@ async function readReferencePack(
   if (entry.isSymbolicLink() || !entry.isFile() || entry.size > SCENE_LIMITS.maxMetadataBytes) {
     return { error: `reference capture ${captureId} evidence.json is not a readable scene pack` };
   }
-  let parsed: SceneEvidence;
+  let parsed: SceneEvidence | SceneEvidenceV2;
   try {
-    parsed = JSON.parse(await readFile(path, "utf8")) as SceneEvidence;
+    parsed = JSON.parse(await readFile(path, "utf8")) as SceneEvidence | SceneEvidenceV2;
   } catch {
     return { error: `reference capture ${captureId} evidence.json is not valid JSON` };
   }
-  if (parsed?.id !== "scene-evidence-v1" || parsed.captureId !== captureId) {
-    return { error: `reference capture ${captureId} is not a scene-evidence-v1 pack for that id` };
+  if (
+    (parsed?.id !== "scene-evidence-v1" && parsed?.id !== "scene-evidence-v2") ||
+    parsed.captureId !== captureId
+  ) {
+    return {
+      error: `reference capture ${captureId} is not a scene-evidence-v1 or scene-evidence-v2 pack for that id`,
+    };
   }
   const viewport = parsed.viewport;
   if (
@@ -326,6 +338,14 @@ async function readReferencePack(
     typeof value === "number" && Number.isFinite(value);
   const unit = (value: unknown): boolean =>
     finite(value) && value >= 0 && value <= 1;
+  const samePointer = (left: unknown, right: unknown): boolean => {
+    const absent = (value: unknown): boolean => value === null || value === undefined;
+    if (absent(left) || absent(right)) return absent(left) && absent(right);
+    if (typeof left !== "object" || typeof right !== "object") return false;
+    const a = left as { x?: unknown; y?: unknown };
+    const b = right as { x?: unknown; y?: unknown };
+    return a.x === b.x && a.y === b.y;
+  };
   for (const checkpoint of parsed.checkpoints) {
     const bad = (detail: string) => ({
       error: `reference capture ${captureId} has a checkpoint with ${detail}`,
@@ -381,6 +401,54 @@ async function readReferencePack(
     }
     if (typeof checkpoint.files?.canvas !== "string" || !checkpoint.files.canvas) {
       return bad("no frame path");
+    }
+  }
+  if (parsed.id === "scene-evidence-v2") {
+    // A v2 pack must carry its coverage block (blind spots live there). Fail
+    // before replay instead of throwing after browser work.
+    const coverage = (parsed as { coverage?: unknown }).coverage;
+    if (!coverage || typeof coverage !== "object" || Array.isArray(coverage)) {
+      return { error: `reference capture ${captureId} has no usable coverage block` };
+    }
+    const keyframes = parsed.keyframes;
+    if (!Array.isArray(keyframes)) {
+      return { error: `reference capture ${captureId} has no keyframe list` };
+    }
+    if (keyframes.length !== parsed.checkpoints.length) {
+      return {
+        error: `reference capture ${captureId} has ${keyframes.length} keyframes for ${parsed.checkpoints.length} checkpoints`,
+      };
+    }
+    for (let index = 0; index < keyframes.length; index++) {
+      const keyframe = keyframes[index];
+      const checkpoint = parsed.checkpoints[index]!;
+      const bad = (detail: string) => ({
+        error: `reference capture ${captureId} has a keyframe with ${detail}`,
+      });
+      if (!unit(keyframe?.scrollRatio)) return bad("a malformed scroll ratio");
+      if (keyframe.scrollRatio !== checkpoint.requestedScrollRatio) {
+        return bad(`a scroll ratio that does not match checkpoint ${index}`);
+      }
+      if (keyframe.pointer !== null && keyframe.pointer !== undefined) {
+        if (
+          typeof keyframe.pointer !== "object" ||
+          !unit(keyframe.pointer.x) ||
+          !unit(keyframe.pointer.y)
+        ) {
+          return bad("a pointer outside 0..1");
+        }
+      }
+      if (!samePointer(keyframe.pointer, checkpoint.pointer)) {
+        return bad(`a pointer that does not match checkpoint ${index}`);
+      }
+      if (typeof keyframe.files?.canvas !== "string" || !keyframe.files.canvas) {
+        return bad("no frame path");
+      }
+      // The replay reads only checkpoint frame paths through readFrame's
+      // containment; a keyframe must name the same already-validated frame.
+      if (keyframe.files.canvas !== checkpoint.files.canvas) {
+        return bad(`a frame path that does not match checkpoint ${index}`);
+      }
     }
   }
   return { evidence: parsed };
@@ -516,7 +584,10 @@ export function scene3dInconclusive(reason: string): Scene3dVerifyResult {
   };
 }
 
-function cameraAngleOf(checkpoint: SceneCheckpointResult, evidence: SceneEvidence): number | null {
+function cameraAngleOf(
+  checkpoint: SceneCheckpointResult,
+  evidence: SceneEvidence | SceneEvidenceV2,
+): number | null {
   // scene-evidence-v1 marks camera state unavailable; a pack that actually
   // carries a comparable angle may override that here.
   if (evidence.coverage?.capabilities?.camera?.status === "unavailable") return null;
@@ -686,11 +757,35 @@ export async function verifyScene3d(
       if (stopped()) return cancelled();
       if ("error" in pack) return scene3dInconclusive(pack.error);
       const evidence = pack.evidence;
+      const v2 = evidence.id === "scene-evidence-v2";
       const requested = evidence.checkpoints.length;
       if (requested === 0) {
         return scene3dInconclusive("the reference pack contains no checkpoints to compare");
       }
-      if (requested > SCENE_LIMITS.maxCheckpoints) {
+      if (v2) {
+        // v2 keyframes were validated 1:1 against the checkpoints in
+        // readReferencePack, so this cap bounds both lists.
+        const keyframeCount = evidence.keyframes.length;
+        if (keyframeCount < 2) {
+          return scene3dInconclusive(
+            `the reference pack has ${keyframeCount} keyframes, below the 2 a dossier pack requires`,
+          );
+        }
+        if (keyframeCount > SCENE_LIMITS.maxDossierStops) {
+          return scene3dInconclusive(
+            `the reference pack has ${keyframeCount} keyframes, above the ${SCENE_LIMITS.maxDossierStops} supported`,
+          );
+        }
+        // Foreign/hand-edited packs get the same schedule refusal as capture,
+        // instead of running into the 45s cap mid-replay.
+        if (!sceneScheduleFitsVerifyBudget(evidence.checkpoints)) {
+          return scene3dInconclusive(
+            `the reference pack schedules ${sceneCheckpointWaitTotalMs(evidence.checkpoints)}ms of ` +
+              `checkpoint waits plus ${SCENE_VERIFY_LIMITS.replayHeadroomMs}ms verify headroom, above ` +
+              `the ${SCENE_VERIFY_LIMITS.maxTimeoutMs}ms verify budget`,
+          );
+        }
+      } else if (requested > SCENE_LIMITS.maxCheckpoints) {
         return scene3dInconclusive(
           `the reference pack has ${requested} checkpoints, above the ${SCENE_LIMITS.maxCheckpoints} supported`,
         );
@@ -890,6 +985,8 @@ export async function verifyScene3d(
       };
 
       const results: Scene3dVerifyCheckpoint[] = [];
+      // v2 keyframes are validated 1:1 with these checkpoints, so every
+      // keyframe is replayed and compared by this loop.
       for (let index = 0; index < evidence.checkpoints.length; index++) {
         if (disposed) break;
         const checkpoint = evidence.checkpoints[index]!;
@@ -1191,16 +1288,47 @@ export async function verifyScene3d(
         (checkpoint) => cameraAngleOf(checkpoint, evidence) === null,
       )
         ? [
-            "cameraAngleDeg stays null: the reference evidence carries no comparable camera state, so camera tolerance cannot be checked.",
+            v2
+              ? "cameraAngleDeg stays null: v2 keyframes record camera transforms as context, but verification compares rendered frames only and never derives or compares a camera angle."
+              : "cameraAngleDeg stays null: the reference evidence carries no comparable camera state, so camera tolerance cannot be checked.",
           ]
         : [];
-      return finalize(
+      const keyframeContextNote = v2
+        ? [
+            "v2 keyframe camera and node transforms are recorded as context only; verification compares rendered frames, not the recorded transforms.",
+          ]
+        : [];
+      const result = finalize(
         requested,
         results,
         opts.tolerances,
-        cameraNote,
+        [...keyframeContextNote, ...cameraNote],
         artifactFailure ? [artifactFailure] : [],
       );
+      if (v2) {
+        const dossier = evidence as SceneEvidenceV2 & { class?: unknown };
+        result.keyframes = {
+          requested: evidence.keyframes.length,
+          compared: result.compared,
+        };
+        // The class is context, never a verdict upgrade: pixels and camera
+        // state still decide comparable/within-tolerance.
+        if (
+          dossier.class === "R1" ||
+          dossier.class === "R2" ||
+          dossier.class === "R3" ||
+          dossier.class === "R4"
+        ) {
+          result.referenceClass = dossier.class;
+        }
+        // v2 puts blind spots on coverage (not at the top level); the
+        // pass-through keeps the dossier's 20 x 200-character cap.
+        const blindSpots = (evidence.coverage as { blindSpots?: unknown } | undefined)?.blindSpots;
+        if (Array.isArray(blindSpots)) {
+          result.blindSpots = capBlindSpots(blindSpots).blindSpots;
+        }
+      }
+      return result;
     } catch (err) {
       return { error: `scene3d verification failed: ${redactSceneError(messageOf(err))}` };
     }
