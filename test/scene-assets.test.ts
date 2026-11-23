@@ -288,7 +288,9 @@ describe("downloadSceneAssets transfers", () => {
     expect(result.captureId).toBe(captureId);
     expect(result).toMatchObject({ downloaded: 1, skipped: 0, totalBytes: PNG.length });
     expect(result.files[0]?.assetId).toBe("asset-1");
-    expect(result.files[0]?.path).toBe(realpathSync(join(dir, "assets", "asset-1.png")));
+    expect(realpathSync(result.files[0]!.path)).toBe(
+      realpathSync(join(dir, "assets", "asset-1.png")),
+    );
     expect(readFileSync(result.files[0]!.path).equals(PNG)).toBe(true);
   });
 

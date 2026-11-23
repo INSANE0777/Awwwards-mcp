@@ -3690,7 +3690,7 @@ describe("fitSceneEvidenceV2", () => {
       "workers are not inspected",
       "OffscreenCanvas is not inspected",
     ]);
-    expect(summary.paths.dossier).toBe("/tmp/dossier.md");
+    expect(summary.paths.dossier).toBe(join("/tmp", "dossier.md"));
     expect(JSON.stringify(summary)).not.toContain("SECRET_SOURCE");
   });
 });

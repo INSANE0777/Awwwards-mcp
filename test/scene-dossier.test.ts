@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import type { SceneEvidenceV2, SceneSpectorEvidence, SceneThreeEvidence } from "../src/scene-capture.js";
 import {
   SCENE_DOSSIER_LIMITATIONS,
@@ -488,7 +489,7 @@ describe("buildSceneDossier", () => {
       },
     ]);
     expect(JSON.stringify(dossier.assets)).not.toMatch(/base64|body|data:/);
-    expect(dossier.paths.dossier).toBe("/tmp/scene-capture/dossier.md");
+    expect(dossier.paths.dossier).toBe(join("/tmp", "scene-capture", "dossier.md"));
     expect(dossier.paths.dossier.endsWith("dossier.md")).toBe(true);
   });
 
