@@ -12,7 +12,7 @@ const DEV = readFileSync(new URL("../README.dev.md", import.meta.url), "utf8");
 const CONTRIBUTING = readFileSync(new URL("../CONTRIBUTING.md", import.meta.url), "utf8");
 const PKG = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-) as { scripts?: Record<string, string>; files?: string[] };
+) as { scripts?: Record<string, string>; files?: string[]; version: string };
 const flatten = (text: string) => text.replace(/\s+/g, " ");
 
 // Use the registered description, not a copy in this test, so a doc change is
@@ -32,12 +32,18 @@ const normalize = (text: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-// Isolates the unreleased notes: pins there must not be satisfied by an
-// already-shipped section's wording.
+// Isolates the current notes (Unreleased during development, the package
+// version at release time): pins must not be satisfied by an older section.
 const unreleasedSection = (text: string): string => {
   const lines = text.split(/\r?\n/);
-  const start = lines.findIndex((line) => line.trim() === "## Unreleased");
-  if (start === -1) throw new Error("CHANGELOG.md has no ## Unreleased section");
+  const heading = `## v${PKG.version}`;
+  const start = lines.findIndex((line) => {
+    const value = line.trim();
+    return value === "## Unreleased" || value === heading || value.startsWith(`${heading} `);
+  });
+  if (start === -1) {
+    throw new Error(`CHANGELOG.md has no ## Unreleased or ${heading} section`);
+  }
   let end = start + 1;
   while (end < lines.length && !lines[end].startsWith("## ")) end += 1;
   return lines.slice(start + 1, end).join("\n");
@@ -227,13 +233,11 @@ describe("install documentation", () => {
     expect(text).toContain(
       "all nine routing copies were byte-identical to the `test/fixtures/v2-routing.md` shipped in 1.21.0",
     );
-    expect(text).toContain(
-      "must be mirrored to the skills repository before this feature ships",
-    );
+    expect(text).toContain("must be mirrored to the skills repository");
     expect(text).not.toContain("all nine routing copies are byte-identical to this package's");
   });
 
-  it("CHANGELOG Unreleased pins the reference-shortlist claims", () => {
+  it("CHANGELOG current section pins the reference-shortlist claims", () => {
     const section = unreleasedSection(CHANGELOG);
     expect(section).toContain("### Reference shortlist");
     expect(section).not.toContain("## v1.21.1");

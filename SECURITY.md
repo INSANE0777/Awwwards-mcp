@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.20.x  | Yes       |
-| < 1.20  | No        |
+| 1.22.x  | Yes       |
+| < 1.22  | No        |
 
 Only the current release line receives fixes.
 
