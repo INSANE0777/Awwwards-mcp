@@ -53,6 +53,7 @@ import {
   get_motion_dna,
   search_motion,
 } from "./handlers/motion.js";
+import { shortlist_references } from "./handlers/shortlist.js";
 import {
   capture_atlas,
   export_evidence_pack,
@@ -107,6 +108,7 @@ export function createHandlers(deps: CreateHandlersDeps): Handlers {
     search_motion: (args) => search_motion(ctx, args),
     new_winners: (args) => new_winners(ctx, args),
     watch_site: (args) => watch_site(ctx, args),
+    shortlist_references: (args) => shortlist_references(ctx, args),
     search_atlas: (args) => search_atlas(ctx, args),
     get_atlas: (args) => get_atlas(ctx, args),
     capture_atlas: (args, signal) => capture_atlas(ctx, args, signal),

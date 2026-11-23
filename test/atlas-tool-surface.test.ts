@@ -116,22 +116,22 @@ function fakeAtlasHandlers() {
 describe("Atlas tool flag", () => {
   it("registers none of the four when the flag is off", () => {
     const full = namesFor(undefined, false);
-    expect(full).toHaveLength(41);
+    expect(full).toHaveLength(42);
     expect(full.some((name) => ATLAS_TOOLS.includes(name as any))).toBe(false);
-    expect(serverNames("core", false)).toHaveLength(13);
+    expect(serverNames("core", false)).toHaveLength(14);
     expect(namesFor("v2", false)).toHaveLength(15);
     expect(namesFor("v2", false)).not.toContain("export_evidence_pack");
   });
 
-  it("registers 45 full / 13 core / 16 v2 when the flag is on, without dual registration", () => {
+  it("registers 46 full / 14 core / 16 v2 when the flag is on, without dual registration", () => {
     const full = namesFor(undefined, true);
-    expect(full).toHaveLength(45);
-    expect(new Set(full).size).toBe(45);
+    expect(full).toHaveLength(46);
+    expect(new Set(full).size).toBe(46);
     expect(full.slice(-4)).toEqual([...ATLAS_TOOLS]);
     expect(full.filter((name) => ATLAS_TOOLS.includes(name as any))).toHaveLength(4);
 
     const core = serverNames("core", true);
-    expect(core).toHaveLength(13);
+    expect(core).toHaveLength(14);
     for (const name of ATLAS_TOOLS) expect(core).not.toContain(name);
     for (const name of CORE_TOOL_NAMES) expect(core).toContain(name);
 
@@ -147,9 +147,9 @@ describe("Atlas tool flag", () => {
   });
 
   it("reads the flag at server start and keeps old counts when off", () => {
-    expect(serverNames(undefined, false)).toHaveLength(41);
-    expect(serverNames(undefined, true)).toHaveLength(45);
-    expect(serverNames("core", true)).toHaveLength(13);
+    expect(serverNames(undefined, false)).toHaveLength(42);
+    expect(serverNames(undefined, true)).toHaveLength(46);
+    expect(serverNames("core", true)).toHaveLength(14);
     expect(serverNames("v2", false)).toHaveLength(15);
     expect(serverNames("v2", true)).toHaveLength(16);
 
@@ -438,8 +438,8 @@ describe("atlas_status output contract", () => {
       const core = withProfile("core", () =>
         createServer({ handlers: {} as any, version: "0.0.0-test" }),
       ) as any;
-      expect(Object.keys(core._registeredTools)).toHaveLength(13);
-      expect(core.server._instructions).toContain("13 core tools");
+      expect(Object.keys(core._registeredTools)).toHaveLength(14);
+      expect(core.server._instructions).toContain("14 core tools");
       expect(core.server._instructions).not.toContain("Experimental Atlas");
       for (const name of ATLAS_TOOLS) {
         expect(core.server._instructions).not.toContain(name);
@@ -449,7 +449,7 @@ describe("atlas_status output contract", () => {
       const full = withProfile(undefined, () =>
         createServer({ handlers: {} as any, version: "0.0.0-test" }),
       ) as any;
-      expect(Object.keys(full._registeredTools)).toHaveLength(45);
+      expect(Object.keys(full._registeredTools)).toHaveLength(46);
       expect(full.server._instructions).toContain("Experimental Atlas");
 
       const v2 = withProfile("v2", () =>

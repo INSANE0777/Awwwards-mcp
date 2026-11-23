@@ -9,7 +9,7 @@ structured, how the data flows, and how to work on it without breaking it.
 A free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/). No API key, no account: it politely
 scrapes public pages (1 request/second, robots.txt-compliant paths), caches
-them in local SQLite, and serves them through 41 MCP tools — screenshots,
+them in local SQLite, and serves them through 42 MCP tools — screenshots,
 design DNA, band maps and motion recordings included.
 
 ```
@@ -32,7 +32,7 @@ design DNA, band maps and motion recordings included.
         └───────────────────────────┬───────────────────────────┘
                                     │
         ┌───────────────────────────▼───────────────────────────┐
-        │ src/server/  41 MCP tools over createHandlers(deps)   │
+        │ src/server/  42 MCP tools over createHandlers(deps)   │
         └───────────────────────────┬───────────────────────────┘
                                     │
                     src/cli.ts ── serveStdio entry (awwwards-mcp)
@@ -69,11 +69,13 @@ including a synthetic side-by-side `playwright` / `ffmpeg-static` import.
 | `server.ts` | ~5 | Thin facade: re-exports the public types and `createHandlers` so existing `src/server.js` imports keep working. |
 | `server/types.ts` | ~556 | Public types (`Handlers`, `CreateHandlersDeps`, capture Fns), `text`/`errorResponse`, the `compact*` token diets and slug/tokenize/suggest helpers. |
 | `server/context.ts` | ~250 | `HandlerContext` / `createHandlerContext`: client + cache + deps + clock plus the shared private helpers (`matchesFilters`, `loadDetail(s)`, `siteImage`, `compactContent`, `orderByScore`). |
-| `server/handlers/*.ts` | ~1700 | Domain handler modules — `awards` (search/detail/brief/elements/categories), `data` (index/annual/collections/directory/monitoring), `capture` (screenshots/structure/hover/component/pose/scene/tokens/images), `motion` (record/DNA/scroll census), `audit` (audit/a11y/bundle/HAR/verify), `build` (project/stubs/manifest/stack). |
-| `server/create-handlers.ts` | ~95 | Composes the 41-method `Handlers` object from the domain modules over one context. |
+| `server/handlers/*.ts` | ~2750 | Domain handler modules - `awards` (search/detail/brief/elements/categories), `data` (index/annual/collections/directory/monitoring), `capture` (screenshots/structure/hover/component/pose/scene/tokens/images), `motion` (record/DNA/scroll census), `audit` (audit/a11y/bundle/HAR/verify), `build` (project/stubs/manifest/stack), `shortlist` (discovery/evidence/dossier), `atlas` (ingest/collector/search/components/states/evidence packs). |
+| `server/create-handlers.ts` | ~117 | Composes the 47-method `Handlers` object (42 base + 4 Atlas + `download_scene_assets`) from the domain modules over one context. |
 | `tools/shared.ts` | ~30 | `ToolContext`, `asMcpResult` and the shared wait-strategy / viewport zod schemas. |
-| `tools/{awards,capture,audit,build,scene}.ts` | ~800 | The 41 `tool()` / `registerTool()` registrations, annotations and schemas, grouped by domain. |
+| `tools/{awards,capture,audit,build,scene}.ts` | ~800 | The 41 historical `tool()` / `registerTool()` registrations, annotations and schemas, grouped by domain; `tools/shortlist.ts` is the 42nd registration. |
+| `tools/shortlist.ts` | ~20 | `shortlist_references` registration: shared input schema, write-safe annotations and the handler pass-through. |
 | `tools/index.ts` | ~87 | `registerAllTools`: calls the per-tool registrars in the historical registration order. |
+| `shortlist/` | ~1,020 | Reference-shortlist core: the bounded input schema (1–6 unique criteria, limit 3–5), evidence-to-label decision rules, and the markdown/offline-HTML/JSON dossier renderers. Live discovery, probing and artifact writes live in `server/handlers/shortlist.ts`. |
 | `motion.ts` | ~429 | `recordSiteMotion`: webm recording + ffmpeg filmstrip under a strict 30 s budget (documented timing table at the top of the file). Virtual SVG cursor, per-call `mkdtemp` isolation, 10-min stale-tmp sweep, 60 s ffmpeg deadline. |
 | `motion-sheet.ts` | ~375 | `buildMotionSheet`: Motion Evidence Sheet from a recording + timeline — keyframes at phase-kind transitions (≤9), pairwise difference masks, onion composite, `motion-sheet.md` + static `sheet.html` with a pure-CSS timeline strip. All ffmpeg injectable; throws so the caller can degrade to the filmstrip. Wired via `recordSiteMotion`'s injectable `sheetFn`. |
 | `structure.ts` | ~886 | Band map. `SCAN_SNIPPET` runs in-page via `page.evaluate` (self-contained, reaches DOM through `globalThis` — the Node tsconfig has no DOM lib). Detects the real scroll root when `body` is pinned and an inner element (`overflow-y: auto/scroll`, `scrollHeight > clientHeight+100`, largest visible) actually scrolls; reports it as `scrollRoot` and measures candidates, landmarks and responsive y's in scroller coordinates (`coordinateY`: rect top − scroller top + scrollTop). `collapseBands` is pure: 8 px sweep, smallest-covering candidate wins, sliver absorb, max-40 cap. `diffBands` is the pure label-matched desktop→mobile diff behind `compare:"mobile"` (`heightDelta`, added/removed/reordered). Owns the ONE `preScroll` shared with capture; it returns `{ scrollRoot, scrollHeight, clientHeight }`, scrolls the detected container (else window) and resets it, with both walks capped at 80 × 450px steps / 8 s (growing `scrollHeight` cannot stall it). `analyzePageStructure` also has an attach path (`cdpEndpoint`, gated by `AWWWARDS_MCP_ATTACH=1`) that scans an already-open page without goto/preScroll, installing the one-shot `__name` shim for tsx runs. |
@@ -102,7 +104,7 @@ including a synthetic side-by-side `playwright` / `ffmpeg-static` import.
 | `build-project.ts` | ~660 | build_project core: rebuild-shape section split (top-level roots keyed on the `c-N` class + generic fallback), style buckets (tokens hoisted, class-safe per-section mention match), timeline extraction (quote-aware balanced-paren `.from(` scan so `;`-bearing callbacks never drop a block), vite/astro/next emit dispatch + the `buildProject` orchestration the bin and MCP tool share. Emitters are pure files arrays (byte-deterministic tests); CLI arg model maps exits 0/2/3 in `build-project-cli.ts`. |
 | `build-project-cli.ts` / `emit-next.ts` | ~45 / ~410 | Thin `awwwards-build-project` bin: one JSON line, exit 0/2/3, verify-cli's DI + main-guard shape. `emit-next.ts`: kit `jsx.mjs` port (`htmlToJsx`: class→className, for→htmlFor, style string→object with kebab→camel + `!important` strip, svg camelCase tags/attrs, text-brace entity escaping) + the Next App Router tree — `package.json`/`next.config.mjs`/tsconfig, `app/layout.tsx` (metadata + font links), `app/globals.css` (tokens+shared+section buckets), `app/page.tsx` and per-section components with kit-verbatim `useEffect` + `gsap.context` + `ctx.revert()` wiring; gsap dep and imports gated on the source's CDN tags. |
 | `cli.ts` | ~65 | Startup only: cache/client/handlers, background auto-reindex, daily version/env checks, then `serveStdio` with a per-connection factory - stdout stays clean for JSON-RPC. |
-| `server-instance.ts` | ~45 | `createServer({handlers,version})`: a fresh v2 `McpServer` with the profile-selected surface (default 41, `core` 13, `v2` 15; mapping in `test/fixtures/v2-routing.md` and the awwwards-skills repository). `serveStdio` calls it once per connection; the modern-probe -> legacy fallback discards the first instance and builds a second. |
+| `server-instance.ts` | ~45 | `createServer({handlers,version})`: a fresh v2 `McpServer` with the profile-selected surface (default 42, `core` 14, `v2` 15; mapping in `test/fixtures/v2-routing.md` and the awwwards-skills repository). `serveStdio` calls it once per connection; the modern-probe -> legacy fallback discards the first instance and builds a second. |
 | `version-check.ts` | ~131 | Daily npm-registry check, stderr-only, 3 s timeout, all failures swallowed. Self-update is opt-in via `AWWWARDS_AUTO_UPDATE=1`. |
 | `viewport.ts` | ~20 | Desktop (1440×900) / mobile (390×844, DPR 3, touch) profiles. Width/height go in playwright's `viewport` key; mobile flags spread as sibling context options. |
 | `types.ts`, `index-cli.ts` | — | Shared types (`SiteSummary`, `SiteDetails`, `ElementMedia`); thin crawl-CLI entry. |
@@ -196,17 +198,19 @@ npm run protocol:smoke  # needs Chromium: core validates one real verify_build
 
 `protocol:smoke` accepts an explicit candidate CLI (`node scripts/protocol-smoke.mjs dist/cli.js`)
 and compares both protocol eras for all profiles with Atlas off and on. Its pinned baseline
-catalog is `scripts/fixtures/protocol-catalog.json`; regenerate it from a clean 1.20 **build**
-using **this checkout's** script:
+catalog is `scripts/fixtures/protocol-catalog.json`. Regenerate it from **this checkout's**
+`npm run build` after **any** surface change (add, remove or rename a tool, or change a
+profile), using **this checkout's** script:
 
 ```bash
-node scripts/protocol-smoke.mjs <clean-1.20>/dist/cli.js \
+node scripts/protocol-smoke.mjs dist/cli.js \
   --dump-catalog scripts/fixtures/protocol-catalog.json
 ```
 
-The script must be the current one: a clean 1.20 checkout's own copy reads `argv[2]` only and
-ignores `--dump-catalog`. Run it once with and once without `AWWWARDS_MCP_ATLAS=1`. Dumps are
-written atomically and record the candidate's package identity.
+Run it once with and once without `AWWWARDS_MCP_ATLAS=1`; each run replaces one state and
+keeps the other. Dumps merge the requested state, are written atomically and record the
+candidate's package identity. A stale fixture fails `test/protocol-catalog.test.ts`, so
+regenerate it in the same change as the surface edit.
 
 Run via `npm run build` + `node dist/cli.js`, not tsx: tsx's esbuild
 `keepNames` injects `__name` into page.evaluate-serialized snippets, which
@@ -231,14 +235,18 @@ tests import it directly (cli.ts connects to stdio on import). The guard is
 called from `server-instance.ts`, once per `serveStdio` factory invocation.
 
 - `AWWWARDS_MCP_PROFILE=core|full|v2` (default `full`) - `core` registers only the
-  13 build-loop tools (including `get_annual_categories`); `full` keeps all 41;
-  `v2` (beta) registers the 15-tool consolidated surface instead of the 1.x
-  list. The profile is read once at startup, so changing it needs a restart.
+  14 build-loop tools, brief to verify and discovery included (including
+  `get_annual_categories` and `shortlist_references`); `full` keeps all 42
+  (46 with `AWWWARDS_MCP_ATLAS=1`);
+  `v2` (beta) registers the 15-tool consolidated surface (16 with Atlas)
+  instead of the 1.x list. The profile is read once at startup, so changing it
+  needs a restart.
   The complete 1.x → v2 mapping for all 36 replaced names lives in
   `test/fixtures/v2-routing.md` (a copy of the doc owned by the
   [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills));
-  the skills carry matching profile notes so an agent never calls a 1.x name
-  in a v2 session.
+  the full surface has 37 legacy names because `shortlist_references` is
+  v1-only and has no v2 branch. The skills carry matching profile notes so an
+  agent never calls a 1.x name in a v2 session.
 - `AWWWARDS_MCP_MAX_RESPONSE_BYTES` (default `32000000`) - full serialized
   result bytes (text, inline images, `structuredContent`, `_meta`). Every
   over-budget result is replaced by `isError: true` with only the

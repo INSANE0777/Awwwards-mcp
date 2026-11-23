@@ -46,6 +46,7 @@ queries keep AND semantics: every token must hit the same site.
 | `get_site_details` | Design DNA for one site: palette, technologies, elements, awards, description. Batch (`slugs`, up to 10) is compact enrichment for a shortlist — `compactSiteDetails` per slug (lists as counts, ≤500-char description, awards), cached/fetched/error status, no inline images. |
 | `compare_sites` | Compare 2–3 sites' design DNA and jury scores as text-only JSON. Uses cached details or fetches missing detail pages. |
 | `create_design_brief` | Turn 2–5 selected site slugs plus a required project goal into a deterministic, cited build brief. Uses cached detail/element evidence and cached Motion DNA first, fetches only missing details, returns Markdown plus versioned JSON, and runs browser band analysis only with `includeStructure: true`. |
+| `shortlist_references` | Turn a rebuild brief and 1–6 structured criteria into up to 5 Awwwards references labelled `recommend` or `consider`, with rebuild evidence, explicit unknowns and a local dossier at `outDir`: `shortlist.md`, offline `shortlist.html`, `shortlist.json` and `reference-decision.json`. Candidates that fail a hard constraint are listed separately under `excluded` with a reason and do not count toward the limit. Probes live sites; optional Playwright supplies structure, motion and screenshot evidence, and missing browser evidence is recorded as unknown or partial evidence. `must` criteria are coverage requirements, not per-candidate passes. No taste score, no auto-pick; adoption unproven; no hosting or telemetry; `outDir` must be absolute. |
 | `get_index_status` | Read local index count, crawl progress, last success/error, lock state and freshness without network requests. |
 | `get_index_stats` | Aggregate metrics over the **local cache only** (zero network). **All-time:** site count, gallery element count (`elements.total`) and technology/tag frequency (`items[].tag`); `elements.corpus` discloses the whole locally cached element set — total, gallery, site, categorized/uncategorized, builtWithKnown and oldest/newest fetch timestamps (aggregates only, no titles or slugs). **Windowed** by `windowDays` (default 90, 1–3650): cached details, palette colour frequency and jury score stats (n/avg/median) from at most the 500 most recently fetched detail rows, plus Motion DNA library frequency. Coverage is labelled `"locally cached subset"` on every metric; `windowDays`/`detailsCached`/`detailParseCap` appear only on the windowed metrics, while sites/elements/technologies are explicitly all-time. `top` caps each frequency list (default 10, 1–50). Aggregates only — no site slugs or titles. Personal, non-commercial use. |
 | `get_site_elements` | Component-level visuals for one site: each element's poster image inline (3D models, video content, mobile layouts, microcopy…) + video URLs. |
@@ -67,7 +68,7 @@ queries keep AND semantics: every token must hit the same site.
 | `analyze_network_capture` | Offline API-surface evidence from a local HAR 1.2 file (a browser DevTools export): requests grouped by method + origin + path template (dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and long high-entropy segments redacted), with counts, statuses, content types and query names only. Reads the file only - never fetches recorded URLs and never returns bodies, headers or query values. 20 MB / 2000-entry caps; `evidenceCoverage` discloses what was excluded. No network. |
 | `audit_url` | Runtime + static performance **evidence** for any live URL — never a grade. Runtime: installed Chrome/Edge over raw CDP (no playwright) measures fps, dropped frames, long tasks/animations and layout thrash (`perf: {error}` when no browser exists). Static: fetches the page HTML + up to 8 same-origin CSS/JS assets (≤2MB each, one shared 1 req/s limiter, 10s default timeouts), resolving refs against the final post-redirect page URL; asset redirects leaving that origin are rejected. Scans them for animation anti-patterns and returns severity-sorted findings (`count`, `worst`, ≤50 `findings`, `coverage: {assetsScanned, failed}`) so `worst` is always included. Each half degrades independently. Personal, non-commercial use; audit only URLs you are authorised to inspect. |
 | `analyze_accessibility` | Accessibility **evidence** from a live page — explicitly not a WCAG pass/fail. Samples up to `limit` (default 100, max 200) visible text nodes with computed colour and a background **composited bottom-up from the ancestor stack** for fully opaque chains (colour alpha layers; reported as final `rgb()`), then the contrast ratio (worst pairs + selector paths). A sample under any ancestor CSS opacity group (<1) is **excluded from ratios** and counted in `coverage.skippedOpacityGroups` — never approximated. Background images, gradients and pseudo-elements are not composited either, so contrast stays heuristic there. Also: image alt coverage; heading ladder issues; focusable/positive-tabindex counts plus `outline:none` stylesheet rules; unlabeled form controls; document `lang`/title. Returns `coverage`, `heuristic: true` and the note "Evidence only — not a WCAG pass/fail". Accepts http(s) URLs only; degrades to `{error}` when playwright is missing. (needs [playwright](https://playwright.dev)). |
-| `build_project` | Convert a single-file exact rebuild (any local `.html`, e.g. the rebuild flow's `full-page-exact.html`) into a runnable **Vite**, **Astro** or **Next.js** project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (`useEffect` + `gsap.context` on Next), assets carried. The Next rehost/layout preserves the opening `html` `lang`/`dir`/`class`/`id`/`style`/`data-*` and `body` `lang`/`dir`/`class`/`id`/`style`/`data-*`/`aria-*` attributes (converted to JSX `className`/style objects), while inline `on*` handlers and arbitrary attributes are not copied; an absent `lang` keeps the `en` fallback. An entity `&#13;` reads as LF without JavaScript and is restored by a one-line inline script (first head child for `html`, first body child for `body`), while a literal CR/CRLF is newline-normalized like the browser. Conditional `<style media>` fidelity is not part of this release. Reads a local file and writes the project dir - the suite's one local-write tool. |
+| `build_project` | Convert a single-file exact rebuild (any local `.html`, e.g. the rebuild flow's `full-page-exact.html`) into a runnable **Vite**, **Astro** or **Next.js** project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (`useEffect` + `gsap.context` on Next), assets carried. The Next rehost/layout preserves the opening `html` `lang`/`dir`/`class`/`id`/`style`/`data-*` and `body` `lang`/`dir`/`class`/`id`/`style`/`data-*`/`aria-*` attributes (converted to JSX `className`/style objects), while inline `on*` handlers and arbitrary attributes are not copied; an absent `lang` keeps the `en` fallback. An entity `&#13;` reads as LF without JavaScript and is restored by a one-line inline script (first head child for `html`, first body child for `body`), while a literal CR/CRLF is newline-normalized like the browser. Conditional `<style media>` fidelity is not part of this release. Reads a local file and writes the project dir. One of two local-write tools: `build_project` writes the generated project, and `shortlist_references` writes its dossier to `outDir`. |
 | `verify_build` | Score a build against a reference site: band-map compare (Dice score) + motion-fingerprint diff (trigger mix, scrub/pin, easing vocabulary, native scroll timelines) → 0–100 score, pass/warn/fail verdict and evidence lines. `bands` carries one aggregate score plus `matched`/`refOnly`/`buildOnly` labels and a `diagnostics` row per band (reference/build index, match reason, relative-order flag, height delta, background change) — there are no per-band scores. The design-loop gate: build → verify the aggregate band score → fix → re-verify. Optional `domDiff` adds a body-subtree structural diff (missing/extra/reordered/rect drift) between reference and build. Optional `scene3d` adds a separate, opt-in 3D gate that preflights both URLs through one shared DNS/private-IP guard before any legacy scan (a private or loopback URL is refused with no requests, and the legacy acquisitions run behind the same proxy), then replays a `capture_scene_3d` pack on the build canvas and returns its own status/verdict; the legacy verdict never certifies a canvas (see [Opt-in 3D verify gate](#opt-in-3d-verify-gate-stable)). (needs [playwright](https://playwright.dev)). |
 | `verify_flow` | Step-aligned interaction-flow comparison: runs the same 1–6 scroll/click/wait steps on a build and a reference URL (two fresh headless launches, desktop or mobile) and compares path, scroll delta, skeleton hash, text hash and element count after each step. `same` only when both sides are complete and untruncated — truncated or failed states are `unknown`. No screenshots; a click can still trigger client-side mutations. (needs [playwright](https://playwright.dev)). |
 | `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000, optional `maxDepth` where values above 12 can exceed Code Mode's depth cap and 12 keeps a capped pack safe), fonts, colors and element animations — for pixel-informed rebuilds. Adds `typography` usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each, `sampled` node count) and a deduped `paletteSummary` (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). `compact: true` trades detail for tokens: each node keeps only `{tag, classes, rect}` (styles, text, svg, pseudo styles and anims are dropped) plus top-level `fonts`/`colors`; the `typography`/`paletteSummary` summaries are full-mode only. Runs on any URL. (needs [playwright](https://playwright.dev)). |
@@ -93,6 +94,7 @@ queries keep AND semantics: every token must hit the same site.
 | Agencies, studios or freelancers | `search_directory` — agencies/studios, not sites. |
 | Annual Awards categories, nominees or one nominee | `get_annual_*` — Annual Awards only. |
 | Design DNA for one site, or compact enrichment for a shortlist | `get_site_details` — one `slug`, or a bounded batch of `slugs`. |
+| A brief turned into evidence-backed references | `shortlist_references` — up to 5 references and a local dossier, not a taste score. |
 | Performance evidence for one URL | `audit_url` — one URL, no reference. |
 | A scored build-vs-reference comparison | `verify_build` — two URLs, scored comparison. |
 | Accessibility evidence for a live page | `analyze_accessibility` — evidence census, not compliance. |
@@ -480,6 +482,101 @@ backing size and the same decoded frame dimensions.
 
 The response separates observed shared signals from one-site outliers, names evidence gaps, and never records motion automatically. Its Interaction Plan applies only evidence-backed cursor/hover, scroll, entrance/reveal, easing, and duration cues; empty fields mean the brief has no supporting evidence, not that an effect should be invented. It also carries a `prefers-reduced-motion`, content-access, and keyboard-access guardrail.
 
+### Reference shortlist
+
+`shortlist_references` turns a rebuild brief and 1–6 criteria into a shortlist
+of up to 5 references labelled `recommend` or `consider`. `limit` is 3–5
+(default 5). Candidates that fail a hard constraint are listed separately under
+`excluded` with a reason and do not count toward the limit:
+
+```json
+{
+  "brief": "A dark editorial portfolio with restrained scroll motion",
+  "criteria": [
+    { "id": "mood", "label": "Editorial restraint", "kind": "must", "tags": ["editorial"] },
+    { "id": "product", "label": "Motion-led product pages", "kind": "nice", "query": "product" }
+  ],
+  "constraints": { "targetStack": "next", "allow3d": "any", "motionBudget": "scroll" },
+  "limit": 4,
+  "viewport": "desktop",
+  "outDir": "C:/work/shortlist"
+}
+```
+
+Each criterion needs `query` or `tags`. Optional `seeds` (up to 8 Awwwards
+slugs) skip discovery for references you already know. Must coverage is selected
+before seeds: the best-ranked non-avoid candidate for each `must` criterion takes
+a slot first, then seeds fill the remaining slots. An explicit seed that no
+criterion surfaces has no criterion coverage, so it never covers a `must`;
+coverage comes from discovery hits on returned candidates, and a seed that is
+also surfaced by a criterion can cover it. A seed that cannot fit reports
+`seed-limit`; a `must` criterion that cannot fit reports `must-trim`.
+
+The dossier lands in `outDir` as `shortlist.md`, an offline `shortlist.html`,
+`shortlist.json`, `reference-decision.json` and an `assets/` directory when
+thumbnails or screenshots were written; it holds thumbnails plus full-page or
+viewport screenshots, and the offline HTML needs `assets/` beside it.
+`shortlist.json` carries each candidate's artifact paths.
+`reference-decision.json` is a blank review template (`decision: null`) and is
+never overwritten on rerun: proposals go to `reference-decision.new.json`, then
+`.new-2.json` and so on. `outDir` must be absolute (Windows
+`C:/work/shortlist`; POSIX `/Users/you/shortlist`).
+
+`viewport` supports `desktop` and `mobile` and controls screenshots, structure
+and motion evidence.
+
+A full-page screenshot is recorded as `fullPage`; when an inner scroll container
+prevents one, the candidate gets a viewport screenshot plus a
+`screenshot-viewport` limitation. Accessibility stays `unknown` unless the host
+injects an accessibility peer; the shipped CLI does not, so the dossier records
+that limitation.
+
+`targetStack` is annotation-only; it never filters. It records `same` /
+`compatible` / `unknown`, where `compatible` means a different but known
+framework, not rebuild compatibility. `analyze_stack` cannot see Vite or static
+sites, so those stay unknown. `allow3d`, `excludeStacks` and `motionBudget` are
+the hard constraints.
+
+`allow3d:"none"` excludes only a recognized 3D library. A page whose only 3D
+signal is a canvas scroll mode or raw WebGL is returned as `consider` with a
+3D-unverified reason (`3d-unverified` in unknowns for raw WebGL), never claimed
+3D-free. `motionBudget` is a real ceiling: `minimal` excludes any measured
+ScrollTrigger, scrub or pin; `scroll` allows triggers/scrubs but not pins;
+`expressive` allows pins.
+
+Criteria are discovery queries: coverage means a returned candidate was surfaced
+by that criterion, not that a measured property matches it. `motionBudget` is a
+ceiling only; there is no minimum-motion or semantic-fit filter. A `minimal`
+budget result is displayed as `none measured` and carries `motion-unmeasured`:
+the scan sees only ScrollTrigger globals, scrubs and pins, so bundled GSAP,
+Lenis, Locomotive, Framer, CSS scroll timelines and IntersectionObserver reveals
+are not measured. `scroll` means non-pinned scroll-linked motion; `expressive`
+means pins. `status` measures criterion coverage, not creative fitness: the
+reasons and per-candidate evidence (including `motionLevel`) are the fitness
+signal for the reviewer. Motion DNA cache reuse is desktop-only for the
+shortlist; mobile always captures fresh DNA and does not read or write that
+cache.
+
+Each reference carries its rebuild evidence and explicit unknowns. The loop:
+`shortlist_references` → `capture_live_site` / `analyze_page_structure` on the
+chosen references → `build_project` → `verify_build`. `must` is a coverage
+requirement on the shortlist, not a per-candidate pass. Status describes the
+returned list after `limit`: `ok` only when every `must` criterion is covered by
+a `recommend` in that list; `partial` when a `must` criterion has only
+`consider`; `inconclusive` when a `must` criterion is uncovered, when no
+candidates are returned, or when all candidates were excluded. Precedence: if
+any `must` criterion is uncovered the result is `inconclusive`, even when
+another `must` criterion has only `consider`; `partial` requires every `must`
+criterion to have at least a `consider` and at least one `must` criterion to
+have no `recommend`. With no `must` criteria, `ok` needs at least one
+`recommend`, consider-only is `partial`, and an empty or all-excluded list is
+`inconclusive`. A covering `recommend` dropped by `limit` can change the status;
+the dossier always reflects the returned list.
+Unknown evidence on a non-required candidate does not by itself change the
+status, and every candidate lists its unknowns. Adoption is unproven (no team
+study yet); there is no taste score, no auto-pick and no hosted board, and the
+dossier is local with no hosting or telemetry.
+
 **Data posture**: element records store metadata + media URLs pointing at
 awwwards' own CDN — nothing is mirrored. Motion DNA records are local
 captures, each stamped with the time it was taken.
@@ -651,23 +748,24 @@ npm run build && npm run smoke:browser
 The smoke serves a three-section page on `127.0.0.1`, seeds a throwaway cache
 (so no crawl or daily update check starts), then makes two real calls — one
 `analyze_page_structure`, one `capture_live_site` — and fails on a missing band,
-a non-PNG image or a timeout. Observed result (Windows, Node 24, Playwright
-1.63, 2026-11-01):
+a non-PNG image or a timeout. The snippet below illustrates the expected output
+shape; the tool count is the current expected surface, while the band and PNG
+lines come from an earlier run and are not a re-recorded run of this tree:
 
 ```
 browser-smoke: pack + global install
-browser-smoke: connected to awwwards-mcp, 41 tools
+browser-smoke: connected to awwwards-mcp, 42 tools
 browser-smoke: analyze_page_structure -> 4 bands, totalHeight 2061, labels body,#hero.hero,#work.work,#contact.contact
 browser-smoke: capture_live_site -> image/png 17.5 KB inline, saved capture-38f75233f8a4-desktop.png
 browser-smoke: PASS
 ```
 
-That run predates Atlas; with `AWWWARDS_MCP_ATLAS=1` the same check reports 45 tools.
+With `AWWWARDS_MCP_ATLAS=1` the same check reports 46 tools.
 
 `npm run qualify:installed` is the release-artifact qualification. It packs
 this checkout, installs the tarball into a throwaway prefix, gives every child
 server/CLI an isolated `HOME`/`USERPROFILE`/`APPDATA` and throwaway caches, then
-runs the profile surfaces (41/13/15 with the flag off, 45/13/16 with
+runs the profile surfaces (42/14/15 with the flag off, 46/14/16 with
 `AWWWARDS_MCP_ATLAS=1`), both protocol eras, Atlas branch schemas, annotations,
 CLI refusals and a real-Chromium fixture over MCP stdio. The machine-readable
 report goes to `.qualification/installed-report.json`.
@@ -729,8 +827,8 @@ All optional and read at startup:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 13 build-loop tools (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`); `full` keeps all 41 (45 with `AWWWARDS_MCP_ATLAS=1`); `v2` (beta) replaces the list with the 15-tool consolidated surface (16 with `AWWWARDS_MCP_ATLAS=1`). The old → new v2 mapping is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). |
-| `AWWWARDS_MCP_ATLAS` | off | `1` adds the experimental Atlas tools and v2 branches; `full` = 45 and `v2` = 16, `core` stays 13. Read once at startup. See [ATLAS.md](./ATLAS.md). |
+| `AWWWARDS_MCP_PROFILE` | `full` | `core` registers only the 14 build-loop tools, brief to verify (`search_sites`, `get_site_details`, `analyze_page_structure`, `analyze_scroll_map`, `capture_component`, `verify_build`, `build_project`, `get_motion_dna`, `analyze_stack`, `capture_live_site`, `get_annual_categories`, `get_annual_nominees`, `get_collections`, `shortlist_references`); `full` keeps all 42 (46 with `AWWWARDS_MCP_ATLAS=1`); `v2` (beta) replaces the list with the 15-tool consolidated surface (16 with `AWWWARDS_MCP_ATLAS=1`). The old → new v2 mapping is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). |
+| `AWWWARDS_MCP_ATLAS` | off | `1` adds the experimental Atlas tools and v2 branches; `full` = 46 and `v2` = 16, `core` stays 14. Read once at startup. See [ATLAS.md](./ATLAS.md). |
 | `AWWWARDS_MCP_MAX_RESPONSE_BYTES` | `32000000` | Full serialized tool-result bytes (text, inline images, `structuredContent` and `_meta`). Every larger result is replaced by `isError: true` with only a `{truncated:true, tool, bytes, limit, note}` text notice - no `structuredContent`, payload or `_meta` survives. The notice is a fixed recovery envelope (about 200 bytes; at most 1 KiB for every registered tool name), so a configured limit below it still returns a slightly larger error envelope. |
 | `AWWWARDS_MCP_DEBUG_MEMORY` | unset | `1` logs one JSON line per tool call (duration, rss, heap) to stderr - never stdout. |
 | `AWWWARDS_MCP_IMAGE_RETENTION_DAYS` | `0` (off) | A positive N prunes cached `images/` files older than N days once at startup. |
@@ -738,13 +836,13 @@ All optional and read at startup:
 
 The v1.14.0 `AWARDS_MCP_*` spellings (one fewer W) are still accepted as a one-release fallback; the `AWWWARDS_MCP_*` name wins when both are set.
 
-`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools (16 with `AWWWARDS_MCP_ATLAS=1`), never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup - `full` = 41, `core` = 13, `v2` = 15 (45 / 13 / 16 with `AWWWARDS_MCP_ATLAS=1`) - so changing the value requires a server restart. The complete 1.x → v2 mapping for all 36 replaced names is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills).
+`AWWWARDS_MCP_PROFILE=v2` is the opt-in beta surface: 15 tools (16 with `AWWWARDS_MCP_ATLAS=1`), never registered alongside the 1.x names. Ten consolidate the old surface (`search_references`, `get_reference`, `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`, `capture_page`, `audit_page`, `build_motion`, `monitor_awards`) and five are retained (`create_design_brief`, `build_project`, `verify_build`, `verify_flow`, `analyze_network_capture`). Each consolidated tool takes exactly one `request` branch. `monitor_awards` `add_watch`/`remove_watch` require `kind` and `pattern` at the schema boundary (the 1.x handler rejected them later; the valid set is the same). Profiles are exclusive and read once at startup - `full` = 42, `core` = 14, `v2` = 15 (46 / 14 / 16 with `AWWWARDS_MCP_ATLAS=1`) - so changing the value requires a server restart. The complete 1.x → v2 mapping for all 36 replaced names is in [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). The full surface has 37 legacy names: those 36 replaced names plus `shortlist_references`, which is v1-only with no v2 branch.
 
 `capture_live_site` also accepts `inline: false` to skip the base64 preview and `maxInlineBytes` to change the budget; captures whose base64 would exceed the budget (default 2.5 MB) are saved without an inline image, decided from the raw PNG size before conversion. Inline images from `capture_pose_3d` and `capture_component` count toward the same `AWWWARDS_MCP_MAX_RESPONSE_BYTES` budget. `analyze_network_capture` reads HAR files up to 20 MB (re-checked after reading) and 2000 entries. The `analyze_bundle` import graph supports import/reexport declarations up to 8 KB each.
 
 ### Experimental Atlas tools
 
-`AWWWARDS_MCP_ATLAS=1` (read once at startup) additionally registers `search_atlas`, `get_atlas`, `capture_atlas` and `export_evidence_pack` (in the `v2` profile only the last of those) together with the v2 branches `search_references` `kind:sections|components`, `get_reference` `kind:atlas_region|atlas_highlight|atlas_taxonomy`, `get_index` `kind:atlas_status` and `capture_page` `kind:atlas`. With the flag off those tools are not registered and the historical 41 / 13 / 15 surface is unchanged; the v2 branch values stay declared by their request schemas and answer with `FEATURE_DISABLED`. Atlas search is local only; candidate labels are uncalibrated hints and `empty_corpus` / `insufficient_coverage` mean not observed, never proven absent. Capture accepts a known site slug only and returns partial evidence without publication when publication is refused; `published` always reports the actual result. Exported packs stay in the local cache: `includeMedia:"references"` copies derived summaries only, while `permitted` copies an artifact only with a caller rights assertion and never overrides robots/destination refusals. See [ATLAS.md](./ATLAS.md) for the tool table, scopes, evidence modes and rights constraints.
+`AWWWARDS_MCP_ATLAS=1` (read once at startup) additionally registers `search_atlas`, `get_atlas`, `capture_atlas` and `export_evidence_pack` (in the `v2` profile only the last of those) together with the v2 branches `search_references` `kind:sections|components`, `get_reference` `kind:atlas_region|atlas_highlight|atlas_taxonomy`, `get_index` `kind:atlas_status` and `capture_page` `kind:atlas`. With the flag off those tools are not registered and the flag-off 42 / 14 / 15 surface is unchanged; the v2 branch values stay declared by their request schemas and answer with `FEATURE_DISABLED`. Atlas search is local only; candidate labels are uncalibrated hints and `empty_corpus` / `insufficient_coverage` mean not observed, never proven absent. Capture accepts a known site slug only and returns partial evidence without publication when publication is refused; `published` always reports the actual result. Exported packs stay in the local cache: `includeMedia:"references"` copies derived summaries only, while `permitted` copies an artifact only with a caller rights assertion and never overrides robots/destination refusals. See [ATLAS.md](./ATLAS.md) for the tool table, scopes, evidence modes and rights constraints.
 
 ### Attach to your own browser
 
@@ -793,14 +891,18 @@ npx skills add INSANE0777/awwwards-skills
 ```
 
 Documented pairing: **`awwwards-mcp@1.21.0` + [`skills-v2026.11.19`](https://github.com/INSANE0777/awwwards-skills/tree/skills-v2026.11.19)**.
-`1.21.1` is an auto-update hotfix with no tool, schema or skill-surface change, so the same skills remain compatible.
-The tag exists independently. We checked the pairing manually on **2026-11-19**
-against that tag: all nine routing copies are byte-identical to this package's
-`test/fixtures/v2-routing.md`, the skills structural validator passes, and the
-1.21 release keeps the same **41 / 13 / 15** tool surface (**45 / 13 / 16** with
-`AWWWARDS_MCP_ATLAS=1`) as 1.20. This is a one-time manual catalog/routing check,
-not an automated cross-repo test or a replay of every skill workflow; rerun it
-before a later release changes either side.
+`1.21.1` is an auto-update hotfix with no tool, schema or skill-surface change,
+so the same skills remain compatible. That shipped pairing was checked manually
+on **2026-11-19** against the tag: all nine routing copies were byte-identical
+to the `test/fixtures/v2-routing.md` shipped in 1.21.0, the skills structural
+validator passed, and 1.21 kept the **41 / 13 / 15** tool surface (**45 / 13 /
+16** with `AWWWARDS_MCP_ATLAS=1`) from 1.20. That check does not cover the
+current unreleased tree: its fixture adds `shortlist_references` and the
+**42 / 14** core table, so the "Not available in v2" row and the 42/14 table
+must be mirrored to the skills repository before this feature ships. This is a
+one-time manual catalog/routing check, not an automated cross-repo test or a
+replay of every skill workflow; rerun it before a later release changes either
+side.
 
 The CLI detects your agents and lets you choose a project or user-level
 install, then links each skill into that agent's skills directory. Useful
@@ -893,8 +995,8 @@ AWWWARDS_MCP_ATLAS=1
 
 | Profile | Flag off | Flag on |
 |---|---:|---:|
-| `full` (default) | 41 | 45 |
-| `core` | 13 | 13 |
+| `full` (default) | 42 | 46 |
+| `core` | 14 | 14 |
 | `v2` | 15 | 16 |
 
 Flag on adds four full-profile tools: `search_atlas`, `get_atlas`,
@@ -904,7 +1006,7 @@ operations are branches of existing tools (`search_references`
 `kind:atlas_region|atlas_highlight|atlas_taxonomy`, `get_index`
 `kind:atlas_status`, `capture_page` `kind:atlas`) plus the one new flat tool
 `export_evidence_pack`. Flag off, the four tools are not registered, the v2
-branches return `FEATURE_DISABLED`, and the historical 41 / 13 / 15 surface is
+branches return `FEATURE_DISABLED`, and the flag-off 42 / 14 / 15 surface is
 unchanged. Atlas tables and files are additive and survive turning the flag
 off.
 
@@ -1012,8 +1114,8 @@ change the bands or motion fingerprint between two runs of the same URL.
 Re-run before treating a delta as a regression; the score is evidence for a
 diff, not a grade.
 
-**The `v2` MCP surface is opt-in, not the default and not a 2.0 release.**
-`AWWWARDS_MCP_PROFILE=v2` replaces the default 41-tool surface (45 with
+**`v2` is opt-in, not the default and not a 2.0 release.**
+`AWWWARDS_MCP_PROFILE=v2` replaces the default 42-tool surface (46 with
 `AWWWARDS_MCP_ATLAS=1`) with the 15-tool consolidated surface (16 with
 `AWWWARDS_MCP_ATLAS=1`) described in
 [awwwards-skills repository](https://github.com/INSANE0777/awwwards-skills). The default stays `full`; there

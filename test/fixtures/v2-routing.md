@@ -7,9 +7,12 @@ call in a skill is a dead tool. Set the variable in the server `env` and
 
 | `AWWWARDS_MCP_PROFILE` | Tools | Surface |
 |---|---|---|
-| `full` (default) | 41 | Every 1.x tool, unchanged |
-| `core` | 13 | Build-loop subset of the 1.x tools; includes `get_annual_categories` |
+| `full` (default) | 42 | Every 1.x tool, unchanged |
+| `core` | 14 | Brief -> capture -> analyze -> build -> verify subset (discovery included); includes `get_annual_categories` |
 | `v2` | 15 | 10 consolidated tools + 5 retained flat tools |
+
+<!-- Skills release: mirror this 42/14 table and the "Not available in v2"
+section to awwwards-skills. -->
 
 The ten consolidated tools are `search_references`, `get_reference`,
 `browse_awards`, `get_index`, `inspect_page`, `analyze_motion`,
@@ -317,3 +320,10 @@ Atlas envelope instead of the old branch shapes; all old branches are unchanged.
   Build and diff PNGs land under the reference capture's `verify/<run>/`. The
   build URL must resolve to a public host (loopback is refused), so this is not
   a localhost-to-localhost check. `compact:true` keeps `scene3d` whole.
+
+## Not available in v2
+
+- **`shortlist_references` is v1-only.** It has no v2 branch, and
+  `AWWWARDS_MCP_PROFILE=v2` keeps its 15-tool surface (16 with Atlas) without
+  registering it. Use the v1 `full` or `core` profile for the brief-to-shortlist
+  workflow.

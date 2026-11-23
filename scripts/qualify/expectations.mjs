@@ -1,7 +1,7 @@
 // Surface expectations and probe classifiers for Atlas release qualification.
-// The counts come from docs/atlas-spec.md §18 Phase 6 / §20.1: the flag-off
-// surface stays at 41 full / 13 core / 15 v2 and the flag-on surface is
-// 45 full / 13 core / 16 v2.
+// The counts are the current Phase 6 surfaces: the flag-off surface is
+// 42 full / 14 core / 15 v2 and the flag-on surface is 46 full / 14 core /
+// 16 v2.
 
 export const ATLAS_FULL_TOOLS = Object.freeze([
   "search_atlas",
@@ -28,6 +28,7 @@ export const CORE_TOOL_NAMES = Object.freeze([
   "get_annual_categories",
   "get_annual_nominees",
   "get_collections",
+  "shortlist_references",
 ]);
 
 export const V2_BASELINE_TOOLS = Object.freeze([
@@ -67,8 +68,8 @@ export const ATLAS_V2_BRANCH_KINDS = Object.freeze(
 );
 
 export const EXPECTED_COUNTS = Object.freeze({
-  off: Object.freeze({ full: 41, core: 13, v2: 15 }),
-  on: Object.freeze({ full: 45, core: 13, v2: 16 }),
+  off: Object.freeze({ full: 42, core: 14, v2: 15 }),
+  on: Object.freeze({ full: 46, core: 14, v2: 16 }),
 });
 
 export function expectedCount(flagOn, profile) {

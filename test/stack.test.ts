@@ -148,6 +148,33 @@ describe("analyzeStack", () => {
     expect(src).toContain("stack-fingerprint/1.0 (research tooling)");
     expect(src).toContain("new AbortController()");
   });
+
+  it("fetches through Playwright with the guard proxy when one is set", async () => {
+    const goto = vi.fn(async () => {});
+    const launch = vi.fn(async () => ({
+      newPage: async () => ({ goto, content: async () => NEXT_HTML }),
+      close: async () => {},
+    }));
+    const loader = vi.fn(async () => ({ chromium: { launch } }));
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+
+    const result = await analyzeStack("https://example.com/page", {
+      proxyServer: "http://127.0.0.1:9",
+      loader,
+      fetchFn,
+    });
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(launch).toHaveBeenCalledWith({
+      proxy: { server: "http://127.0.0.1:9", bypass: "<-loopback>" },
+      args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+    });
+    expect(goto).toHaveBeenCalledWith("https://example.com/page", {
+      waitUntil: "load",
+      timeout: 15000,
+    });
+    expect(!("error" in result) && result.framework).toBe("next");
+  });
 });
 
 // B2: Webflow pages emit functional utility-like classes that fool density

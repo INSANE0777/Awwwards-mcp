@@ -5,8 +5,8 @@
 // offline (Node egress guard plus a loopback-only fixture) and records every
 // assertion as PASS/FAIL/SKIP in a machine-readable report.
 //
-// The expected surfaces are Phase 6 exit criteria: 41/13/15 flag off and
-// 45/13/16 flag on. On a base where Phase 6A/6B are not integrated the
+// The expected surfaces are Phase 6 exit criteria: 42/14/15 flag off and
+// 46/14/16 flag on. On a base where Phase 6A/6B are not integrated the
 // flag-on and CLI checks fail or skip explicitly; they are never green.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

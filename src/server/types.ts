@@ -40,6 +40,7 @@ import type {
   SearchAtlasToolInput,
 } from "../atlas/tool-contracts.js";
 import type { AtlasEnvelope } from "../atlas/tool-contracts.js";
+import type { ShortlistInput } from "../shortlist/contracts.js";
 
 export const AWARD_FILTER_LABELS: Record<AwardFilter, string> = {
   sotd: "Site of the Day",
@@ -120,9 +121,15 @@ export type MotionFn = (
 
 export type MotionDnaFn = (
   url: string,
-  // C2: same opts contract as the census peers — the default switched from
+  // C2: same opts contract as the census peers - the default switched from
   // captureMotionDna (viewport-only) to captureMotionDnaUnified.
-  opts?: { waitStrategy?: WaitStrategy; viewport?: ViewportName; reducedMotion?: boolean },
+  opts?: {
+    waitStrategy?: WaitStrategy;
+    viewport?: ViewportName;
+    reducedMotion?: boolean;
+    /** Route every launched-browser connection through the public-network guard. */
+    proxyServer?: string;
+  },
 ) => Promise<MotionDna>;
 
 export type ScrollMapFn = (
@@ -161,7 +168,7 @@ export type PoseStubFn = (
 // analyze_stack: one polite fetch of a page's HTML, fingerprinted offline.
 export type StackFn = (
   url: string,
-  opts?: { timeoutMs?: number; fetchFn?: typeof fetch },
+  opts?: { timeoutMs?: number; fetchFn?: typeof fetch; proxyServer?: string },
 ) => Promise<StackFingerprint | { error: string }>;
 
 // analyze_bundle: fetches a page + its script chunks (bounded), greps keywords.
@@ -234,6 +241,8 @@ export type AnalyzeAccessibilityFn = (args: {
   url: string;
   viewport?: ViewportName;
   limit?: number;
+  /** Route the launched browser through the public-network guard. */
+  proxyServer?: string;
 }) => Promise<AccessibilityResult | { error: string }>;
 export type IndexStatsFn = (args: IndexStatsArgs) => Promise<IndexStatsResult>;
 
@@ -663,6 +672,7 @@ export interface Handlers {
     award?: "sotd" | "developer" | "honorable";
     note?: string;
   }): Promise<ToolResponse>;
+  shortlist_references(args: ShortlistInput): Promise<ToolResponse>;
   search_atlas(args: SearchAtlasToolInput): Promise<ToolResponse>;
   get_atlas(args: GetAtlasInput): Promise<ToolResponse>;
   capture_atlas(args: CaptureAtlasInput, signal?: AbortSignal): Promise<ToolResponse>;
