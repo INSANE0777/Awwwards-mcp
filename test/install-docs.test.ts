@@ -228,13 +228,15 @@ describe("install documentation", () => {
     expect(text).toContain("`shortlist_references`, which is v1-only with no v2 branch");
   });
 
-  it("README scopes the skills mirror claim to the shipped pairing", () => {
+  it("README names the shipped skills pairing and its manual check", () => {
     const text = flatten(README);
+    expect(text).toContain("Documented pairing: **`awwwards-mcp@1.22.0`");
+    expect(text).toContain("skills-v2026.11.23");
     expect(text).toContain(
-      "all nine routing copies were byte-identical to the `test/fixtures/v2-routing.md` shipped in 1.21.0",
+      "all nine routing copies are byte-identical to the `test/fixtures/v2-routing.md` shipped in 1.22.0",
     );
-    expect(text).toContain("must be mirrored to the skills repository");
-    expect(text).not.toContain("all nine routing copies are byte-identical to this package's");
+    expect(text).toContain("skills structural validator passes");
+    expect(text).not.toContain("predates `shortlist_references`");
   });
 
   it("CHANGELOG current section pins the reference-shortlist claims", () => {
