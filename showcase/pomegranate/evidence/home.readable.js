@@ -1,0 +1,36 @@
+import{_ as b,l as _,c as a,k as n,d as s,j as c,F as k,a as C,h as r,r as i,o,q as T,t as E,w as u,p as m,i as V,e as d}from"./index-1cb91aca.js";
+const D={components:{"part-header":_(()=>d(()=>import("./header-34b9fd1a.js"),["assets/header-34b9fd1a.js","assets/index-1cb91aca.js","assets/index-ff101a6a.css","assets/header-31ef58cc.css"])),"part-phones":_(()=>d(()=>import("./phones-de22cf24.js"),["assets/phones-de22cf24.js","assets/index-1cb91aca.js","assets/index-ff101a6a.css","assets/phones-3f42a49d.css"])),"part-footer":_(()=>d(()=>import("./footer-d5065cc1.js"),["assets/footer-d5065cc1.js","assets/index-1cb91aca.js","assets/index-ff101a6a.css","assets/footer-729e3c66.css"]))},
+computed:{heroCardLg(){return this._api.get("hero.card_lg",{})},heroPhones(){return this._api.get("hero.phones",{})},body(){return this._api.get("body",[])}},mounted(){const t=this;
+t._motion.animateType({heading:t.$refs.heading,
+text:t.$refs.text})}},
+P={class:"template-home"},
+w={class:"--ui-space"},
+B={class:"template-home_icon --ui-center"},
+H=["src","alt"],
+M=["innerHTML"],
+N=["innerHTML"],
+A={class:"--ui-space"};
+function I(t,O,R,F,j,e){const g=r("part-header"),
+y=r("part-phones"),
+f=r("ui-card"),
+v=r("block"),
+L=r("part-footer"),
+h=i("orphans"),
+p=i("nl2br"),
+l=i("links");
+return o(),a("main",P,[n(g),s("article",w,[n(f,{hero:""},{before:c(()=>[s("div",B,[s("img",{src:t._image("pomegranate-icon.svg"),
+width:"64",
+height:"72",
+alt:e.heroCardLg.tag},null,8,H)])]),
+tag:c(()=>[T(E(e.heroCardLg.tag),1)]),
+after:c(()=>[n(y,{content:e.heroPhones},null,8,["content"])]),
+default:c(()=>[e.heroCardLg.heading?u((o(),a("h1",{key:0,
+ref:"heading",
+class:"--ui-x-reduced --type-heading --type-cms --type-balance --ui-py-xs",
+innerHTML:e.heroCardLg.heading},null,8,M)),[[h],[p],[l]]):m("",!0),e.heroCardLg.text?u((o(),a("p",{key:1,
+ref:"text",
+class:"--ui-x-narrow --type-opening --type-cms --type-balance",
+innerHTML:e.heroCardLg.text},null,8,N)),[[h],[p],[l]]):m("",!0)]),
+_:1}),s("section",A,[(o(!0),a(k,null,C(e.body,
+x=>(o(),V(v,{content:x},null,8,["content"]))),256))])]),n(L)])}const z=b(D,[["render",I]]);
+export{z as default};

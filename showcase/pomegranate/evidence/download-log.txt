@@ -1,0 +1,16 @@
+ok assets/phones-de22cf24.js 820
+ok assets/phones-3f42a49d.css 812
+ok assets/footer-d5065cc1.js 2594
+ok assets/footer-729e3c66.css 1945
+ok assets/pomegranate-logo-71304675.svg 54653
+ok assets/pomegranate-icon-dfadad6d.svg 2435
+ok assets/phone-mask-f191834c.svg 349
+ok uploads/feature-1-15351.riv 89854
+ok uploads/feature-2-v2-84416.riv 134439
+ok uploads/feature-3-v2-58293.riv 88895
+ok uploads/feature-4-69534.riv 199676
+ok uploads/feature-5-v3-55153.riv 174344
+ok uploads/feature-6-566.riv 121369
+ok uploads/phone-1-v2-3034.mp4 393673
+ok uploads/pinkphone-crop-99599.png 137911
+ok uploads/phone-3-46773.png 167162

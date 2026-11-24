@@ -1,0 +1,12 @@
+docHeight 7408 scrollW 1662
+header {"x":0,"y":39,"w":1440,"h":76}
+hero {"x":0,"y":73,"w":1440,"h":1349}
+h1 {"x":180,"y":443,"w":1080,"h":178}
+f1 {"x":0,"y":1453,"w":1440,"h":542}
+footer {"x":0,"y":5959,"w":1440,"h":1449}
+bar {"x":62,"y":7281,"w":1316,"h":85}
+canvases [{"w":870,"h":458,"cssW":870,"cssH":458,"parentOpacity":"1"},{"w":732,"h":496,"cssW":732,"cssH":496,"parentOpacity":"1"},{"w":625,"h":562,"cssW":625,"cssH":562,"parentOpacity":"1"},{"w":1813,"h":585,"cssW":1813,"cssH":585,"parentOpacity":"1"},{"w":823,"h":651,"cssW":823,"cssH":651,"parentOpacity":"1"},{"w":724,"h":526,"cssW":724,"cssH":526,"parentOpacity":"1"}]
+rive {"rive0":{"w":870,"h":458,"opacity":"1","canvases":1},"rive1":{"w":732,"h":496,"opacity":"1","canvases":1},"rive2":{"w":625,"h":562,"opacity":"1","canvases":1},"rive3":{"w":1813,"h":585,"opacity":"1","canvases":1},"rive4":{"w":823,"h":651,"opacity":"1","canvases":1},"rive5":{"w":724,"h":526,"opacity":"1","canvases":1}}
+h2font 64.3011px / 67.5162px / Gliker, sans-serif
+console 0 failed 0
+mobile doc 6755 scrollW 390

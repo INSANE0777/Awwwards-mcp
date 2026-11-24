@@ -1,0 +1,6 @@
+ok assets/TTCPro-ed9ac02e.woff2 567556
+ok assets/Gliker-RegularSemiCondensed-315ea8e4.woff2 39988
+ok assets/Gliker-SemiBoldSemiCondensed-d695c20d.woff2 40152
+ok assets/pomegranate-logo-71304675.svg 54653
+ok thumbs/og-68657_opengraph.jpg 26945
+ok thumbs/favicon-88699_favicon-32.png 910

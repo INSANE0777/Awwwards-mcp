@@ -1,0 +1,607 @@
+{
+ "ref-1440": {
+  "docH": 7367,
+  "svgCount": 9,
+  "svgs": [
+   {
+    "cls": "--icon --icon-action-open",
+    "w": 26,
+    "h": 26
+   },
+   {
+    "cls": "",
+    "w": 454,
+    "h": 76
+   },
+   {
+    "cls": "",
+    "w": 454,
+    "h": 76
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 1396,
+    "h": 171
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 1396,
+    "h": 171
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 1442,
+    "h": 184
+   },
+   {
+    "cls": "",
+    "w": 484,
+    "h": 82
+   },
+   {
+    "cls": "",
+    "w": 484,
+    "h": 82
+   },
+   {
+    "cls": "--type-external",
+    "w": 19,
+    "h": 19
+   }
+  ],
+  "imgs": [
+   {
+    "src": "assets/pomegranate-icon-dfadad6d.svg",
+    "w": 61,
+    "h": 69,
+    "nat": 64
+   },
+   {
+    "src": "",
+    "w": 0,
+    "h": 0,
+    "nat": 0
+   },
+   {
+    "src": "thumbs/pinkphone-crop-99599_phone_png.webp",
+    "w": 435,
+    "h": 660,
+    "nat": 446
+   },
+   {
+    "src": "thumbs/phone-3-46773_phone_png.webp",
+    "w": 435,
+    "h": 660,
+    "nat": 446
+   },
+   {
+    "src": "",
+    "w": 0,
+    "h": 0,
+    "nat": 0
+   },
+   {
+    "src": "thumbs/pinkphone-crop-99599_phone_png.webp",
+    "w": 428,
+    "h": 648,
+    "nat": 446
+   },
+   {
+    "src": "thumbs/phone-3-46773_phone_png.webp",
+    "w": 428,
+    "h": 648,
+    "nat": 446
+   }
+  ],
+  "bg": [
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient --ui-card --ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(247, 239, 223) 50%, rgb(250, 227, 183) 100%)"
+   },
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient --ui-card --ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(247, 239, 223) 50%, rgb(250, 227, 183) 100%)"
+   }
+  ],
+  "canvases": [
+   {
+    "w": 1740,
+    "h": 916,
+    "cssW": 870,
+    "cssH": 458
+   },
+   {
+    "w": 1464,
+    "h": 992,
+    "cssW": 732,
+    "cssH": 496
+   },
+   {
+    "w": 1249,
+    "h": 1123,
+    "cssW": 625,
+    "cssH": 562
+   },
+   {
+    "w": 3626,
+    "h": 1170,
+    "cssW": 1813,
+    "cssH": 585
+   },
+   {
+    "w": 1645,
+    "h": 1302,
+    "cssW": 823,
+    "cssH": 651
+   },
+   {
+    "w": 1448,
+    "h": 1051,
+    "cssW": 724,
+    "cssH": 526
+   }
+  ],
+  "errors": [],
+  "failed": [
+   "https://pomegranate.health/api/media-stream/phone-1-v2-3034.mp4/"
+  ],
+  "shots": [
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y0.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y1.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y2.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y3.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y4.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y5.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y6.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y7.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-1440-y8.png"
+  ]
+ },
+ "build-1440": {
+  "docH": 7383,
+  "svgCount": 6,
+  "svgs": [
+   {
+    "cls": "ui-button_icon",
+    "w": 21,
+    "h": 21
+   },
+   {
+    "cls": "ui-button_icon",
+    "w": 0,
+    "h": 0
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 1392,
+    "h": 170
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 1462,
+    "h": 179
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 1438,
+    "h": 184
+   },
+   {
+    "cls": "type-external",
+    "w": 21,
+    "h": 21
+   }
+  ],
+  "imgs": [
+   {
+    "src": "img/pomegranate-logo.svg",
+    "w": 455,
+    "h": 76,
+    "nat": 642
+   },
+   {
+    "src": "img/pomegranate-logo.svg",
+    "w": 0,
+    "h": 0,
+    "nat": 642
+   },
+   {
+    "src": "img/pomegranate-icon.svg",
+    "w": 61,
+    "h": 69,
+    "nat": 64
+   },
+   {
+    "src": "img/phone-2.png",
+    "w": 435,
+    "h": 660,
+    "nat": 892
+   },
+   {
+    "src": "img/phone-3.png",
+    "w": 435,
+    "h": 660,
+    "nat": 850
+   },
+   {
+    "src": "img/phone-2.png",
+    "w": 428,
+    "h": 648,
+    "nat": 892
+   },
+   {
+    "src": "img/phone-3.png",
+    "w": 428,
+    "h": 648,
+    "nat": 850
+   }
+  ],
+  "bg": [
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient ui-card-frame ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(250, 227, 183) 100%)"
+   },
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient ui-card-frame ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(250, 227, 183) 100%)"
+   }
+  ],
+  "canvases": [
+   {
+    "w": 870,
+    "h": 458,
+    "cssW": 870,
+    "cssH": 458
+   },
+   {
+    "w": 732,
+    "h": 496,
+    "cssW": 732,
+    "cssH": 496
+   },
+   {
+    "w": 625,
+    "h": 562,
+    "cssW": 625,
+    "cssH": 562
+   },
+   {
+    "w": 1813,
+    "h": 585,
+    "cssW": 1813,
+    "cssH": 585
+   },
+   {
+    "w": 823,
+    "h": 651,
+    "cssW": 823,
+    "cssH": 651
+   },
+   {
+    "w": 724,
+    "h": 526,
+    "cssW": 724,
+    "cssH": 526
+   }
+  ],
+  "errors": [],
+  "failed": [],
+  "shots": [
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y0.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y1.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y2.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y3.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y4.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y5.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y6.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y7.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-1440-y8.png"
+  ]
+ },
+ "ref-390": {
+  "docH": 7910,
+  "svgCount": 9,
+  "svgs": [
+   {
+    "cls": "--icon --icon-action-open",
+    "w": 25,
+    "h": 25
+   },
+   {
+    "cls": "",
+    "w": 305,
+    "h": 51
+   },
+   {
+    "cls": "",
+    "w": 305,
+    "h": 51
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 359,
+    "h": 132
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 359,
+    "h": 132
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 392,
+    "h": 150
+   },
+   {
+    "cls": "",
+    "w": 316,
+    "h": 53
+   },
+   {
+    "cls": "",
+    "w": 316,
+    "h": 53
+   },
+   {
+    "cls": "--type-external",
+    "w": 16,
+    "h": 16
+   }
+  ],
+  "imgs": [
+   {
+    "src": "assets/pomegranate-icon-dfadad6d.svg",
+    "w": 52,
+    "h": 58,
+    "nat": 64
+   },
+   {
+    "src": "",
+    "w": 0,
+    "h": 0,
+    "nat": 0
+   },
+   {
+    "src": "thumbs/pinkphone-crop-99599_phone_png.webp",
+    "w": 191,
+    "h": 289,
+    "nat": 446
+   },
+   {
+    "src": "thumbs/phone-3-46773_phone_png.webp",
+    "w": 191,
+    "h": 289,
+    "nat": 446
+   },
+   {
+    "src": "",
+    "w": 0,
+    "h": 0,
+    "nat": 0
+   },
+   {
+    "src": "thumbs/pinkphone-crop-99599_phone_png.webp",
+    "w": 191,
+    "h": 289,
+    "nat": 446
+   },
+   {
+    "src": "thumbs/phone-3-46773_phone_png.webp",
+    "w": 191,
+    "h": 289,
+    "nat": 446
+   }
+  ],
+  "bg": [
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient --ui-card --ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(247, 239, 223) 50%, rgb(250, 227, 183) 100%)"
+   },
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient --ui-card --ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(247, 239, 223) 50%, rgb(250, 227, 183) 100%)"
+   }
+  ],
+  "canvases": [
+   {
+    "w": 1740,
+    "h": 916,
+    "cssW": 574,
+    "cssH": 302
+   },
+   {
+    "w": 1464,
+    "h": 992,
+    "cssW": 483,
+    "cssH": 327
+   },
+   {
+    "w": 1249,
+    "h": 1123,
+    "cssW": 412,
+    "cssH": 371
+   },
+   {
+    "w": 3626,
+    "h": 1170,
+    "cssW": 1197,
+    "cssH": 386
+   },
+   {
+    "w": 1645,
+    "h": 1302,
+    "cssW": 543,
+    "cssH": 430
+   },
+   {
+    "w": 1448,
+    "h": 1051,
+    "cssW": 478,
+    "cssH": 347
+   }
+  ],
+  "errors": [],
+  "failed": [
+   "https://pomegranate.health/api/media-stream/phone-1-v2-3034.mp4/"
+  ],
+  "shots": [
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y0.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y1.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y2.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y3.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y4.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y5.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y6.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y7.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/ref-390-y8.png"
+  ]
+ },
+ "build-390": {
+  "docH": 6757,
+  "svgCount": 6,
+  "svgs": [
+   {
+    "cls": "ui-button_icon",
+    "w": 17,
+    "h": 17
+   },
+   {
+    "cls": "ui-button_icon",
+    "w": 0,
+    "h": 0
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 355,
+    "h": 43
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 355,
+    "h": 43
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "w": 388,
+    "h": 50
+   },
+   {
+    "cls": "type-external",
+    "w": 18,
+    "h": 18
+   }
+  ],
+  "imgs": [
+   {
+    "src": "img/pomegranate-logo.svg",
+    "w": 0,
+    "h": 0,
+    "nat": 642
+   },
+   {
+    "src": "img/pomegranate-logo.svg",
+    "w": 0,
+    "h": 0,
+    "nat": 642
+   },
+   {
+    "src": "img/pomegranate-icon.svg",
+    "w": 52,
+    "h": 58,
+    "nat": 64
+   },
+   {
+    "src": "img/phone-2.png",
+    "w": 191,
+    "h": 289,
+    "nat": 892
+   },
+   {
+    "src": "img/phone-3.png",
+    "w": 191,
+    "h": 289,
+    "nat": 850
+   },
+   {
+    "src": "img/phone-2.png",
+    "w": 191,
+    "h": 289,
+    "nat": 892
+   },
+   {
+    "src": "img/phone-3.png",
+    "w": 191,
+    "h": 289,
+    "nat": 850
+   }
+  ],
+  "bg": [
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient ui-card-frame ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(250, 227, 183) 100%)"
+   },
+   {
+    "tag": "DIV",
+    "cls": "ui-card_gradient ui-card-frame ui-relative",
+    "bg": "linear-gradient(rgb(247, 239, 223) 0%, rgb(250, 227, 183) 100%)"
+   }
+  ],
+  "canvases": [
+   {
+    "w": 334,
+    "h": 176,
+    "cssW": 335,
+    "cssH": 176
+   },
+   {
+    "w": 334,
+    "h": 226,
+    "cssW": 335,
+    "cssH": 227
+   },
+   {
+    "w": 334,
+    "h": 300,
+    "cssW": 335,
+    "cssH": 301
+   },
+   {
+    "w": 357,
+    "h": 115,
+    "cssW": 357,
+    "cssH": 115
+   },
+   {
+    "w": 334,
+    "h": 264,
+    "cssW": 335,
+    "cssH": 265
+   },
+   {
+    "w": 334,
+    "h": 243,
+    "cssW": 335,
+    "cssH": 243
+   }
+  ],
+  "errors": [],
+  "failed": [],
+  "shots": [
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y0.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y1.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y2.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y3.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y4.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y5.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y6.png",
+   "A:/Recreations/pomegranate/evidence/qa/compare/build-390-y7.png"
+  ]
+ }
+}

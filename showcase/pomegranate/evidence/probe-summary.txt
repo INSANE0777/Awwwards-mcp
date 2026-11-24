@@ -1,0 +1,165 @@
+docHeight 7367 canvasCount 6
+heroCardHTML len 3548
+sections [
+ {
+  "tag": "header",
+  "cls": "part-header --app-scrollbar-offset",
+  "rect": {
+   "x": 0,
+   "y": 39,
+   "w": 1440,
+   "h": 76
+  }
+ },
+ {
+  "tag": "article",
+  "cls": "--ui-space",
+  "rect": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 5954
+  }
+ },
+ {
+  "tag": "footer",
+  "cls": "part-footer",
+  "rect": {
+   "x": 0,
+   "y": 5954,
+   "w": 1440,
+   "h": 1413
+  }
+ }
+]
+features 6
+[
+ {
+  "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --text-media",
+  "rect": {
+   "x": 0,
+   "y": 1451,
+   "w": 1440,
+   "h": 542
+  },
+  "media": {
+   "x": 762,
+   "y": 1493,
+   "w": 595,
+   "h": 458
+  },
+  "canvas": {
+   "x": 762,
+   "y": 1493,
+   "w": 870,
+   "h": 458
+  }
+ },
+ {
+  "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --media-text",
+  "rect": {
+   "x": 0,
+   "y": 2024,
+   "w": 1440,
+   "h": 580
+  },
+  "media": {
+   "x": 84,
+   "y": 2066,
+   "w": 594,
+   "h": 496
+  },
+  "canvas": {
+   "x": -54,
+   "y": 2066,
+   "w": 732,
+   "h": 496
+  }
+ },
+ {
+  "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --text-media",
+  "rect": {
+   "x": 0,
+   "y": 2635,
+   "w": 1440,
+   "h": 645
+  },
+  "media": {
+   "x": 762,
+   "y": 2676,
+   "w": 595,
+   "h": 562
+  },
+  "canvas": {
+   "x": 762,
+   "y": 2676,
+   "w": 625,
+   "h": 562
+  }
+ },
+ {
+  "cls": "block-feature --large",
+  "rect": {
+   "x": 0,
+   "y": 3311,
+   "w": 1440,
+   "h": 1237
+  },
+  "media": {
+   "x": 23,
+   "y": 3961,
+   "w": 1394,
+   "h": 585
+  },
+  "canvas": {
+   "x": -186,
+   "y": 3961,
+   "w": 1813,
+   "h": 585
+  }
+ },
+ {
+  "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --text-media",
+  "rect": {
+   "x": 0,
+   "y": 4579,
+   "w": 1440,
+   "h": 735
+  },
+  "media": {
+   "x": 762,
+   "y": 4621,
+   "w": 595,
+   "h": 651
+  },
+  "canvas": {
+   "x": 762,
+   "y": 4621,
+   "w": 823,
+   "h": 651
+  }
+ },
+ {
+  "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --media-text",
+  "rect": {
+   "x": 0,
+   "y": 5344,
+   "w": 1440,
+   "h": 609
+  },
+  "media": {
+   "x": 84,
+   "y": 5386,
+   "w": 594,
+   "h": 526
+  },
+  "canvas": {
+   "x": -46,
+   "y": 5386,
+   "w": 724,
+   "h": 526
+  }
+ }
+]
+canvases [{"w":1740,"h":916,"css":{"w":870,"h":458},"parent":"ui-rive --ui-media"},{"w":1464,"h":992,"css":{"w":732,"h":496},"parent":"ui-rive --ui-media"},{"w":1249,"h":1123,"css":{"w":625,"h":562},"parent":"ui-rive --ui-media"},{"w":3626,"h":1170,"css":{"w":1813,"h":585},"parent":"ui-rive --ui-media"},{"w":1645,"h":1302,"css":{"w":823,"h":651},"parent":"ui-rive --ui-media"},{"w":1448,"h":1051,"css":{"w":724,"h":526},"parent":"ui-rive --ui-media"}]
+computedVars 93

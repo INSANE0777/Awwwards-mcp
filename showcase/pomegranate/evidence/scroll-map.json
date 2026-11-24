@@ -1,0 +1,34 @@
+{
+ "url": "https://pomegranate.health/",
+ "capturedAt": 1794848895842,
+ "counts": {
+  "gsap-scrolltrigger": 0,
+  "css-scroll-timeline": 0,
+  "css-view-timeline": 0,
+  "data-attr": 0,
+  "css-keyframe": 0,
+  "smil": 0,
+  "unknown": 0
+ },
+ "anims": [],
+ "svgStrokes": [],
+ "nativeScrollTimelines": 0,
+ "gsapTriggers": [],
+ "gsapRegistryCount": 0,
+ "reducedMotion": false,
+ "acquisition": {
+  "waitStrategy": "networkidle",
+  "settleMs": 3000,
+  "postScrollMs": 500,
+  "capturedAt": 1794848895842,
+  "documentHeight": 7367,
+  "animationCount": 0,
+  "gsapRegistryCount": 0,
+  "stable": true
+ },
+ "scrubCurves": [],
+ "choreography": {
+  "hints": [],
+  "groups": 0
+ }
+}

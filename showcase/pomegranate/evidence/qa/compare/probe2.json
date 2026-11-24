@@ -1,0 +1,652 @@
+{
+ "ref": {
+  "name": "ref",
+  "docH": 7367,
+  "svgs": [
+   {
+    "cls": "--icon --icon-action-open",
+    "parent": "ui-button_content --ui-center",
+    "w": 26,
+    "h": 26,
+    "head": "<svg role=\"img\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" preserveAspectRatio=\"xMidYMin"
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 454,
+    "h": 76,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 454,
+    "h": 76,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flush",
+    "w": 1396,
+    "h": 171,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flush",
+    "w": 1396,
+    "h": 171,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flip --flush",
+    "w": 1442,
+    "h": 184,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 484,
+    "h": 77,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 484,
+    "h": 80,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "--type-external",
+    "parent": "",
+    "w": 19,
+    "h": 19,
+    "head": "<svg class=\"--type-external\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 "
+   }
+  ],
+  "reveals": [],
+  "sections": [
+   {
+    "cls": "--ui-space",
+    "y": 1451,
+    "h": 4503
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --te",
+    "y": 1451,
+    "h": 542
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --me",
+    "y": 2024,
+    "h": 580
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --te",
+    "y": 2635,
+    "h": 645
+   },
+   {
+    "cls": "block-feature --large",
+    "y": 3311,
+    "h": 1237
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --te",
+    "y": 4579,
+    "h": 735
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --me",
+    "y": 5344,
+    "h": 609
+   }
+  ],
+  "footerPhones": {
+   "display": "block",
+   "rect": {
+    "y": 6646,
+    "h": 643
+   }
+  },
+  "header": {
+   "y": 39,
+   "h": 0,
+   "pos": "fixed"
+  },
+  "errs": []
+ },
+ "build": {
+  "name": "build",
+  "docH": 7383,
+  "svgs": [
+   {
+    "cls": "ui-button_icon",
+    "parent": "ui-button_content ui-center",
+    "w": 21,
+    "h": 21,
+    "head": "<svg class=\"ui-button_icon\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"> <path "
+   },
+   {
+    "cls": "ui-button_icon",
+    "parent": "ui-button_content ui-center",
+    "w": 0,
+    "h": 0,
+    "head": "<svg class=\"ui-button_icon\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"> <path d=\"M"
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient",
+    "w": 1392,
+    "h": 170,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient",
+    "w": 1462,
+    "h": 179,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flip",
+    "w": 1438,
+    "h": 184,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "type-external",
+    "parent": "",
+    "w": 21,
+    "h": 21,
+    "head": "<svg class=\"type-external\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24"
+   }
+  ],
+  "reveals": [
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 378
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 444
+   },
+   {
+    "kind": "text",
+    "op": "1",
+    "y": 644
+   },
+   {
+    "kind": "tag",
+    "op": "0.4737",
+    "y": 1567
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 1631
+   },
+   {
+    "kind": "text",
+    "op": "0",
+    "y": 1720
+   },
+   {
+    "kind": "tag",
+    "op": "0.5785",
+    "y": 2145
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 2209
+   },
+   {
+    "kind": "text",
+    "op": "0",
+    "y": 2298
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 2769
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 2833
+   },
+   {
+    "kind": "text",
+    "op": "0.3667",
+    "y": 2989
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 3541
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 3605
+   },
+   {
+    "kind": "text",
+    "op": "0.87",
+    "y": 3805
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 4764
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 4828
+   },
+   {
+    "kind": "text",
+    "op": "0.4067",
+    "y": 4984
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 5467
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 5531
+   },
+   {
+    "kind": "text",
+    "op": "0.4333",
+    "y": 5687
+   }
+  ],
+  "sections": [
+   {
+    "cls": "hero-card ui-card ui-x-outer ui-px-sm",
+    "y": 73,
+    "h": 1353
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --text-med",
+    "y": 1457,
+    "h": 542
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --media-te",
+    "y": 2029,
+    "h": 580
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --text-med",
+    "y": 2640,
+    "h": 646
+   },
+   {
+    "cls": "block-feature --large",
+    "y": 3317,
+    "h": 1242
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --text-med",
+    "y": 4590,
+    "h": 735
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --media-te",
+    "y": 5356,
+    "h": 610
+   }
+  ],
+  "footerPhones": {
+   "display": "block",
+   "rect": {
+    "y": 6663,
+    "h": 643
+   }
+  },
+  "header": {
+   "y": 39,
+   "h": 76,
+   "pos": "absolute"
+  },
+  "errs": []
+ },
+ "ref390": {
+  "name": "ref390",
+  "docH": 7910,
+  "svgs": [
+   {
+    "cls": "--icon --icon-action-open",
+    "parent": "ui-button_content --ui-center",
+    "w": 25,
+    "h": 25,
+    "head": "<svg role=\"img\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" preserveAspectRatio=\"xMidYMin"
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 305,
+    "h": 51,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 305,
+    "h": 51,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flush",
+    "w": 359,
+    "h": 132,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flush",
+    "w": 359,
+    "h": 132,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flip --flush",
+    "w": 392,
+    "h": 150,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 316,
+    "h": 51,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "",
+    "parent": "",
+    "w": 316,
+    "h": 52,
+    "head": "<svg role=\"img\" viewBox=\"0 0 642 108\" preserveAspectRatio=\"xMinYMin meet\" fill=\"none\" xmlns=\"http://"
+   },
+   {
+    "cls": "--type-external",
+    "parent": "",
+    "w": 16,
+    "h": 16,
+    "head": "<svg class=\"--type-external\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 "
+   }
+  ],
+  "reveals": [],
+  "sections": [
+   {
+    "cls": "--ui-space",
+    "y": 1147,
+    "h": 5546
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --te",
+    "y": 1147,
+    "h": 790
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --me",
+    "y": 1956,
+    "h": 817
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --te",
+    "y": 2792,
+    "h": 885
+   },
+   {
+    "cls": "block-feature --large",
+    "y": 3695,
+    "h": 1228
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --te",
+    "y": 4941,
+    "h": 920
+   },
+   {
+    "cls": "block-feature --ui-x-outer --ui-px-lg --ui-py --me",
+    "y": 5880,
+    "h": 813
+   }
+  ],
+  "footerPhones": {
+   "display": "block",
+   "rect": {
+    "y": 7360,
+    "h": 286
+   }
+  },
+  "header": {
+   "y": 872,
+   "h": 0,
+   "pos": "fixed"
+  },
+  "errs": []
+ },
+ "build390": {
+  "name": "build390",
+  "docH": 6757,
+  "svgs": [
+   {
+    "cls": "ui-button_icon",
+    "parent": "ui-button_content ui-center",
+    "w": 17,
+    "h": 17,
+    "head": "<svg class=\"ui-button_icon\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"> <path "
+   },
+   {
+    "cls": "ui-button_icon",
+    "parent": "ui-button_content ui-center",
+    "w": 0,
+    "h": 0,
+    "head": "<svg class=\"ui-button_icon\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"> <path d=\"M"
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient",
+    "w": 355,
+    "h": 43,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient",
+    "w": 355,
+    "h": 43,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "ui-gradient_svg",
+    "parent": "ui-gradient --flip",
+    "w": 388,
+    "h": 50,
+    "head": "<svg class=\"ui-gradient_svg\" xmlns=\"http://www.w3.org/2000/svg\" preserveAspectRatio=\"xMinYMin meet\" "
+   },
+   {
+    "cls": "type-external",
+    "parent": "",
+    "w": 18,
+    "h": 18,
+    "head": "<svg class=\"type-external\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24"
+   }
+  ],
+  "reveals": [
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 197
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 250
+   },
+   {
+    "kind": "text",
+    "op": "1",
+    "y": 551
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 1092
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 1165
+   },
+   {
+    "kind": "text",
+    "op": "0.32",
+    "y": 1275
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 1775
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 1826
+   },
+   {
+    "kind": "text",
+    "op": "0.37",
+    "y": 1936
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 2510
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 2561
+   },
+   {
+    "kind": "text",
+    "op": "0.3733",
+    "y": 2720
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 3415
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 3466
+   },
+   {
+    "kind": "text",
+    "op": "0.32",
+    "y": 3822
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 4253
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 4304
+   },
+   {
+    "kind": "text",
+    "op": "0.3767",
+    "y": 4462
+   },
+   {
+    "kind": "tag",
+    "op": "1",
+    "y": 5051
+   },
+   {
+    "kind": "heading",
+    "op": "1",
+    "y": 5102
+   },
+   {
+    "kind": "text",
+    "op": "0.44",
+    "y": 5212
+   }
+  ],
+  "sections": [
+   {
+    "cls": "hero-card ui-card ui-x-outer ui-px-sm",
+    "y": 49,
+    "h": 997
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --text-med",
+    "y": 1065,
+    "h": 664
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --media-te",
+    "y": 1748,
+    "h": 717
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --text-med",
+    "y": 2483,
+    "h": 839
+   },
+   {
+    "cls": "block-feature --large",
+    "y": 3340,
+    "h": 867
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --text-med",
+    "y": 4225,
+    "h": 779
+   },
+   {
+    "cls": "block-feature ui-x-outer ui-px-lg ui-py --media-te",
+    "y": 5023,
+    "h": 709
+   }
+  ],
+  "footerPhones": {
+   "display": "block",
+   "rect": {
+    "y": 6302,
+    "h": 286
+   }
+  },
+  "header": {
+   "y": 822,
+   "h": 50,
+   "pos": "fixed"
+  },
+  "errs": []
+ }
+}
