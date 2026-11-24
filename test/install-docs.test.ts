@@ -303,7 +303,7 @@ describe("install documentation", () => {
       "`build` (project/stubs/manifest/stack), `shortlist` (discovery/evidence/dossier), `atlas` (ingest/collector/search/components/states/evidence packs)",
     );
     expect(dev).toContain("47-method `Handlers` object");
-    expect(dev).toContain("`shortlist/` | ~1,020");
+    expect(dev).toContain("`shortlist/` | ~1,269");
     expect(dev).toContain(
       "The 41 historical `tool()` / `registerTool()` registrations",
     );

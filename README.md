@@ -22,7 +22,11 @@ sourced from the web's best award-winning websites.
   </picture>
 </p>
 
-<a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif?v=2" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="480"></a>
+<p align="center">
+  <a href="https://github.com/INSANE0777/Awwwards-mcp"><img src="assets/demo.gif?v=2" alt="awwwards-mcp in action: search results, design DNA, motion filmstrip, band map — real tool output" width="640"></a>
+</p>
+
+<p align="center"><sub>Search results → design DNA → motion filmstrip → band map, straight from the tools.</sub></p>
 
 Your agent searches in natural language ("dark 3D portfolio sites", "soft pastel
 e-commerce"), sees **real screenshots inline**, and pulls the **design DNA** of any
@@ -51,10 +55,20 @@ queries keep AND semantics: every token must hit the same site.
 |---|---|
 | [Setup](#setup) · [Browser-enabled install](#browser-enabled-install-side-by-side) · [Skills](#skills) | [Tools](#tools) · [Indexing](#indexing-recommended) · [Atlas](#atlas-experimental-opt-in) · [Limitations](#limitations) · [Contributing](#contributing) |
 
+## The loop at a glance
+
+| Discover | Study | Rebuild | Verify |
+|---|---|---|---|
+| `search_sites` · `get_collections` · `search_directory` | `get_site_details` · `analyze_page_structure` · `analyze_scroll_map` | `build_project` · `build_gsap_stub` · `build_motion_manifest` | `verify_build` · `verify_flow` · `audit_url` |
+
 ## Tools
 
+The 42 tools are grouped by job below. Every tool runs in the local server; the browser-backed ones need the optional Playwright install described in [Setup](#setup).
+
+### Discovery and design DNA
+
 | Tool | What it does |
-|------|--------------|
+|---|---|
 | `search_sites` | Search by color, tags, technology, award type or free-text query; e.g. `award: "soty"`, `award: "nominees"`, `award: "ecommerce"` (winners), or a technology alias like `technology: "nextjs"` which canonicalizes to the live slug. Multi-word queries match against the local FTS5 index and rank BM25 (title hits lead); zero results come with loose-match and taxonomy-tag hints. Default full results include each site's screenshot; use `responseMode: "compact"` for concise cards and inline previews of only the first two results on the requested page. |
 | `get_site_details` | Design DNA for one site: palette, technologies, elements, awards, description. Batch (`slugs`, up to 10) is compact enrichment for a shortlist — `compactSiteDetails` per slug (lists as counts, ≤500-char description, awards), cached/fetched/error status, no inline images. |
 | `compare_sites` | Compare 2–3 sites' design DNA and jury scores as text-only JSON. Uses cached details or fetches missing detail pages. |
@@ -69,14 +83,32 @@ queries keep AND semantics: every token must hit the same site.
 | `get_annual_categories` | Official Annual Awards categories (Site of the Year, Agency of the Year, …) with nominee counts from Awwwards' public read-only API. Nominee details hydrate on request. Personal, non-commercial inspiration use; media URLs are reference-only. |
 | `get_annual_nominees` | Nominees in one Annual Awards category, hydrated on demand at 1 request/second (default 10, max 20). Site summaries include `siteSlug` and `inLocalIndex` so agents can jump to `get_site_details` when the daily index has the site. |
 | `get_annual_nominee` | One Annual Awards nominee in full — site: date, description, designBy, country, images/videos; agency: location, avatar, award tag counts, featured projects. Accepts a UUID, a full `/api/annual/nominees/...` path, or category+slug; the slug form may hydrate up to 20 uncached nominees at 1 req/s (~20s worst case), so prefer an id when known. Media URLs are reference-only (`mediaNote: "reference-only"`); nothing is downloaded. |
+| `search_elements` | Search the element corpus (footer, hero, pricing, 404…) by free text: cached `source:"gallery"` records plus `source:"site"` records backfilled from new winners' own Elements sections; ranks BM25 over title/author/category. `category` (exact) and `stack` (case-insensitive substring, all terms AND) are applied across the whole cached corpus before the limit. It does **not** crawl the robots-disallowed `/elements/*` gallery. |
+| `get_element` | One element record: title, category, author, built-with stack, related elements and its media URL (image or video) pointing at awwwards' CDN. |
+| `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
+| `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds the baseline and reports the current listing count (no element backfill); later calls report the delta. Each winner first reported after the baseline poll is backfilled into the searchable element corpus from its site page when reachable; failed per-winner fetches are not retried. |
+| `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
+
+### Capture, structure and motion
+
+| Tool | What it does |
+|---|---|
 | `capture_live_site` | Optional: fresh full-page screenshot of any live URL. Waits for `load` + a settle window with a pre-scroll capped at 80 × 450px steps / 8 s (step- and time-capped so a growing page cannot stall it), so heavy sites work (`waitStrategy: "networkidle"` available). After the scroll it waits up to 10 s for a full-screen fixed preloader (≥90% viewport, z-index ≥100) to clear, so the site — not its loader — is captured; `waitForOverlay: false` skips that wait. Pass `viewport: "mobile"` for the 390×844 iPhone-class render (`"desktop"` 1440×900 default). On inner-scroller pages (`body` pinned, an inner container scrolls) it returns `mode: "anchors"` — six ordered viewport screenshots down that container as JSON `anchors[].scrollTop`/`file` paths, with no inline image and no top-level `file`; `scrollCapture: "viewport"` forces one explicit viewport shot instead. Document-scrolling pages keep the single full-page capture. Inline previews are capped at 2.5 MB of base64; `inline: false` keeps only the saved file. (needs [playwright](https://playwright.dev)). |
 | `analyze_page_structure` | Section band map of any page (live URL or local file:// build): tag, background, offset, height per band. Detects the real scroll container when the page pins `body` and scrolls an inner element (`overflow-y: auto/scroll`), reports it as `scrollRoot` (`tag#id.class`), and measures every band and landmark in that scroller's coordinates; the pre-scroll drives the same container. Adds a conservative `scrollMode` (always present: `document`/`element`/`virtual`/`canvas`); `virtualRoot` appears only with `virtual`, and `note` only with `canvas`. Virtual inference needs a wide wrapper taller than the viewport plus 100 px with no hidden, fixed/overlay or clipped ancestry; element and virtual modes carry no note. `canvas` needs one visible canvas covering at least 80% of the viewport after its own and ancestor inset/overflow clipping, and no taller supported layout. `virtualRoot` is a label, not a guaranteed selector or replay root, and a canvas note never claims the DOM is empty; scroll-root identity for duplicated roots remains deferred (`SCROLL_ROOT_UNKNOWN` instead of a guess). Compare a reference site's structure against your build. Same heavy-site-friendly wait (`waitStrategy: "networkidle"` available); `viewport: "mobile"` analyzes the phone-class layout (`"desktop"` default). `compare: "mobile"` adds a second 390×844 capture and returns `mobileBands` + `diff: {heightDelta, bandsAdded, bandsRemoved, reordered}` (label-matched); if the mobile capture fails you still get the desktop result plus `mobileError`. Without `compare`, no second capture runs; `scrollMode` is always present on current records, `virtualRoot` and `note` appear only in their modes, and all three are absent from legacy records. `cdpEndpoint` instead attaches to a browser you started (loopback only, requires `AWWWARDS_MCP_ATTACH=1`) and scans the already-open matching page — it never navigates, scrolls, clicks or creates tabs, and disconnects without closing yours. (needs [playwright](https://playwright.dev)). |
 | `record_site_motion` | Optional: short motion-through video of a live URL — preloader, scroll-triggered and hover/cursor animations. Returns an inline filmstrip JPEG plus the saved .webm path. `viewport: "mobile"` records at phone size — the filmstrip renders at the selected viewport, no pillarboxing (`"desktop"` default). Every recording also produces a **Motion Evidence Sheet** (`sheet.html` + `motion-sheet.md`): census-directed keyframes, consecutive-frame diff masks, an onion-skin composite, a cursor-trail overlay and a phase timeline — motion video turned into a document a model can actually read. Degrades gracefully: recording never fails because the sheet does. (needs [playwright](https://playwright.dev) + ffmpeg-static). |
-| `search_elements` | Search the element corpus (footer, hero, pricing, 404…) by free text: cached `source:"gallery"` records plus `source:"site"` records backfilled from new winners' own Elements sections; ranks BM25 over title/author/category. `category` (exact) and `stack` (case-insensitive substring, all terms AND) are applied across the whole cached corpus before the limit. It does **not** crawl the robots-disallowed `/elements/*` gallery. |
-| `get_element` | One element record: title, category, author, built-with stack, related elements and its media URL (image or video) pointing at awwwards' CDN. |
 | `get_motion_dna` | Runtime motion fingerprint of a live URL: animation libraries, render engines, ScrollTrigger stats (trigger count, scrub ratio), tween easing/duration vocab and the scroll model. Fresh capture or cached capture with timestamp. |
 | `analyze_scroll_map` | Per-element scroll-motion census of any URL: selector path, trigger source (gsap-scrolltrigger / native css scroll & view timelines / data-attr / css-keyframe / SMIL), animated props, duration, easing, scrub/pin flags and SVG stroke draw-ins — the rebuild recipe an agent can wire straight into GSAP timelines. Optional `scrubProbe` re-drives the page through ≤8 scroll steps and samples each scrubbed trigger's real progress curve (`scrubCurves`); every payload ends with a `choreography` block — `hints[]` (selector/value/source) and `groups` read from `gsapTriggers` tween vars and stepped sibling `delayMs`. (needs [playwright](https://playwright.dev)). |
 | `analyze_hover_census` | Hover-interaction census: extracts `:hover` rules from stylesheets, then samples up to 20 interactive elements before/after hover — transform/color/filter diffs plus transition timing (ms + easing). The hover recipe for rebuilds, no video required. (needs [playwright](https://playwright.dev)). |
+| `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000, optional `maxDepth` where values above 12 can exceed Code Mode's depth cap and 12 keeps a capped pack safe), fonts, colors and element animations — for pixel-informed rebuilds. Adds `typography` usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each, `sampled` node count) and a deduped `paletteSummary` (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). `compact: true` trades detail for tokens: each node keeps only `{tag, classes, rect}` (styles, text, svg, pseudo styles and anims are dropped) plus top-level `fonts`/`colors`; the `typography`/`paletteSummary` summaries are full-mode only. Runs on any URL. (needs [playwright](https://playwright.dev)). |
+| `export_design_tokens` | Deterministic design-token export from one computed-style capture: colors, typography, spacing, radii, shadows and borders as ordinal CSS variables (`--color-1`, `--space-1`, …) plus a Tailwind theme map. `selector` defaults to `body`, `maxNodes` to 800 (50–2000); `include` filters categories. Names are ordinals — never semantic guesses — values are deduped, frequency-ranked and capped; a category cap or node truncation sets `truncated` and names the reason in `notes`, and the CSS contains no URLs. Runs on any URL. (needs [playwright](https://playwright.dev)). |
+| `analyze_images` | Image-delivery **evidence** for a live page: totals by format, `loading` split (lazy/eager/missing), `srcset`/`sizes` coverage, intrinsic vs rendered dimensions (oversized, tiny, zero-rect), broken images and alt coverage; up to 20 issue samples with origin+pathname only (query/hash stripped, data URIs reduced to `data:<mime>`). The page loads its own assets — no tool-initiated fetches, no downloads. `maxImages` defaults to 200 (max 500); `truncated` when the pre-cap total is larger. Not a WCAG grade. (needs [playwright](https://playwright.dev)). |
+| `capture_pose_3d` | Hero canvas reference frames → `pose-grid-v1`; runs on any URL. Samples the page's largest canvas at up to 10 scroll steps with per-step scroll ratios (`viewport: "mobile"` supported). Frame evidence only — camera transforms are not recovered. (needs [playwright](https://playwright.dev)). |
+| `capture_scene_3d` | Two strict ops. `op:"capture"` writes a `scene-evidence-v1` pack for a WebGL/canvas page (opt-in `emit:"dossier"` writes a `scene-evidence-v2` dossier instead; see [3D rebuild dossier](#3d-rebuild-dossier-opt-in-122)): up to 10 checkpoints (dossier: 2–24 stops via `samplePoints`, or 2–10 via checkpoints; scroll ratio + optional normalized pointer + settle wait), each saving a viewport screenshot and a clipped canvas screenshot (the chosen canvas gets a per-run random marker; duplicate or pre-marked decoys are refused) with requested/actual scroll, scroll range, canvas CSS rect/backing size/DPR and elapsed ms plus a post-screenshot `stable`/`stabilityReason` flag; plus passive framework hints and a redacted inventory of up to 200 of the page's own responses (origin+pathname only, MIME, Content-Length when declared, resource type, texture/model/HDR/shader/script/font/image classification, plus an `assetId` and download status per row). The internal download URL is stored only when the observed URL has no query, fragment or credentials; every other row carries a skip reason. Without adapters, no hooks and no `getContext` are used during capture; the spector adapter injects its own WebGL bundle before load. `op:"download_assets"` fetches up to 32 `assetId`s from one `captureId`: `rights.basis` (`owned`/`licensed`/`permission`) and `rights.evidence` are mandatory because downloading is a licensing decision, are recorded with a timestamp in `provenance.json`, and are not verified by the server. Originals are written to `<cache>/scene-captures/<captureId>/assets` with SHA-256 and an extension validated from MIME/magic (unknown types are skipped unless `allowUnknown` saves them as `.bin`). Caps: 16 MiB/file, 64 MiB/run, 5 manual redirects, 1 request/second, 15s body deadline, 120s overall; every hop is DNS-validated and loopback/private/metadata/reserved addresses are refused. It never crawls, never guesses model or source-map URLs and never uses credentials. **Honest scope:** passive capture (no adapter) recovers no scene graph, camera, controls, shader source or geometry — frames show rendered output only. Two experimental opt-in adapters extend the pack: `adapters:["three"]` adds a bounded `evidence.three` summary from reachable globals (see [Opt-in Three adapter](#opt-in-three-adapter)), and `adapters:["spector"]` captures one WebGL frame into a bounded `evidence.spector` summary with command names/counts, context attributes and capped shader source (see [Opt-in Spector adapter](#opt-in-spector-adapter)). Neither adapter crawls the heap; a requested adapter that finds nothing leaves its capabilities unknown, not available. Capture evidence is written to `<captureId>/evidence.json` + PNG frames (metadata ≤2 MiB, 8 MiB per image, 32 MiB total); responses are compact JSON with paths, hashes, counts, coverage and limitations, never inline bodies. (capture needs [playwright](https://playwright.dev)). |
+
+### Build, audit and verify
+
+| Tool | What it does |
+|---|---|
 | `analyze_bundle` | Bundle forensics for a live page: fetches the page once, downloads its script chunks (script tags, inline scripts, and modulepreload/preload-as-script hints; bounded: ≤40 chunks / 10MB / 1 request/second), saves + hashes them locally, optionally de-obfuscates with webcrack if installed, and greps keywords across the code — chunk paths + match lines so an agent can read the actual animation mechanism instead of guessing. Optional `edges` adds the static import graph over the captured chunks (import/reexport declarations up to 8 KB each). Needs no browser. |
 | `analyze_network_capture` | Offline API-surface evidence from a local HAR 1.2 file (a browser DevTools export): requests grouped by method + origin + path template (dates, versions, UUIDs, hex ids and numbers templated; emails, tokens and long high-entropy segments redacted), with counts, statuses, content types and query names only. Reads the file only - never fetches recorded URLs and never returns bodies, headers or query values. 20 MB / 2000-entry caps; `evidenceCoverage` discloses what was excluded. No network. |
 | `audit_url` | Runtime + static performance **evidence** for any live URL — never a grade. Runtime: installed Chrome/Edge over raw CDP (no playwright) measures fps, dropped frames, long tasks/animations and layout thrash (`perf: {error}` when no browser exists). Static: fetches the page HTML + up to 8 same-origin CSS/JS assets (≤2MB each, one shared 1 req/s limiter, 10s default timeouts), resolving refs against the final post-redirect page URL; asset redirects leaving that origin are rejected. Scans them for animation anti-patterns and returns severity-sorted findings (`count`, `worst`, ≤50 `findings`, `coverage: {assetsScanned, failed}`) so `worst` is always included. Each half degrades independently. Personal, non-commercial use; audit only URLs you are authorised to inspect. |
@@ -84,24 +116,16 @@ queries keep AND semantics: every token must hit the same site.
 | `build_project` | Convert a single-file exact rebuild (any local `.html`, e.g. the rebuild flow's `full-page-exact.html`) into a runnable **Vite**, **Astro** or **Next.js** project: sections become components, CSS splits per section, gsap timelines re-wire in the framework idiom (`useEffect` + `gsap.context` on Next), assets carried. The Next rehost/layout preserves the opening `html` `lang`/`dir`/`class`/`id`/`style`/`data-*` and `body` `lang`/`dir`/`class`/`id`/`style`/`data-*`/`aria-*` attributes (converted to JSX `className`/style objects), while inline `on*` handlers and arbitrary attributes are not copied; an absent `lang` keeps the `en` fallback. An entity `&#13;` reads as LF without JavaScript and is restored by a one-line inline script (first head child for `html`, first body child for `body`), while a literal CR/CRLF is newline-normalized like the browser. Conditional `<style media>` fidelity is not part of this release. Reads a local file and writes the project dir. One of two local-write tools: `build_project` writes the generated project, and `shortlist_references` writes its dossier to `outDir`. |
 | `verify_build` | Score a build against a reference site: band-map compare (Dice score) + motion-fingerprint diff (trigger mix, scrub/pin, easing vocabulary, native scroll timelines) → 0–100 score, pass/warn/fail verdict and evidence lines. `bands` carries one aggregate score plus `matched`/`refOnly`/`buildOnly` labels and a `diagnostics` row per band (reference/build index, match reason, relative-order flag, height delta, background change) — there are no per-band scores. The design-loop gate: build → verify the aggregate band score → fix → re-verify. Optional `domDiff` adds a body-subtree structural diff (missing/extra/reordered/rect drift) between reference and build. Optional `scene3d` adds a separate, opt-in 3D gate that preflights both URLs through one shared DNS/private-IP guard before any legacy scan (a private or loopback URL is refused with no requests, and the legacy acquisitions run behind the same proxy), then replays a `capture_scene_3d` pack on the build canvas and returns its own status/verdict; the legacy verdict never certifies a canvas (see [Opt-in 3D verify gate](#opt-in-3d-verify-gate-stable)). (needs [playwright](https://playwright.dev)). |
 | `verify_flow` | Step-aligned interaction-flow comparison: runs the same 1–6 scroll/click/wait steps on a build and a reference URL (two fresh headless launches, desktop or mobile) and compares path, scroll delta, skeleton hash, text hash and element count after each step. `same` only when both sides are complete and untruncated — truncated or failed states are `unknown`. No screenshots; a click can still trigger client-side mutations. (needs [playwright](https://playwright.dev)). |
-| `capture_component` | Optional: serialize one page component (CSS selector, default `header`) into a portable `component-pack-v1` JSON pack — bounded DOM tree with computed-style tokens (44 keys incl. layout offsets + `::before`/::after pseudo styles, `maxNodes` up to 2000, optional `maxDepth` where values above 12 can exceed Code Mode's depth cap and 12 keeps a capped pack safe), fonts, colors and element animations — for pixel-informed rebuilds. Adds `typography` usage summaries (families/sizes/weights/line-heights/letter-spacings, top 12 each, `sampled` node count) and a deduped `paletteSummary` (colour counts from node styles + pack colors, transparent/rgba(0,0,0,0)/none filtered, top 24). `compact: true` trades detail for tokens: each node keeps only `{tag, classes, rect}` (styles, text, svg, pseudo styles and anims are dropped) plus top-level `fonts`/`colors`; the `typography`/`paletteSummary` summaries are full-mode only. Runs on any URL. (needs [playwright](https://playwright.dev)). |
-| `export_design_tokens` | Deterministic design-token export from one computed-style capture: colors, typography, spacing, radii, shadows and borders as ordinal CSS variables (`--color-1`, `--space-1`, …) plus a Tailwind theme map. `selector` defaults to `body`, `maxNodes` to 800 (50–2000); `include` filters categories. Names are ordinals — never semantic guesses — values are deduped, frequency-ranked and capped; a category cap or node truncation sets `truncated` and names the reason in `notes`, and the CSS contains no URLs. Runs on any URL. (needs [playwright](https://playwright.dev)). |
-| `analyze_images` | Image-delivery **evidence** for a live page: totals by format, `loading` split (lazy/eager/missing), `srcset`/`sizes` coverage, intrinsic vs rendered dimensions (oversized, tiny, zero-rect), broken images and alt coverage; up to 20 issue samples with origin+pathname only (query/hash stripped, data URIs reduced to `data:<mime>`). The page loads its own assets — no tool-initiated fetches, no downloads. `maxImages` defaults to 200 (max 500); `truncated` when the pre-cap total is larger. Not a WCAG grade. (needs [playwright](https://playwright.dev)). |
-| `capture_pose_3d` | Hero canvas reference frames → `pose-grid-v1`; runs on any URL. Samples the page's largest canvas at up to 10 scroll steps with per-step scroll ratios (`viewport: "mobile"` supported). Frame evidence only — camera transforms are not recovered. (needs [playwright](https://playwright.dev)). |
-| `capture_scene_3d` | Two strict ops. `op:"capture"` writes a `scene-evidence-v1` pack for a WebGL/canvas page (opt-in `emit:"dossier"` writes a `scene-evidence-v2` dossier instead; see [3D rebuild dossier](#3d-rebuild-dossier-opt-in-122)): up to 10 checkpoints (dossier: 2–24 stops via `samplePoints`, or 2–10 via checkpoints; scroll ratio + optional normalized pointer + settle wait), each saving a viewport screenshot and a clipped canvas screenshot (the chosen canvas gets a per-run random marker; duplicate or pre-marked decoys are refused) with requested/actual scroll, scroll range, canvas CSS rect/backing size/DPR and elapsed ms plus a post-screenshot `stable`/`stabilityReason` flag; plus passive framework hints and a redacted inventory of up to 200 of the page's own responses (origin+pathname only, MIME, Content-Length when declared, resource type, texture/model/HDR/shader/script/font/image classification, plus an `assetId` and download status per row). The internal download URL is stored only when the observed URL has no query, fragment or credentials; every other row carries a skip reason. Without adapters, no hooks and no `getContext` are used during capture; the spector adapter injects its own WebGL bundle before load. `op:"download_assets"` fetches up to 32 `assetId`s from one `captureId`: `rights.basis` (`owned`/`licensed`/`permission`) and `rights.evidence` are mandatory because downloading is a licensing decision, are recorded with a timestamp in `provenance.json`, and are not verified by the server. Originals are written to `<cache>/scene-captures/<captureId>/assets` with SHA-256 and an extension validated from MIME/magic (unknown types are skipped unless `allowUnknown` saves them as `.bin`). Caps: 16 MiB/file, 64 MiB/run, 5 manual redirects, 1 request/second, 15s body deadline, 120s overall; every hop is DNS-validated and loopback/private/metadata/reserved addresses are refused. It never crawls, never guesses model or source-map URLs and never uses credentials. **Honest scope:** passive capture (no adapter) recovers no scene graph, camera, controls, shader source or geometry — frames show rendered output only. Two experimental opt-in adapters extend the pack: `adapters:["three"]` adds a bounded `evidence.three` summary from reachable globals (see [Opt-in Three adapter](#opt-in-three-adapter)), and `adapters:["spector"]` captures one WebGL frame into a bounded `evidence.spector` summary with command names/counts, context attributes and capped shader source (see [Opt-in Spector adapter](#opt-in-spector-adapter)). Neither adapter crawls the heap; a requested adapter that finds nothing leaves its capabilities unknown, not available. Capture evidence is written to `<captureId>/evidence.json` + PNG frames (metadata ≤2 MiB, 8 MiB per image, 32 MiB total); responses are compact JSON with paths, hashes, counts, coverage and limitations, never inline bodies. (capture needs [playwright](https://playwright.dev)). |
 | `build_pose_stub` | Pose grid → offline three.js+GSAP replay skeleton. Renders a `pose-grid-v1` grid as a standalone scroll-scrubbed stub page: frames preloaded inline (same-index loads are deduped and stale decodes discarded), a synthesized camera path interpolated between snapshot scroll ratios (guidance, not recovered camera data), reduced-motion static fallback; optional `analyze_scroll_map` census adds st/pin/ease suggestions. Pure build — no page fetches. |
 | `analyze_stack` | Fingerprint any page's stack from one polite HTML fetch (no browser): framework (Next.js/Astro/Nuxt/Remix/SvelteKit/WordPress/Webflow/Framer), CSS framework (Tailwind/Bootstrap) with marker lists and honest confidence, plus a `stack-fingerprint-v1` payload. |
 | `build_gsap_stub` | Captured motion evidence → runnable single-file GSAP+ScrollTrigger stub: one timeline per scroll-census anim (trigger, `start: "top 80%"`, scrub/pin, census duration, cubic-bezier easing normalized to the nearest GSAP token), plus an optional scroll-driven camera module from pose-grid anchors (synthesized dolly-in over the page's three.js canvas). Always-on `prefers-reduced-motion` guard; requires the full census shape (`anims[]` + `gsapTriggers[]`) - empty arrays still build a valid no-anim page, but a compact census is rejected. Pure build from provided JSON - no page fetches. |
 | `build_motion_manifest` | Build a `motion.manifest.json` scaffold from measured evidence: an `analyze_page_structure` result (`bands`) + an `analyze_scroll_map` census, with optional `sections: [{label, selector?}]` overrides. Sections map best-effort from each band's tag plus the first `#id`/`.class` token in its label (or the override selector); no markup is available, so DOM initial-state hints are empty while census triggers still attribute by those tokens. Returns `{manifest, measured: false, censusAnims, warnings, note}` (`manifest.measured` stays false when the census has no anims/triggers/curves); never throws (`{error}` on invalid input). Pure/offline — no page fetches. |
 | `build_scene_stub` | Offline Vite + Three.js scaffold from a `capture_scene_3d` pack (full profile only). Reads one `scene-evidence-v1` file (regular file ≤2 MiB, inside `scene-captures` or an exported pack with top-level `"exported": true`) and up to 32 `assetBindings` (`resourceId` → a local file you already hold: regular, non-symlink, ≤64 MiB, glb/gltf/bin/png/jpg/jpeg/webp/ktx2/hdr/exr; traversal and duplicate ids rejected). Returns `files[{path,content}]` — `package.json` with pinned `three` 0.160.0 + vite and dev/build/preview scripts, `index.html`, `src/main.js` (resize, reduced-motion static render, `GLTFLoader` for a bound model, texture loading, adapter meshes for supported Box/Plane/Sphere/Cylinder geometry with standard/basic materials, a labelled placeholder plane when no model or supported mesh exists, pagehide disposal, load-failure message), `scene.json` (bindings + frame basenames extracted from Windows or POSIX paths) and a provenance README — plus `assetCopies` to `public/assets/<assetId>.<ext>`, `unresolved`, `authoredDefaults` and `mode` (`reconstructed-subset` with a glb/gltf model or at least one supported adapter mesh, else `placeholder`). Adapter packs rebuild only the supported subset: primitive geometry, standard/basic materials and a validated perspective camera from its exact matrix (static, no idle orbit); captured controls are never recreated and are listed in `unresolved`. Unsupported geometry, materials and cameras plus missing dimensions are also listed, captured lights are recorded but not applied, and shader source/`userData` are never used. Deterministic and offline: no fetch, install, directory write or captured-code execution; copy the assets and run `npm install && npm run build` yourself. |
-| `search_motion` | Search previously captured motion-DNA scans by library, scroll model or easing vocabulary — find references by how a site moves. |
-| `new_winners` | Poll today's freshly-crowned winners (SOTD / Developer Award / Honorable Mention) against a persisted baseline. First call seeds the baseline and reports the current listing count (no element backfill); later calls report the delta. Each winner first reported after the baseline poll is backfilled into the searchable element corpus from its site page when reachable; failed per-winner fetches are not retried. |
-| `watch_site` | Persistent watches over studios, tags or specific sites (add/list/remove). `list` matches each watch against the freshest cached listing and reports per-watch `NEW since last check` deltas — it never fetches; `new_winners`/`search_sites` keep the pool fresh. |
 
 ### Routing
 
 | You want | Use |
-|----------|-----|
+|---|---|
 | Sites matching filters or free text | `search_sites` — the site index with filters. |
 | Curated inspiration boards | `get_collections` — curated moodboards, not a search index. |
 | Agencies, studios or freelancers | `search_directory` — agencies/studios, not sites. |
@@ -231,13 +255,17 @@ capture or dossier assembly downloads no asset body.
 
 1.22 scope: the dossier is opt-in on `capture_scene_3d` only.
 `emit:"dossier"`, `dossier.md` and `evidence-v2.json` are produced by that
-capture path alone. `build_scene_stub`, `build_motion` `kind:"scene_stub"`, and
-`capture_page` `kind:"scene"` still accept and return `scene-evidence-v1` on
-that surface. `verify_build.scene3d` replays a scene-evidence-v2 dossier's 2–24
-stops 1:1; keyframes are parity-checked metadata, camera/transforms are not
-replayed, and its classification/blind spots pass through, but a pixel verdict
-never certifies the classification. Static replay and a `build_project` replay
-are not in 1.22: the dossier does not turn a capture into a runnable scene.
+capture path alone. `build_scene_stub` and `build_motion` `kind:"scene_stub"`
+still accept and return `scene-evidence-v1`, and the `capture_page`
+`kind:"scene"` **capture** branch emits v1 only (`emit:"dossier"` is available
+on `capture_scene_3d`). Its `op:"download_assets"` branch is not v1-only: it
+reads both `scene-evidence-v1` and `scene-evidence-v2` inventories, so dossier
+assets stay metadata until a later rights-backed download. `verify_build.scene3d`
+accepts both pack versions: it replays a `scene-evidence-v2` pack's 2–24 stops
+1:1; keyframes are parity-checked metadata, camera/transforms are not replayed,
+and its classification/blind spots pass through, but a pixel verdict never
+certifies the classification. Static replay and a `build_project` replay are not
+in 1.22: the dossier does not turn a capture into a runnable scene.
 
 Honest caveats: `window.__pwClock` (also `globalThis.__pwClock`) is
 page-tamperable, so a virtual clock is determinism metadata, not proof that the
@@ -676,8 +704,10 @@ args = ["-y", "awwwards-mcp"]
 
 #### Claude Desktop, Cursor, Windsurf, Gemini CLI, Cline, Continue
 
-Anything reading the common `mcpServers` JSON shape works (e.g.
-`~/.claude/claude_desktop_config.json` or `~/.gemini/settings.json`):
+Anything reading the common `mcpServers` JSON shape works. Claude Desktop's
+file is `~/Library/Application Support/Claude/claude_desktop_config.json` on
+macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows; Gemini CLI
+uses `~/.gemini/settings.json`:
 
 ```json
 {
@@ -1016,7 +1046,21 @@ Atlas is a local, section-level evidence layer over the existing SQLite cache.
 It is off by default and enabled with one flag, read once at startup:
 
 ```bash
-AWWWARDS_MCP_ATLAS=1
+export AWWWARDS_MCP_ATLAS=1
+```
+
+Or put the flag in the MCP client's server environment:
+
+```json
+{
+  "mcpServers": {
+    "awwwards": {
+      "command": "npx",
+      "args": ["-y", "awwwards-mcp"],
+      "env": { "AWWWARDS_MCP_ATLAS": "1" }
+    }
+  }
+}
 ```
 
 | Profile | Flag off | Flag on |
@@ -1197,8 +1241,9 @@ the shipped `awwwards-inspiration` skill; the last three are study or rehost
 artifacts. Each build exercised a different corner of the loop — and every
 correction the loop caught on the way became doctrine in the skill.
 
-> **Built in one shot, by a model that can't watch video.** All three sites
-> were built in a single prompt run on **GLM 5.3-flash** — which does not
+> **Built in one shot, by a model that can't watch video.** Fallow Press,
+> Cerebrium and The Meridian were each built in a single prompt run on
+> **GLM 5.3-flash** — which does not
 > support video input. The loop's motion study worked entirely from
 > frame-tiled filmstrips (ffmpeg, 1–2 fps per element) instead of watching
 > the recordings. With a video-native model, those same `get_site_elements`
@@ -1209,7 +1254,9 @@ correction the loop caught on the way became doctrine in the skill.
 
 **Watch the whole loop run (1:50):**
 
-<video src="assets/demo-loop.mp4" controls muted playsinline></video>
+<p align="center">
+  <video src="assets/demo-loop.mp4" controls muted playsinline width="720"></video>
+</p>
 
 *Screen recording of the agent running the `awwwards-inspiration` loop end to
 end with the awwwards MCP tools — searching SOTD references with inline
@@ -1397,7 +1444,8 @@ becomes the new test fixture and the fastest merged PR. See
 ([scripts/parser-drift-probe.mjs](scripts/parser-drift-probe.mjs),
 `npm run drift`) checks every markup anchor the parsers depend on — the
 `split`/`indexOf`/regex literals in `src/parsers.ts` — against the live
-listing and detail pages (2 fetches, 1 request/second, same politeness as
+listing and detail pages (up to 7 fetches at 1 request/second: one listing,
+three pinned detail pages and up to three sampled details, same politeness as
 the client). A daily GitHub Action ([.github/workflows/parser-drift.yml](.github/workflows/parser-drift.yml))
 runs it and, on drift, opens/updates a single tracking issue with the exact
 anchors that changed (and auto-closes it when a later run is green). To run

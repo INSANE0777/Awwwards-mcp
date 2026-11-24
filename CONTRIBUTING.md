@@ -25,10 +25,11 @@ on Windows + Git Bash; CI runs Ubuntu 22.04/24.04, Windows and macOS).
 git clone https://github.com/INSANE0777/Awwwards-mcp.git
 cd Awwwards-mcp
 npm install
+npm run build   # protocol-catalog spawns dist/cli.js
 npm run typecheck   # tsc --noEmit
 npm test            # full suite, including Chromium regressions
-# Fast offline run without browser tests:
-npx vitest run --exclude "**/*.chromium.test.ts" --maxWorkers=2
+# Fast offline run without browser tests (build once first):
+npm run build && npx vitest run --exclude "**/*.chromium.test.ts" --maxWorkers=2
 ```
 
 Most tests run against **committed HTML fixtures** in `test/fixtures/` - you
@@ -106,6 +107,7 @@ Hard constraints the codebase enforces (keep them in new code):
 
    ```bash
    npm run typecheck
+   npm run build   # protocol-catalog spawns dist/cli.js
    npm test
    ```
 
@@ -147,9 +149,11 @@ Hard constraints the codebase enforces (keep them in new code):
 
 ### Docs-only PRs
 
-Docs PRs skip the test gates when no `src/`/`test/` file changed — CI still
-runs, it just won't find anything to break. Keep code blocks in README valid
-(embedded JSON is validated in review).
+**Docs PRs still run the full CI matrix.** Every pull request triggers
+`.github/workflows/ci.yml`; there is no changed-path condition, so no test gate
+is skipped. What changes for a docs-only PR is review scope: reviewers check the
+prose, embedded JSON and links instead of implementation. Keep code blocks in
+README valid (embedded JSON is validated in review).
 
 ## Reporting security issues
 
