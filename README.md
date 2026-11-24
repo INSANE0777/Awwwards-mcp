@@ -4,9 +4,16 @@ Free, open-source MCP server that gives AI agents design inspiration from
 [Awwwards](https://www.awwwards.com/) — the Mobbin-style visual reference loop,
 sourced from the web's best award-winning websites.
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b)](https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme) [![mcp.market](https://mcp.market/badge/insane0777-awwwards-mcp.svg)](https://mcp.market/server/insane0777-awwwards-mcp) [![Website](https://img.shields.io/badge/Website-awwwards--mcp.vercel.app-2ea44f)](https://awwwards-mcp.vercel.app) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa)](https://github.com/sponsors/INSANE0777)
+<p align="center">
+  <a href="https://m8ven.ai/mcp/insane0777-awwwards-mcp-1ll2az?s=readme"><img src="https://m8ven.ai/badge/mcp/insane0777-awwwards-mcp-1ll2az?v=2f46bb2a1c85764573ed2516bfbb1c9b" alt="M8ven Score"></a>
+  <a href="https://mcp.market/server/insane0777-awwwards-mcp"><img src="https://mcp.market/badge/insane0777-awwwards-mcp.svg" alt="mcp.market"></a>
+  <a href="https://awwwards-mcp.vercel.app"><img src="https://img.shields.io/badge/Website-awwwards--mcp.vercel.app-2ea44f" alt="Website"></a>
+  <a href="https://github.com/sponsors/INSANE0777"><img src="https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa" alt="Sponsor"></a>
+</p>
 
-Project site: **https://awwwards-mcp.vercel.app**
+<p align="center">
+  Project site: <a href="https://awwwards-mcp.vercel.app"><strong>awwwards-mcp.vercel.app</strong></a>
+</p>
 
 <p align="center">
   <picture>
@@ -37,6 +44,12 @@ Free-text queries run on a porter-stemmed, prefix-matching FTS5 index with BM25
 ranking — "magazines" now finds Magazine-tagged sites (68 on the live index),
 best matches first, where the old substring path returned zero. Multi-word
 queries keep AND semantics: every token must hit the same site.
+
+## Contents
+
+| Get started | Go deeper |
+|---|---|
+| [Setup](#setup) · [Browser-enabled install](#browser-enabled-install-side-by-side) · [Skills](#skills) | [Tools](#tools) · [Indexing](#indexing-recommended) · [Atlas](#atlas-experimental-opt-in) · [Limitations](#limitations) · [Contributing](#contributing) |
 
 ## Tools
 
@@ -120,11 +133,21 @@ input order, carry compact details only (no images), and report per-slug
 — page overflow, small text and small tap targets at 390×844 — evidence, not a
 score.
 
+### Design brief
+
+`create_design_brief` turns 2–5 shortlisted references into a cited direction:
+
+1. Search and shortlist references with `search_sites`.
+2. Call `create_design_brief` with the slugs and a required project goal.
+3. Use its Markdown direction and versioned JSON; set `includeStructure: true` only when optional browser-derived section-band evidence is needed.
+
+The response separates observed shared signals from one-site outliers, names evidence gaps, and never records motion automatically. Its Interaction Plan applies only evidence-backed cursor/hover, scroll, entrance/reveal, easing, and duration cues; empty fields mean the brief has no supporting evidence, not that an effect should be invented. It also carries a `prefers-reduced-motion`, content-access, and keyboard-access guardrail.
+
+### 3D rebuild dossier (opt-in, 1.22)
+
 Passive `capture_scene_3d` capture and `op:"download_assets"` are stable
 features. The `verify_build.scene3d` gate is stable and opt-in. The Three.js
 and Spector adapters remain experimental and opt-in.
-
-### 3D rebuild dossier (opt-in, 1.22)
 
 `capture_scene_3d` keeps writing a `scene-evidence-v1` pack by default. Setting
 `emit:"dossier"` on `op:"capture"` writes a `scene-evidence-v2` dossier instead:
@@ -474,14 +497,6 @@ scene/camera/geometry evidence, so it cannot attribute a mismatch; and there is
 no scaling, so the build must match the reference's DPR within 0.01, the same
 backing size and the same decoded frame dimensions.
 
-`create_design_brief` turns 2–5 shortlisted references into a cited direction:
-
-1. Search and shortlist references with `search_sites`.
-2. Call `create_design_brief` with the slugs and a required project goal.
-3. Use its Markdown direction and versioned JSON; set `includeStructure: true` only when optional browser-derived section-band evidence is needed.
-
-The response separates observed shared signals from one-site outliers, names evidence gaps, and never records motion automatically. Its Interaction Plan applies only evidence-backed cursor/hover, scroll, entrance/reveal, easing, and duration cues; empty fields mean the brief has no supporting evidence, not that an effect should be invented. It also carries a `prefers-reduced-motion`, content-access, and keyboard-access guardrail.
-
 ### Reference shortlist
 
 `shortlist_references` turns a rebuild brief and 1–6 criteria into a shortlist
@@ -584,7 +599,7 @@ captures, each stamped with the time it was taken.
 ## Setup
 
 **Local-first, no API key, no account.** Any MCP-compatible coding agent can use awwwards-mcp. The server runs locally, but it is not zero-egress at startup: the CLI may refresh the index and check npm for updates.
-Requires Node ≥ 22.13 (`node -v` to check). Pick your agent:
+Requires Node ≥ 22.13 (`node -v` to check).
 
 **Updates**: the server checks the npm registry once a day and prints an
 stderr notice when a newer `awwwards-mcp` exists (stdout stays clean for the
@@ -603,13 +618,19 @@ registry check is cached for 24 hours, and serving never waits on the check.
 > install hint instead of running. For those, use the
 > [global side-by-side install](#browser-enabled-install-side-by-side).
 
-**Claude Code**
+### Configure your agent
+
+Pick the entry that matches your client.
+
+#### Claude Code
 
 ```bash
 claude mcp add awwwards -- npx -y awwwards-mcp
 ```
 
-**Codex CLI** (ChatGPT desktop app and the IDE extension share this config)
+#### Codex CLI
+
+The ChatGPT desktop app and the IDE extension share this config.
 
 ```bash
 codex mcp add awwwards -- npx -y awwwards-mcp
@@ -623,7 +644,9 @@ command = "npx"
 args = ["-y", "awwwards-mcp"]
 ```
 
-**OpenCode** (`opencode.json` — note the command is an array)
+#### OpenCode
+
+`opencode.json` — note the command is an array.
 
 ```json
 {
@@ -637,7 +660,9 @@ args = ["-y", "awwwards-mcp"]
 }
 ```
 
-**ZCode** (`~/.zcode/cli/config.json` — note servers nest under `"mcp": { "servers": ... }`)
+#### ZCode
+
+`~/.zcode/cli/config.json` — note servers nest under `"mcp": { "servers": ... }`.
 
 ```json
 {
@@ -649,9 +674,10 @@ args = ["-y", "awwwards-mcp"]
 }
 ```
 
-**Claude Desktop / Cursor / Windsurf / Gemini CLI / Cline / Continue** — anything
-reading the common `mcpServers` JSON shape (e.g. `~/.claude/claude_desktop_config.json`
-or `~/.gemini/settings.json`):
+#### Claude Desktop, Cursor, Windsurf, Gemini CLI, Cline, Continue
+
+Anything reading the common `mcpServers` JSON shape works (e.g.
+`~/.claude/claude_desktop_config.json` or `~/.gemini/settings.json`):
 
 ```json
 {
@@ -661,12 +687,16 @@ or `~/.gemini/settings.json`):
 }
 ```
 
-**Anything else** — awwwards-mcp is a plain stdio MCP server: point your client
-at `npx -y awwwards-mcp` for the core tools. To pin a version, use
+#### Anything else
+
+awwwards-mcp is a plain stdio MCP server: point your client at
+`npx -y awwwards-mcp` for the core tools. To pin a version, use
 `npx -y awwwards-mcp@1.9.0`.
 
-**pi coding agent** has no built-in MCP by design — it uses skills and
-extensions instead. Two options:
+#### pi coding agent
+
+pi has no built-in MCP by design — it uses skills and extensions instead. Two
+options:
 
 1. Install the awwwards-inspiration skill (below). pi reads skills from
    `~/.pi/agent/skills/` or `~/.agents/skills/` (the latter is shared across
@@ -1161,11 +1191,11 @@ review awwwards.com's terms yourself.
 
 ## Built with awwwards-mcp: seven real sites
 
-Four complete sites were built through the full inspiration loop this MCP
-enables, using nothing but the server's tools plus the shipped
-`awwwards-inspiration` skill. Each one exercised a different corner of the
-loop — and every correction the loop caught on the way became doctrine in the
-skill.
+Seven sites are documented below. The first four were built through the full
+inspiration loop this MCP enables, using nothing but the server's tools plus
+the shipped `awwwards-inspiration` skill; the last three are study or rehost
+artifacts. Each build exercised a different corner of the loop — and every
+correction the loop caught on the way became doctrine in the skill.
 
 > **Built in one shot, by a model that can't watch video.** All three sites
 > were built in a single prompt run on **GLM 5.3-flash** — which does not
@@ -1259,25 +1289,18 @@ re-derived — geometry, motion, and copy come along exactly.
 The full build lives in the repo: [`showcase/neutomni/`](showcase/neutomni/) —
 open `index.html` directly, no server or build step needed.
 
-![NEUTOMNI rehost — loader band with the giant wordmark](assets/neutomni-rehost-loader.png)
-
-![NEUTOMNI rehost — nav, hero, and the pharmacy-type band](assets/neutomni-rehost-hero.png)
-
-![NEUTOMNI rehost — the statement section](assets/neutomni-rehost-statement.png)
-
-![NEUTOMNI rehost — the four red process panels](assets/neutomni-rehost-process.png)
-
-![NEUTOMNI rehost — Selected Work with the RSB tablet mockup](assets/neutomni-rehost-work.png)
-
-![NEUTOMNI rehost — focus statement on the blue gradient](assets/neutomni-rehost-focus.png)
-
-![NEUTOMNI rehost — pricing cards, Essentials to Enterprise](assets/neutomni-rehost-pricing.png)
-
-![NEUTOMNI rehost — desktop with the Pricing.html window](assets/neutomni-rehost-desktop-pricing.png)
-
-![NEUTOMNI rehost — Win-95 desktop with the pricing TV](assets/neutomni-rehost-desktop.png)
-
-![NEUTOMNI rehost — red footer with contact and wordmark](assets/neutomni-rehost-footer.png)
+| Screen | Preview |
+|---|---|
+| Loader band with the giant wordmark | ![NEUTOMNI rehost — loader band with the giant wordmark](assets/neutomni-rehost-loader.png) |
+| Nav, hero and the pharmacy-type band | ![NEUTOMNI rehost — nav, hero, and the pharmacy-type band](assets/neutomni-rehost-hero.png) |
+| Statement section | ![NEUTOMNI rehost — the statement section](assets/neutomni-rehost-statement.png) |
+| Four red process panels | ![NEUTOMNI rehost — the four red process panels](assets/neutomni-rehost-process.png) |
+| Selected Work with the RSB tablet mockup | ![NEUTOMNI rehost — Selected Work with the RSB tablet mockup](assets/neutomni-rehost-work.png) |
+| Focus statement on the blue gradient | ![NEUTOMNI rehost — focus statement on the blue gradient](assets/neutomni-rehost-focus.png) |
+| Pricing cards, Essentials to Enterprise | ![NEUTOMNI rehost — pricing cards, Essentials to Enterprise](assets/neutomni-rehost-pricing.png) |
+| Desktop with the Pricing.html window | ![NEUTOMNI rehost — desktop with the Pricing.html window](assets/neutomni-rehost-desktop-pricing.png) |
+| Win-95 desktop with the pricing TV | ![NEUTOMNI rehost — Win-95 desktop with the pricing TV](assets/neutomni-rehost-desktop.png) |
+| Red footer with contact and wordmark | ![NEUTOMNI rehost — red footer with contact and wordmark](assets/neutomni-rehost-footer.png) |
 
 **6. NEUTOMNI study recreation** ([`showcase/nio/`](showcase/nio/index.html)) — a hand-built recreation of neutomni.com reconstructed from MCP evidence (band map, component packs, scroll/hover censuses, motion DNA, pose capture) rather than rehosted markup: authored HTML/CSS/JS with GSAP + ScrollTrigger + Lenis, sourced fonts/images/audio vendored locally. Ships with the mandatory study-build disclaimer and a full provenance list in its own README — a private reference build, **not for publication**; replace the borrowed assets before any real use. This is the `recreate` skill's end-to-end artifact.
 
@@ -1397,9 +1420,9 @@ templates. Security problems go privately — see
 
 ```bash
 npm install
+npm run build   # compile to dist/ (protocol-catalog spawns dist/cli.js)
 npm test        # offline unit tests against committed HTML fixtures
 npm run smoke   # manual live smoke test against awwwards.com
-npm run build   # compile to dist/
 ```
 
 MIT — see [LICENSE](LICENSE).

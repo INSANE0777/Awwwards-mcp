@@ -19,7 +19,7 @@ everything you need, from fork to merged PR.
 ## Development setup
 
 Requires Node ≥ 22.13. Windows/macOS/Linux all work (the maintainer develops
-on Windows + Git Bash; CI runs ubuntu).
+on Windows + Git Bash; CI runs Ubuntu 22.04/24.04, Windows and macOS).
 
 ```bash
 git clone https://github.com/INSANE0777/Awwwards-mcp.git
