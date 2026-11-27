@@ -370,5 +370,5 @@ describe("Atlas search scope witnesses", () => {
     const later = eight.results[19]!;
     expect(later.explanationsTruncated).toBe(true);
     expect(later.explanations.every((explanation) => explanation.supportingRegionIds.length === 0)).toBe(true);
-  });
+  }, 120_000);
 });

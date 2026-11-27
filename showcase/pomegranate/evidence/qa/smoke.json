@@ -1,0 +1,53 @@
+{
+  "failed": [],
+  "errors": [],
+  "menu": {
+    "hidden": false,
+    "linkCount": 6,
+    "links": [
+      {
+        "t": "Features",
+        "h": 674
+      },
+      {
+        "t": "For You",
+        "h": 352
+      },
+      {
+        "t": "For Employers",
+        "h": 352
+      },
+      {
+        "t": "For Health Professionals",
+        "h": 352
+      },
+      {
+        "t": "For Investors",
+        "h": 309
+      },
+      {
+        "t": "Why Pomegranate",
+        "h": 352
+      }
+    ],
+    "expanded": "true"
+  },
+  "closed": true,
+  "assets": {
+    "rive": 6,
+    "canvases": 6,
+    "ready": 0,
+    "videos": [
+      {
+        "readyState": 4,
+        "paused": true,
+        "w": 850
+      },
+      {
+        "readyState": 4,
+        "paused": true,
+        "w": 850
+      }
+    ]
+  }
+}

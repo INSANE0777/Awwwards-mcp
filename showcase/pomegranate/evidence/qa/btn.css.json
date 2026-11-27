@@ -1,0 +1,71 @@
+{
+  "buttons": [
+    {
+      "tag": "BUTTON",
+      "cls": "ui-button --sm",
+      "w": 85,
+      "h": 33,
+      "lineHeight": "0px",
+      "fontSize": "32.2381px",
+      "padding": "1px 6px",
+      "display": "inline-flex",
+      "alignItems": "center",
+      "height": "84.6562px"
+    },
+    {
+      "tag": "A",
+      "cls": "ui-button --secondary --sm",
+      "w": 73,
+      "h": 15,
+      "lineHeight": "0px",
+      "fontSize": "32.2381px",
+      "padding": "0px",
+      "display": "inline-flex",
+      "alignItems": "center",
+      "height": "43.9688px"
+    }
+  ],
+  "contents": [
+    {
+      "tag": "SPAN",
+      "cls": "ui-button_content ui-center",
+      "w": 81,
+      "h": 32,
+      "lineHeight": "19.3428px",
+      "fontSize": "12.8952px",
+      "padding": "10.3162px 18.0533px",
+      "display": "flex",
+      "alignItems": "center",
+      "height": "82.6562px"
+    },
+    {
+      "tag": "SPAN",
+      "cls": "ui-button_content ui-center",
+      "w": 73,
+      "h": 15,
+      "lineHeight": "19.3428px",
+      "fontSize": "12.8952px",
+      "padding": "10.3162px 18.0533px",
+      "display": "flex",
+      "alignItems": "center",
+      "height": "43.9688px"
+    }
+  ],
+  "headerCss": {
+    "minHeight": "75.7595px",
+    "h": 76.453125
+  },
+  "footerLogo": {
+    "tag": "A",
+    "cls": "part-footer_logo",
+    "w": 484,
+    "h": 81,
+    "lineHeight": "normal",
+    "fontSize": "32.2381px",
+    "padding": "0px",
+    "display": "block",
+    "alignItems": "normal",
+    "height": "81.3438px"
+  },
+  "footerLogoParentAlign": "normal"
+}

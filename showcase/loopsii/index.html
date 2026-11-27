@@ -1,0 +1,724 @@
+<!doctype html>
+<!--
+  Private study recreation of https://loopsii.com/
+  Design, copy, images, fonts, audio and video belong to Loopsii and the original creators.
+  This build must not be deployed, published, sold or presented as your own work.
+  See README.md for the full provenance list.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopsii: the all-in-one app for freelancers — study recreation</title>
+<meta name="description" content="A private study recreation of the Loopsii landing page. Not affiliated with Loopsii.">
+<meta property="og:title" content="Loopsii — study recreation">
+<meta property="og:description" content="A private study recreation of loopsii.com. Design and copy belong to Loopsii.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/img/app-mock.png">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="assets/_astro/fonts/f1306f12b629075b.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/_astro/fonts/fd3499837a53ca88.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/motion.css">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","name":"Loopsii — study recreation","description":"Private study recreation of loopsii.com. Not affiliated with Loopsii.","isAccessibleForFree":true}
+</script>
+</head>
+<body>
+
+<div class="loader" id="loader" data-loader aria-hidden="true">
+  <div class="loader-sheet"></div>
+  <div class="loader-box">
+    <span class="loader-line loader-line-x loader-line-x--top"></span>
+    <span class="loader-line loader-line-x loader-line-x--bottom"></span>
+    <span class="loader-line loader-line-y loader-line-y--left"></span>
+    <span class="loader-line loader-line-y loader-line-y--right"></span>
+    <span class="loader-frame"></span>
+    <span class="loader-dot tl"></span><span class="loader-dot tr"></span><span class="loader-dot bl"></span><span class="loader-dot br"></span>
+  </div>
+  <div class="loader-counter"><span id="loaderCount">000</span> %</div>
+  <div class="loader-mark" id="loaderMark">
+    <div class="loader-left" id="loaderLeft"></div>
+    <div class="loader-right" id="loaderRight"></div>
+  </div>
+</div>
+
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="nav-logo" href="#" aria-label="Loopsii home"><img src="assets/icons/logo.svg" alt="Loopsii"></a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#why-loopsii">Why Loopsii</a>
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+    </nav>
+    <a class="btn btn--nav" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener" target="_blank" rel="noopener">
+      <span class="btn-arrow"><svg viewBox="0 0 11 11" aria-hidden="true"><path d="M6.82353 2.1L-0.00146866 8.946L1.57353 10.521L8.41953 3.654V9.24H10.5195V0H1.27953V2.1H6.82353Z" fill="currentColor"/></svg></span>
+      <span class="btn-label">Sign up for free</span>
+    </a>
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <div class="hero-top">
+      <h1 class="hero-heading">
+        <span class="sr-only">Loopsii, the all-in-one app for freelancers.</span>
+        <span aria-hidden="true">One app for</span>
+        <span class="hero-line" aria-hidden="true">your
+          <span class="hero-words" id="heroWords">
+            <span>invoices</span><span>time tracking</span><span>client calls</span><span>proposals</span>
+            <span>QA rounds</span><span>recordings</span><span>contracts</span><span>follow-ups</span>
+            <span>clients</span><span>deliverables</span><span>projects</span>
+          </span>
+        </span>
+      </h1>
+      <p class="hero-sub">The all-in-one app for freelancers. Like a personal manager, it keeps your clients, calls, tasks and hours connected.</p>
+    </div>
+    <div class="hero-bottom">
+      <div class="hero-stage">
+        <div class="hero-lines"><i></i><i></i></div>
+        <div class="hero-shapes" id="heroShapes" aria-hidden="true"></div>
+        <div class="hero-label tl"><i></i><span>Edits</span></div>
+        <div class="hero-label tr"><i></i><span>Time management</span></div>
+        <div class="hero-label br"><i></i><span>Communication</span></div>
+        <div class="hero-label bl"><i></i><span>Invoices</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INTRO -->
+  <section class="intro" id="intro">
+    <div class="intro-wrap">
+      <div class="intro-sticky" data-intro>
+        <div class="intro-head">
+          <p class="hand intro-label">What is Loopsii</p>
+          <h2>Loopsii helps freelance designers and developers manage their entire workflow in one app. There’s less to organize and more time to do the work.</h2>
+        </div>
+        <div class="intro-stage">
+          <div class="intro-logo-wrap">
+            <div class="intro-logo"><div class="intro-mark-lottie" id="introMarkLottie"></div></div>
+            <div class="orbit" aria-hidden="true">
+              <div class="orbit-item" style="--l:69;--t:-171;--w:133;--c:var(--steel);--r:0"><img src="assets/dashboard/icon-play.svg" alt=""></div>
+              <div class="orbit-item" style="--l:181;--t:-77;--w:140;--c:var(--lime-light);--r:0"><img src="assets/dashboard/icon-clock.svg" alt=""></div>
+              <div class="orbit-item" style="--l:248;--t:62;--w:110;--c:var(--apricot);--r:-38"><img src="assets/dashboard/icon-blocks.svg" alt=""></div>
+              <div class="orbit-item" style="--l:211;--t:203;--w:110;--c:var(--sky);--r:0"><img src="assets/highlights/icon-mic.svg" alt=""></div>
+              <div class="orbit-item" style="--l:60;--t:238;--w:119;--c:var(--sage);--r:-77"><img src="assets/dashboard/icon-users.svg" alt=""></div>
+              <div class="orbit-item" style="--l:-102;--t:188;--w:140;--c:var(--main);--r:0"><img src="assets/dashboard/icon-home.svg" alt=""></div>
+              <div class="orbit-item" style="--l:-142;--t:43;--w:110;--c:var(--apricot);--r:-38"><img src="assets/dashboard/icon-timer.svg" alt=""></div>
+              <div class="orbit-item" style="--l:-65;--t:-99;--w:110;--c:var(--sky);--r:0"><img src="assets/dashboard/icon-search.svg" alt=""></div>
+            </div>
+          </div>
+          <p class="intro-note">Every project follows a familiar loop. Loopsii keeps it moving, so you don’t have to think about what comes next.</p>
+        </div>
+        <div class="intro-overlay"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DISTRACTION -->
+  <section class="distraction" id="distraction">
+    <div class="distract-sticky">
+      <div class="distract-inner">
+        <div class="distract-photo" aria-hidden="true"></div>
+        <div class="distract-vignette" aria-hidden="true"></div>
+        <div class="distract-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <p class="distract-title a">Too many things pulling you away</p>
+        <p class="distract-title b">from the work that actually matters</p>
+        <div class="distract-tags" id="distractTags">
+          <span class="tag">Forgot to start the timer</span>
+          <span class="tag">Where's that file?</span>
+          <span class="tag">How long was that call?</span>
+          <span class="tag">Did I send that invoice?</span>
+          <span class="tag">What changed last round?</span>
+          <span class="tag">Following up. Again.</span>
+          <span class="tag">Is this profitable?</span>
+          <span class="tag">"Just one more change"</span>
+          <span class="tag">Where's that client task?</span>
+          <span class="tag">Chasing feedback</span>
+          <span class="tag">Did I log those hours?</span>
+        </div>
+        <span class="paren paren-l" aria-hidden="true">(</span>
+        <span class="paren paren-r" aria-hidden="true">)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- APP DEMO -->
+  <section class="appdemo" id="appdemo">
+    <div class="appdemo-pin">
+      <div class="pixel-bg" aria-hidden="true"></div>
+      <h2 class="appdemo-title">That's why Loopsii exists</h2>
+      <div class="appdemo-stage">
+        <div class="app-stack-bg" aria-hidden="true"><i class="s1"></i><i class="s2"></i><i class="s3"></i></div>
+        <div class="app-window" data-appwindow>
+          <aside class="app-side">
+            <div class="app-side-top"><img src="assets/dashboard/logo-mark.svg" alt=""></div>
+            <div class="app-side-icons">
+              <span><img src="assets/dashboard/icon-search.svg" alt=""></span>
+              <span><img src="assets/dashboard/icon-home.svg" alt=""></span>
+              <span><img src="assets/dashboard/icon-timer.svg" alt=""></span>
+              <span><img src="assets/dashboard/icon-blocks.svg" alt=""></span>
+              <span><img src="assets/dashboard/icon-users.svg" alt=""></span>
+              <span><img src="assets/dashboard/icon-play.svg" alt=""></span>
+            </div>
+            <div class="app-side-foot"><span>ST</span></div>
+          </aside>
+          <div class="app-main">
+            <div class="app-topbar">
+              <span class="app-crumb">Home</span>
+              <div class="app-top-actions">
+                <span class="app-timer"><img src="assets/dashboard/timer-circle.svg" alt=""> Start Timer</span>
+                <span class="app-new"><img src="assets/dashboard/icon-plus.svg" alt=""> New</span>
+              </div>
+            </div>
+            <h3 class="app-greeting">Winding down, Maya</h3>
+            <div class="app-row">
+              <div class="app-card">
+                <div class="app-card-head"><span>Time tracker</span><span>Project ⌄</span></div>
+                <div class="app-start"><span class="app-start-dot">▶</span> Start</div>
+              </div>
+              <div class="app-card">
+                <div class="app-card-head"><span>Upcoming meetings</span></div>
+                <div class="app-meeting"><b>26</b><span>Nov<br>Thu</span><div><p>Component workshop with Northwind</p><small>10:00 – 11:00</small></div></div>
+                <div class="app-meeting"><b></b><span></span><div><p>Weekly sync with Harbor &amp; Vale</p><small>15:30 – 16:00</small></div></div>
+              </div>
+              <div class="app-card">
+                <div class="app-card-head"><span>Total this month</span></div>
+                <div class="app-total"><b>73</b><span>activities</span></div>
+                <div class="app-heat" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              </div>
+            </div>
+            <h3 class="app-recent">Recent recordings</h3>
+            <div class="app-recs">
+              <div class="rec"><div class="rec-thumb dark"><span class="rec-title">Design system kickoff with Northwind</span><span class="rec-time">38 min</span><span class="rec-wave"></span></div><span class="rec-pill sky">Northwind design system</span><span class="rec-name">Design system kickoff with Northwi…</span><small>Nov 21, 2026 · 22:10 – 22:48</small></div>
+              <div class="rec"><div class="rec-thumb light"><span class="rec-light-title">Book a table</span><span class="rec-book">Available times</span><span class="rec-time">4 min</span></div><span class="rec-pill lime">Harbor &amp; Vale booking site</span><span class="rec-name">Booking flow walkthrough</span><small>Nov 20, 2026 · 16:10</small></div>
+              <div class="rec"><div class="rec-thumb dark"><span class="rec-title">Weekly sync with Harbor &amp; Vale</span><span class="rec-time">31 min</span><span class="rec-wave"></span></div><span class="rec-pill lime">Harbor &amp; Vale booking site</span><span class="rec-name">Weekly sync with Harbor &amp; Vale</span><small>Nov 19, 2026 · 15:30 – 16:01</small></div>
+              <div class="rec"><div class="rec-thumb brand"><span class="brand-circles"><i></i><i></i></span><span class="rec-time">2 min</span></div><span class="rec-pill steel">Pixelbrew brand refresh</span><span class="rec-name">Logo options, round two</span><small>Nov 18, 2026 · 12:40</small></div>
+            </div>
+            <h3 class="app-recent">Active projects</h3>
+            <div class="app-projects">
+              <div class="app-project"><span class="pdot lime"></span><span>Rebrand · Project 001</span><span class="pbar"><i style="width:62%"></i></span><b>62%</b></div>
+              <div class="app-project"><span class="pdot sky"></span><span>Landing · Project 002</span><span class="pbar"><i style="width:38%"></i></span><b>38%</b></div>
+              <div class="app-project"><span class="pdot sage"></span><span>App icons</span><span class="pbar"><i style="width:84%"></i></span><b>84%</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <a class="btn appdemo-cta" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener">
+        <span class="btn-arrow"><svg viewBox="0 0 11 11" aria-hidden="true"><path d="M6.82353 2.1L-0.00146866 8.946L1.57353 10.521L8.41953 3.654V9.24H10.5195V0H1.27953V2.1H6.82353Z" fill="currentColor"/></svg></span>
+        <span class="btn-label">Sign up for free</span>
+      </a>
+      <div class="mobile-dash"><img src="assets/img/app-mock.png" alt="Loopsii dashboard"></div>
+    </div>
+  </section>
+
+  <!-- STACK -->
+  <section class="stack" id="why-loopsii">
+    <div class="wrap">
+      <div class="stack-head">
+        <p class="hand">the copy-paste tax</p>
+        <h2>Your workflow shouldn’t cost this much</h2>
+      </div>
+    </div>
+    <div class="stack-grid" id="stackGrid">
+      <div class="stack-lines" aria-hidden="true"></div>
+      <div class="stack-app" style="grid-area:1/1" data-name="Notion" data-role="Docs & task lists" data-price="120" data-brands='[["Notion",120],["ClickUp",84],["Asana",132],["Trello",60]]' data-color="sage">
+        <span class="app-swatch"></span><div><p class="app-name">Notion</p><p class="app-role">Docs &amp; task lists</p></div><p class="app-price">$120/yr</p>
+      </div>
+      <div class="stack-app" style="grid-area:1/3" data-name="Loom" data-role="Screen recordings" data-price="180" data-brands='[["Loom",180],["Tella",156],["Claap",384]]' data-color="steel">
+        <span class="app-swatch"></span><div><p class="app-name">Loom</p><p class="app-role">Screen recordings</p></div><p class="app-price">$180/yr</p>
+      </div>
+      <div class="stack-app" style="grid-area:2/2" data-name="Bonsai" data-role="Invoices & contracts" data-price="228" data-brands='[["Bonsai",228],["HoneyBook",348],["FreshBooks",248],["Dubsado",360]]' data-color="main">
+        <span class="app-swatch"></span><div><p class="app-name">Bonsai</p><p class="app-role">Invoices &amp; contracts</p></div><p class="app-price">$228/yr</p>
+      </div>
+      <div class="stack-app" style="grid-area:2/4" data-name="Toggl Track" data-role="Time tracking" data-price="108" data-brands='[["Toggl Track",108],["Harvest",108],["Clockify",48]]' data-color="coral">
+        <span class="app-swatch"></span><div><p class="app-name">Toggl Track</p><p class="app-role">Time tracking</p></div><p class="app-price">$108/yr</p>
+      </div>
+      <div class="stack-app" style="grid-area:3/1" data-name="Wispr Flow" data-role="Voice dictation" data-price="144" data-brands='[["Wispr Flow",144],["Superwhisper",85],["Aqua Voice",120],["MacWhisper",60]]' data-color="sky">
+        <span class="app-swatch"></span><div><p class="app-name">Wispr Flow</p><p class="app-role">Voice dictation</p></div><p class="app-price">$144/yr</p>
+      </div>
+      <div class="stack-app" style="grid-area:3/3" data-name="Granola" data-role="AI meeting notes" data-price="168" data-brands='[["Granola",168],["Otter",100],["Fireflies",120],["tl;dv",216]]' data-color="apricot">
+        <span class="app-swatch"></span><div><p class="app-name">Granola</p><p class="app-role">AI meeting notes</p></div><p class="app-price">$168/yr</p>
+      </div>
+
+      <p class="stack-stat" style="grid-area:2/6"><span class="stat-num"><span>$</span><span data-total>948</span><span class="plus">+</span></span><span class="stat-label">a year</span></p>
+      <p class="stack-stat" style="grid-area:2/8"><span class="stat-num"><span data-logins>6</span><span class="plus">+</span></span><span class="stat-label">logins</span></p>
+      <div class="stack-sync" style="grid-area:3/7"><p>you keep<br>them<br>in sync</p><i class="dot tl"></i><i class="dot bl"></i><i class="dot tr"></i></div>
+
+      <div class="stack-side left" style="grid-area:5/1/9/3"><p>Your whole stack,<br>in one app</p></div>
+      <div class="stack-side right" style="grid-area:5/7/9/9"><p>Everything on it,<br>connected.</p></div>
+
+      <div class="stack-loop" style="grid-area:6/5" aria-hidden="true">
+        <div class="stack-mark"></div>
+        <div class="loop-ring"></div>
+        <div class="loop-hub">Client project</div>
+        <span class="loop-pill" style="--lx:0;--ly:-238">Call</span>
+        <span class="loop-pill" style="--lx:206;--ly:-119">Notes</span>
+        <span class="loop-pill" style="--lx:206;--ly:119">Tasks</span>
+        <span class="loop-pill" style="--lx:0;--ly:238">Hours</span>
+        <span class="loop-pill" style="--lx:-206;--ly:119">Invoice</span>
+        <span class="loop-pill" style="--lx:-206;--ly:-119">Recording</span>
+      </div>
+      <div class="stack-badge" style="grid-area:7/5"><img src="assets/favicon.svg" alt=""></div>
+      <span class="stack-stem" style="grid-area:8/5" aria-hidden="true"></span>
+      <div class="stack-hubcard" style="grid-area:8/4/9/6">
+        <p class="hub-name">Loopsii</p>
+        <p class="hub-role">All of the above</p>
+        <p class="hub-price"><span>$</span><span>120</span><span>/yr</span></p>
+      </div>
+    </div>
+    <div class="wrap">
+      <div class="stack-cta">
+        <h3>Move in without leaving anything behind</h3>
+        <div class="stack-cta-body">
+          <p>Bring your recordings, meeting notes, docs and hours with you — dates, projects and links intact. Import twice, get no duplicates.</p>
+          <a class="btn" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener">
+            <span class="btn-arrow"><svg viewBox="0 0 11 11" aria-hidden="true"><path d="M6.82353 2.1L-0.00146866 8.946L1.57353 10.521L8.41953 3.654V9.24H10.5195V0H1.27953V2.1H6.82353Z" fill="currentColor"/></svg></span>
+            <span class="btn-label">Try it free for 14 days</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HIGHLIGHTS -->
+  <section class="highlights">
+    <h2 class="hl-title">Everything around<br>your work, handled</h2>
+    <div class="hl-cards">
+
+      <article class="hl-card" style="--i:0">
+        <div class="hl-text">
+          <p class="hand hl-step">1<span>/6</span></p>
+          <h3>Know where your money stands</h3>
+          <p class="hl-desc">See what’s paid, invoiced, and still unbilled, and how close you are to your income goal.</p>
+          <ul class="hl-points"><li>Paid &amp; outstanding income</li><li>Income goals</li><li>Project profitability</li><li>Unbilled work</li></ul>
+        </div>
+        <div class="hl-media bg-steel">
+          <div class="viz viz-gauge">
+            <p class="viz-label">Month<br>income</p>
+            <svg viewBox="0 0 400 230" class="gauge-svg" aria-hidden="true">
+              <path d="M34 200 A166 166 0 0 1 366 200" fill="none" stroke="#e2e2e2" stroke-width="40"/>
+              <path class="gauge-seg" d="M34 200 A166 166 0 0 1 366 200" fill="none" stroke="#c4f041" stroke-width="40" pathLength="100" stroke-dasharray="0 100"/>
+              <path class="gauge-seg" d="M34 200 A166 166 0 0 1 366 200" fill="none" stroke="#9ec3d5" stroke-width="40" pathLength="100" stroke-dasharray="0 100"/>
+              <path class="gauge-seg" d="M34 200 A166 166 0 0 1 366 200" fill="none" stroke="#bce6fa" stroke-width="40" pathLength="100" stroke-dasharray="0 100"/>
+              <path class="gauge-seg" d="M34 200 A166 166 0 0 1 366 200" fill="none" stroke="#d2d2d2" stroke-width="40" pathLength="100" stroke-dasharray="0 100"/>
+            </svg>
+            <div class="gauge-center"><p><sup>$</sup>2,580</p><span>28% of $10,000 goal</span></div>
+            <div class="gauge-legend">
+              <span><i style="background:var(--main)"></i>Paid <b>$2.80k</b></span>
+              <span><i style="background:var(--steel)"></i>Invoiced <b>$0.00k</b></span>
+              <span><i style="background:var(--sky)"></i>Unbilled <b>$0.00k</b></span>
+              <span><i style="background:#d2d2d2"></i>In conv. <b>$0.00k</b></span>
+              <span><i style="background:#e2e2e2"></i>Gap <b>$7.42k</b></span>
+            </div>
+          </div>
+          <div class="hl-frame" aria-hidden="true"></div>
+        </div>
+      </article>
+
+      <article class="hl-card" style="--i:1">
+        <div class="hl-text">
+          <p class="hand hl-step">2<span>/6</span></p>
+          <h3>Keep clients in the loop</h3>
+          <p class="hl-desc">Give clients one place to follow progress, review deliverables, and share feedback.</p>
+          <ul class="hl-points"><li>Project progress</li><li>Deliverables &amp; files</li><li>Feedback &amp; approvals</li><li>Shared project updates</li></ul>
+        </div>
+        <div class="hl-media bg-main">
+          <div class="viz viz-board">
+            <p class="viz-label">Chapters</p>
+            <div class="board">
+              <div class="board-col"><p>Not Started</p><div class="board-card"><i></i><span>Urgent</span></div><div class="board-card"><i></i><span>Low</span></div></div>
+              <div class="board-col"><p>In Progress</p><div class="board-card"><i></i><span>Normal</span></div></div>
+              <div class="board-col"><p>Client Approval</p><div class="board-card"><i></i><span>Urgent</span></div><div class="board-card"><i></i><span>Medium</span></div></div>
+              <div class="board-col"><p>Done</p><div class="board-card"><i></i><span>Urgent</span></div></div>
+            </div>
+            <div class="board-drag"><i></i><span>Urgent</span><b><img src="assets/highlights/icon-message.svg" alt="">1</b></div>
+            <div class="cursor you" style="--cx:78%;--cy:88%"><img src="assets/highlights/cursor-hand.svg" alt=""><span>You</span></div>
+            <div class="cursor client" style="--cx:16%;--cy:66%"><img src="assets/highlights/cursor-arrow.svg" alt=""><span>Client</span></div>
+          </div>
+          <div class="hl-frame" aria-hidden="true"></div>
+        </div>
+      </article>
+
+      <article class="hl-card" style="--i:2">
+        <div class="hl-text">
+          <p class="hand hl-step">3<span>/6</span></p>
+          <h3>Know when you can take on more</h3>
+          <p class="hl-desc">See your projects and availability together, so you can spot overlaps and plan ahead.</p>
+          <ul class="hl-points"><li>Project schedules</li><li>Workload &amp; availability</li><li>Timeline overlaps</li><li>Future capacity</li></ul>
+        </div>
+        <div class="hl-media bg-coral">
+          <div class="viz viz-timeline">
+            <p class="viz-label">Projects<br>timeline</p>
+            <div class="timeline-free"><p>Free</p><p>≈ hrs / mo</p><p><span>60</span></p></div>
+            <p class="timeline-start">Can start <span>Sep 8</span></p>
+            <div class="timeline-grid">
+              <span class="tl-today"></span>
+              <span class="tl-hatch"></span>
+              <div class="tl-bar lime" style="--x:3%;--y:36%;--w:31%">Rebrand · Project 001 <i>✓</i></div>
+              <div class="tl-bar sky" style="--x:14%;--y:58%;--w:35%">Landing · Project 002 <i>✓</i></div>
+              <div class="tl-bar sage" style="--x:7%;--y:78%;--w:25%">App icons <i>✓</i></div>
+              <div class="tl-months"><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span></div>
+            </div>
+            <div class="cursor you" style="--cx:64%;--cy:82%"><img src="assets/highlights/cursor-hand.svg" alt=""><span>You</span></div>
+          </div>
+          <div class="hl-frame" aria-hidden="true"></div>
+        </div>
+      </article>
+
+      <article class="hl-card" style="--i:3">
+        <div class="hl-text">
+          <p class="hand hl-step">4<span>/6</span></p>
+          <h3>Make sure extra work gets counted</h3>
+          <p class="hl-desc">Capture change requests as they happen and know what’s included in scope, and what should be billed.</p>
+          <ul class="hl-points"><li>Change requests</li><li>Included vs billable work</li><li>Scope history</li><li>Extra work tracking</li></ul>
+        </div>
+        <div class="hl-media bg-sage">
+          <div class="viz viz-requests">
+            <p class="viz-label">Change<br>requests</p>
+            <div class="req-list">
+              <div class="req"><span class="req-icon"><img src="assets/highlights/icon-message.svg" alt=""></span><div><p>One more pass on the homepage?</p><small>via chat · Jul 1</small></div><b>included</b></div>
+              <div class="req"><span class="req-icon"><img src="assets/highlights/icon-pencil.svg" alt=""></span><div><p>Can we add a pricing page?</p><small>comment on Figma · Jul 2</small></div><b>billable · $180</b></div>
+              <div class="req"><span class="req-icon"><img src="assets/highlights/icon-mic.svg" alt=""></span><div><p>Also add a dark theme</p><small>caught on call · Jul 2 · play 12:04</small></div><b>billable · auto-logged</b></div>
+            </div>
+          </div>
+          <div class="hl-frame" aria-hidden="true"></div>
+        </div>
+      </article>
+
+      <article class="hl-card" style="--i:4">
+        <div class="hl-text">
+          <p class="hand hl-step">5<span>/6</span></p>
+          <h3>Put your AI to work</h3>
+          <p class="hl-desc">Connect Claude, Codex, or any AI agent to your workspace. Your meetings, tasks, and hours — readable by the tools you already think with.</p>
+          <ul class="hl-points"><li>Meetings &amp; transcripts</li><li>Tasks, time &amp; clients</li><li>MCP server</li><li>CLI for scripts &amp; agents</li></ul>
+        </div>
+        <div class="hl-media bg-apricot">
+          <div class="viz viz-agent">
+            <p class="viz-label">Claude ·<br>Connected to Loopsii</p>
+            <div class="agent-thread">
+              <div class="agent-user">What did we agree with Anna about the pricing page?</div>
+              <div class="agent-tools">
+                <span class="agent-tool"><img src="assets/highlights/icon-gear-search.svg" alt="">· loopsii <em>search</em></span>
+                <span class="agent-arrow">→</span>
+                <span class="agent-tool"><img src="assets/highlights/icon-gear-ask.svg" alt="">· loopsii <em>get_meeting</em></span>
+              </div>
+              <div class="agent-answer">
+                <span class="agent-spark"><img src="assets/highlights/icon-spark.svg" alt=""></span>
+                <div>
+                  <p class="agent-line">Anna signed off on a three-tier pricing page.</p>
+                  <div class="agent-quote"><i></i><p>“Let’s add a pricing page — three tiers, no calculator. Keep it to one screen.”</p></div>
+                  <div class="agent-meta"><span>Anna · Kickoff call · Jul 2 · play 12:04</span><b>from transcript</b></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="hl-frame" aria-hidden="true"></div>
+        </div>
+      </article>
+
+      <article class="hl-card" style="--i:5">
+        <div class="hl-text">
+          <p class="hand hl-step">6<span>/6</span></p>
+          <h3>Talk instead of typing</h3>
+          <p class="hl-desc">Hold fn and dictate emails, briefs, and prompts in any app on your Mac, minus the ums and uhs.</p>
+          <ul class="hl-points"><li>Works wherever you can type</li><li>Your clients’ names, spelled right</li><li>Emails laid out like emails</li><li>Double-press fn to go hands-free</li></ul>
+        </div>
+        <div class="hl-media bg-sky">
+          <div class="viz viz-dictate">
+            <p class="viz-label">Dictation</p>
+            <div class="dictate-frame">
+              <div class="dictate-head"><span class="dictate-dot"></span><p>Mail <span>· Re: Pricing page</span></p></div>
+              <div class="dictate-body">
+                <p>Hi Anna,</p>
+                <p>The pricing page is ready for you to review. Let me know if anything needs changing.</p>
+                <p>Thanks,</p>
+                <p>Stas</p>
+              </div>
+              <div class="dictate-pill">
+                <span class="pill-side">✕</span>
+                <span class="waveform"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="pill-side ok">✓</span>
+              </div>
+            </div>
+          </div>
+          <div class="hl-frame" aria-hidden="true"></div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- FOLDERS -->
+  <section class="folders">
+    <div class="wrap folders-row">
+      <div class="folders-card">
+        <h2>Go back to doing<br>the work</h2>
+        <p>Loopsii handles the rest. Set it up once, stop rebuilding your process for every new client.</p>
+        <a class="btn" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener">
+          <span class="btn-arrow"><svg viewBox="0 0 11 11" aria-hidden="true"><path d="M6.82353 2.1L-0.00146866 8.946L1.57353 10.521L8.41953 3.654V9.24H10.5195V0H1.27953V2.1H6.82353Z" fill="currentColor"/></svg></span>
+          <span class="btn-label">Sign up for free</span>
+        </a>
+      </div>
+      <div class="folders-tile" aria-hidden="true">
+        <div class="folder"><img src="assets/folders/folder-207.svg" alt="" class="flip"></div>
+        <div class="folder"><img src="assets/folders/folder-208.svg" alt=""></div>
+        <div class="folder"><img src="assets/folders/folder-209.svg" alt="" class="flip"></div>
+        <div class="folder"><img src="assets/folders/folder-204.svg" alt="" class="flip"><span class="folder-label" style="--x:728">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-205.svg" alt=""><span class="folder-label" style="--x:410">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-206.svg" alt="" class="flip"><span class="folder-label" style="--x:101">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-207.svg" alt="" class="flip"><span class="folder-label" style="--x:728">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-208.svg" alt=""><span class="folder-label" style="--x:410">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-209.svg" alt="" class="flip"><span class="folder-label" style="--x:101">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-204.svg" alt="" class="flip"><span class="folder-label" style="--x:728">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-205.svg" alt=""><span class="folder-label" style="--x:410">Project</span></div>
+        <div class="folder"><img src="assets/folders/folder-196.svg" alt=""><span class="folder-label" style="--x:101">Project</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="wrap">
+      <div class="features-head"><p class="hand">What's included</p><h2>Everything you need, at<br>every project stage.</h2></div>
+      <div class="feat-groups">
+
+        <div class="feat-group">
+          <div class="feat-aside"><span class="phase">Negotiation</span><h3>Turn a conversation into a project</h3></div>
+          <div class="feat-grid">
+            <article class="feat-card bg-sky"><div><h3>Clients &amp; projects</h3><p>Every client and project, organized by stage.</p></div><div class="feat-icon" style="--iw:322"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 322 111" width="322" height="111" data-icon="deposit-invoice"><defs><clipPath id="deposit-invoice-m1"><rect x="-136.08" y="-55.66" width="272.15" height="111.32" fill="#000" transform="translate(0.59 59.5) scale(1.18 1.08) translate(178.24 -125) translate(-42.16 120.78)"></rect></clipPath></defs><g clip-path="url(#deposit-invoice-m1)"><g data-l="Pre-comp 2" data-i="2" data-x="389" data-y="-65.5" data-r="0" data-sx="1" data-sy="1" transform="translate(389 -65.5)"><g transform="translate(-786 -196.5)"><g data-l="Null 20" data-i="6" data-x="786" data-y="196.5" data-r="0" data-sx="1" data-sy="1" transform="translate(786 196.5)"><g data-l="Vector 52" data-i="10" data-x="-79.62" data-y="121.04" data-r="-180" data-sx="-0.97" data-sy="-1" transform="translate(-79.62 121.04) rotate(-180) scale(-0.97 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 53" data-i="9" data-x="-115.52" data-y="121.04" data-r="-180" data-sx="-1.83" data-sy="-1" transform="translate(-115.52 121.04) rotate(-180) scale(-1.83 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 54" data-i="8" data-x="-169.35" data-y="121.04" data-r="-180" data-sx="-2.38" data-sy="-1" transform="translate(-169.35 121.04) rotate(-180) scale(-2.38 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 55" data-i="7" data-x="-240.19" data-y="121.04" data-r="-180" data-sx="-3.18" data-sy="-1" transform="translate(-240.19 121.04) rotate(-180) scale(-3.18 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 57" data-i="5" data-x="-334.54" data-y="121.04" data-r="-180" data-sx="-4.19" data-sy="-1" transform="translate(-334.54 121.04) rotate(-180) scale(-4.19 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 58" data-i="4" data-x="-429.57" data-y="121.04" data-r="-180" data-sx="-3.18" data-sy="-1" transform="translate(-429.57 121.04) rotate(-180) scale(-3.18 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 59" data-i="3" data-x="-499.84" data-y="121.04" data-r="-180" data-sx="-2.38" data-sy="-1" transform="translate(-499.84 121.04) rotate(-180) scale(-2.38 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 60" data-i="2" data-x="-553.63" data-y="121.04" data-r="-180" data-sx="-1.83" data-sy="-1" transform="translate(-553.63 121.04) rotate(-180) scale(-1.83 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g><g data-l="Vector 61" data-i="1" data-x="-589.25" data-y="121.04" data-r="-180" data-sx="-0.97" data-sy="-1" transform="translate(-589.25 121.04) rotate(-180) scale(-0.97 -1)"><g transform="rotate(-90)"><path d="M-55 0 C-55 7.1 -30.37 12.86 0 12.86 C30.38 12.86 55 7.1 55 0 C55 -7.1 30.38 -12.86 0 -12.86 C-30.37 -12.86 -55 -7.1 -55 0 Z" fill="currentColor"></path></g></g></g></g></g></g></svg></div></article>
+            <article class="feat-card bg-steel"><div><h3>Proposal builder</h3><p>Proposals with line-item estimates, built from templates.</p></div><div class="feat-icon" style="--iw:152"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152 152" width="152" height="152" data-icon="reusable"><g data-l="Vector" data-i="1" data-x="75.96" data-y="76.51" data-r="0" data-sx="1" data-sy="1" transform="translate(75.96 76.51)"><path d="M60.62 -35 L74.8 -10.45 L28.35 16.37 L60.62 35 L46.45 59.55 L0 32.74 L0 70 L-28.35 70 L-28.35 16.37 L-60.62 35 L-74.8 10.45 L-28.35 -16.37 L-60.62 -35 L-46.45 -59.55 L0 -32.73 L0 -70 L28.35 -70 L28.35 -16.37 L60.62 -35 Z" fill="currentColor"></path></g></svg></div></article>
+            <article class="feat-card bg-coral"><div><h3>Agreements</h3><p>Contracts clients sign in the browser, with an audit trail.</p></div><div class="feat-icon" style="--iw:230"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 116" width="230" height="116" data-icon="agreements"><g data-l="Graphic_2" data-i="1" data-x="181.5" data-y="-60.5" data-r="0" data-sx="1" data-sy="1" transform="translate(181.5 -60.5)"><g transform="translate(-196.5 -196.5)"><g data-l="Shape Layer 2" data-i="1" data-x="130.22" data-y="372.63" data-r="0" data-sx="1" data-sy="1" transform="translate(130.22 372.63)"><g transform="translate(66.28 -176.13)"><g data-trim=""><g transform="translate(-66.5 175.5) scale(0.97 0.97)"><path d="M-79 0 A79 79 0 0 1 79 0" fill="none" stroke="currentColor" stroke-width="80" stroke-linecap="butt" stroke-linejoin="miter"></path></g></g></g></g></g></g></svg></div></article>
+            <article class="feat-card bg-main"><div><h3>Client portal</h3><p class="hand note">Up next</p><p>One place where clients follow progress and approve work.</p></div><div class="feat-icon" style="--iw:251"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 251 95" width="251" height="95" data-icon="client-portal"><defs><clipPath id="client-portal-m1"><path d="M-46.95 -74.27 C-38.01 -57.46 -20.32 -44.77 0.05 -44.77 C20.42 -44.77 38.11 -57.46 47.05 -74.27 L47.34 142.68 C47.39 149.11 31.33 173.31 0.29 174.1 C-26.98 174.8 -46.51 151.58 -46.66 143.05 L-46.95 -74.27 Z" fill="#000" transform="translate(176.34 47.55) rotate(-360) scale(-1.01 -1.01) rotate(-90)"></path></clipPath></defs><g clip-path="url(#client-portal-m1)"><g data-l="Null 7" data-i="2" data-x="190.5" data-y="-81.5" data-r="0" data-sx="1" data-sy="1" transform="translate(190.5 -81.5)"><g data-l="Vector" data-i="9" data-x="-222.16" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-222.16 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="8" data-x="-118.15" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-118.15 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g><g data-l="Vector 3" data-i="7" data-x="-14.16" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-14.16 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g><g data-l="Vector 4" data-i="6" data-x="-326.57" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-326.57 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g><g data-l="Vector 5" data-i="5" data-x="-535.97" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-535.97 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g><g data-l="Vector 6" data-i="4" data-x="-431.96" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-431.96 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g><g data-l="Vector 8" data-i="3" data-x="-640.37" data-y="129.05" data-r="0" data-sx="-1" data-sy="-1" transform="translate(-640.37 129.05) scale(-1 -1)"><g transform="rotate(-90)"><path d="M-47 -58.46 C-38.06 -41.64 -20.37 -30.19 0 -30.19 C20.37 -30.19 38.06 -41.64 47 -58.46 L47 11.46 C47 37.42 25.96 58.46 0 58.46 C-25.96 58.46 -47 37.42 -47 11.46 L-47 -58.46 Z" fill="currentColor"></path></g></g></g></g></svg></div></article>
+          </div>
+        </div>
+
+        <div class="feat-group">
+          <div class="feat-aside"><span class="phase">Working</span><h3>Keep every project moving</h3></div>
+          <div class="feat-grid">
+            <article class="feat-card bg-lime"><div><h3>Screen recordings</h3><p>Loom-style recordings with a link, transcript and summary.</p></div><div class="feat-icon" style="--iw:251"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 251 102" width="251" height="102" data-icon="todays-plate"><g data-l="Layer 2 Outlines" data-i="1" data-x="127.84" data-y="50.96" data-r="0" data-sx="1" data-sy="1" transform="translate(127.84 50.96)"><g transform="translate(-165.04 -88.22)"><g data-trim=""><g transform="translate(165.04 88.22)"><path d="M117.54 -40.72 L-104.11 -40.72 C-111.53 -40.72 -117.54 -35.71 -117.54 -28.3 L-117.54 -27.2 C-117.54 -19.78 -111.53 -13.77 -104.11 -13.77 L100.12 -13.77 C107.53 -13.77 113.54 -7.76 113.54 -0.35 L113.54 0.45 C113.54 7.86 107.53 13.87 100.12 13.87 L-104.11 13.87 C-111.53 13.87 -117.54 19.88 -117.54 27.3 C-117.54 34.71 -111.53 40.72 -104.11 40.72 L117.54 40.72" fill="none" stroke="currentColor" stroke-width="19" stroke-linecap="butt" stroke-linejoin="miter"></path></g></g></g></g></svg></div></article>
+            <article class="feat-card bg-steel"><div><h3>Ask Loopsii</h3><p>Answers from every call, doc and project.</p></div><div class="feat-icon" style="--iw:224"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 110" width="224" height="110" data-icon="meetings-hub"><defs><mask id="meetings-hub-m1"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"></rect><g data-l="Pre-comp 5" data-i="1" data-x="112" data-y="55" data-r="0" data-sx="1" data-sy="1" transform="translate(112 55)"><g transform="translate(-112 -55)"><g data-l="Shape Layer 3" data-i="3" data-x="168.8" data-y="55" data-r="0" data-sx="1" data-sy="1" transform="translate(168.8 55)"><g transform="translate(121.78 -121.58)"><g transform="translate(-121.86 121.47)"><ellipse cx="0" cy="0" rx="39.62" ry="39.62" fill="#000"></ellipse></g></g></g><g data-l="Shape Layer 2" data-i="2" data-x="55" data-y="55" data-r="0" data-sx="1" data-sy="1" transform="translate(55 55)"><g transform="translate(121.78 -121.58)"><g transform="translate(-121.86 121.47)"><ellipse cx="0" cy="0" rx="39.62" ry="39.62" fill="#000"></ellipse></g></g></g><g data-l="Shape Layer 4" data-i="1" data-x="-51.73" data-y="55" data-r="0" data-sx="1" data-sy="1" transform="translate(-51.73 55)"><g transform="translate(121.78 -121.58)"><g transform="translate(-121.86 121.47)"><ellipse cx="0" cy="0" rx="39.62" ry="39.62" fill="#000"></ellipse></g></g></g></g></g></mask></defs><g mask="url(#meetings-hub-m1)"><g data-l="Vector 2" data-i="2" data-x="111.98" data-y="55" data-r="0" data-sx="1" data-sy="1" transform="translate(111.98 55)"><path d="M56.98 -55 C87.36 -55 111.98 -30.38 111.98 0 C111.98 30.37 87.36 55 56.98 55 L0 55 L-56.98 55 C-87.36 55 -111.98 30.38 -111.98 0 C-111.98 -30.38 -87.36 -55 -56.98 -55 L0 -55 L56.98 -55 Z" fill="currentColor"></path></g></g></svg></div></article>
+            <article class="feat-card bg-sage"><div><h3>AI Meeting Assistant</h3><p>Records any call, no bot. Then notes and suggested tasks.</p></div><div class="feat-icon" style="--iw:159"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 159 160" width="159" height="160" data-icon="ai-meeting"><g data-l="Shape Layer 2" data-i="1" data-x="79.06" data-y="79.77" data-r="0" data-sx="1" data-sy="1" transform="translate(79.06 79.77)"><g transform="translate(106.45 -105.27)"><g data-l="Vector" data-i="5" data-x="-82.94" data-y="59.12" data-r="-0.09" data-sx="1" data-sy="1" transform="translate(-82.94 59.12) rotate(-0.09)"><path d="M-46.67 23.33 C-46.67 -2.44 -25.77 -23.33 0 -23.33 C25.77 -23.33 46.67 -2.44 46.67 23.33 L-46.67 23.33 Z" fill="currentColor"></path></g><g data-l="Vector" data-i="4" data-x="-60.1" data-y="128.73" data-r="-0.09" data-sx="1" data-sy="1" transform="translate(-60.1 128.73) rotate(-0.09)"><path d="M-23.33 -46.67 C2.44 -46.67 23.33 -25.77 23.33 0 C23.33 25.77 2.44 46.67 -23.33 46.67 L-23.33 -46.67 Z" fill="currentColor"></path></g><g data-l="Vector" data-i="3" data-x="-130.08" data-y="152" data-r="-0.09" data-sx="1" data-sy="1" transform="translate(-130.08 152) rotate(-0.09)"><path d="M46.67 -23.33 C46.67 2.44 25.77 23.33 0 23.33 C-25.77 23.33 -46.67 2.44 -46.67 -23.33 L46.67 -23.33 Z" fill="currentColor"></path></g><g data-l="Vector" data-i="2" data-x="-152.93" data-y="81.9" data-r="-0.09" data-sx="1" data-sy="1" transform="translate(-152.93 81.9) rotate(-0.09)"><path d="M23.33 46.67 C-2.44 46.67 -23.33 25.77 -23.33 0 C-23.33 -25.77 -2.44 -46.67 23.33 -46.67 L23.33 46.67 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+            <article class="feat-card bg-sky"><div><h3>Time tracking</h3><p>Timer and timesheets, tied to projects and tasks.</p></div><div class="feat-icon" style="--iw:146"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 146 146" width="146" height="146" data-icon="time-tracking"><g data-l="Time tracking" data-i="2" data-x="72.88" data-y="73" data-r="0" data-sx="1" data-sy="1" transform="translate(72.88 73)"><g transform="translate(-90.88 -302)"><g data-l="Vector" data-i="2" data-x="134.34" data-y="302" data-r="0" data-sx="1" data-sy="1" transform="translate(134.34 302)"><path d="M-27.42 31.42 C-2.27 20.09 -2.26 -20.08 -27.42 -31.41 L-27.42 -70 C45.68 -54.9 45.72 54.88 -27.42 70 L-27.42 31.42 Z" fill="currentColor"></path></g><g data-l="Vector" data-i="1" data-x="47.42" data-y="302" data-r="0" data-sx="1" data-sy="1" transform="translate(47.42 302)"><path d="M27.42 -31.41 C2.27 -20.09 2.26 20.08 27.42 31.42 L27.42 70 C-45.68 54.9 -45.72 -54.88 27.42 -70 L27.42 -31.41 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+            <article class="feat-card bg-coral"><div><h3>Gantt timeline &amp; milestones</h3><p>Visual schedule sized for solo work, not 50-person teams.</p></div><div class="feat-icon" style="--iw:315"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 315 81" width="315" height="81" data-icon="gantt"><defs><clipPath id="gantt-m1"><rect x="-113.48" y="-40.17" width="226.97" height="80.35" fill="#000" transform="translate(1.67 40.5) scale(1.4 1) translate(175.83 -135) translate(-63.55 134.84)"></rect></clipPath></defs><g clip-path="url(#gantt-m1)"><g data-l="Null 8" data-i="2" data-x="-29.42" data-y="1.65" data-r="0" data-sx="1" data-sy="1" transform="translate(-29.42 1.65)"><g data-l="Vector" data-i="22" data-x="4.36" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(4.36 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 2" data-i="21" data-x="37.79" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(37.79 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 3" data-i="20" data-x="71.23" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(71.23 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 4" data-i="19" data-x="104.66" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(104.66 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 5" data-i="18" data-x="138.1" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(138.1 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 6" data-i="17" data-x="171.52" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(171.52 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 7" data-i="16" data-x="204.96" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(204.96 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 8" data-i="15" data-x="238.39" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(238.39 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 9" data-i="14" data-x="271.82" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(271.82 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 11" data-i="13" data-x="305.7" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(305.7 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 12" data-i="12" data-x="339.14" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(339.14 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 13" data-i="11" data-x="-296.22" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-296.22 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 14" data-i="10" data-x="-262.79" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-262.79 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 15" data-i="9" data-x="-229.35" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-229.35 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 16" data-i="8" data-x="-195.92" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-195.92 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 17" data-i="7" data-x="-162.48" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-162.48 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 18" data-i="6" data-x="-129.06" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-129.06 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 19" data-i="5" data-x="-95.63" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-95.63 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 20" data-i="4" data-x="-62.19" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-62.19 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g><g data-l="Vector 10" data-i="3" data-x="-28.76" data-y="38.85" data-r="0" data-sx="1" data-sy="1" transform="translate(-28.76 38.85)"><path d="M8.36 -40 L-8.36 -40 L-8.36 40 L8.36 40 L8.36 -40 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+            <article class="feat-card bg-main"><div><h3>Dictation</h3><p>Hold fn, talk, and clean text appears in any app on your Mac.</p></div><div class="feat-icon" style="--iw:150"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120" data-icon="dictation"><rect data-bar="0" x="0" y="36" width="22" height="48" rx="11" fill="currentColor"></rect><rect data-bar="1" x="32" y="16" width="22" height="88" rx="11" fill="currentColor"></rect><rect data-bar="2" x="64" y="0" width="22" height="120" rx="11" fill="currentColor"></rect><rect data-bar="3" x="96" y="22" width="22" height="76" rx="11" fill="currentColor"></rect><rect data-bar="4" x="128" y="40" width="22" height="40" rx="11" fill="currentColor"></rect></svg></div></article>
+            <article class="feat-card bg-apricot"><div><h3>Change requests</h3><p class="hand note">Up next</p><p>Every extra request logged, scoped and billable.</p></div><div class="feat-icon" style="--iw:259"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 259 112" width="259" height="112" data-icon="qa-change-log"><defs><clipPath id="qa-change-log-m5"><path d="M128.97 55.04 C128.97 20.54 129.09 -56.07 129.09 -56.07 L-130.23 -55.9 L-130.19 54.8 L128.97 55.04 Z" fill="#000" transform="translate(130.05 56)"></path></clipPath></defs><g clip-path="url(#qa-change-log-m5)"><g data-l="Null 12" data-i="1" data-x="130.05" data-y="56" data-r="0" data-sx="1" data-sy="1" transform="translate(130.05 56)"><g data-l="Vector 9" data-i="4" data-x="-516.14" data-y="0" data-r="0" data-sx="1" data-sy="1" transform="translate(-516.14 0)"><path d="M-19.05 55 L129.05 55 C129.05 -5.75 79.8 -55 19.05 -55 L-129.05 -55 C-129.05 5.75 -79.8 55 -19.05 55 Z" fill="currentColor"></path></g><g data-l="Vector 7" data-i="3" data-x="-258.29" data-y="0" data-r="0" data-sx="-1" data-sy="1" transform="translate(-258.29 0) scale(-1 1)"><path d="M-19.05 55 L129.05 55 C129.05 -5.75 79.8 -55 19.05 -55 L-129.05 -55 C-129.05 5.75 -79.8 55 -19.05 55 Z" fill="currentColor"></path></g><g data-l="Vector 8" data-i="2" data-x="0" data-y="0" data-r="0" data-sx="1" data-sy="1"><path d="M-19.05 55 L129.05 55 C129.05 -5.75 79.8 -55 19.05 -55 L-129.05 -55 C-129.05 5.75 -79.8 55 -19.05 55 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+          </div>
+        </div>
+
+        <div class="feat-group">
+          <div class="feat-aside"><span class="phase">Closure</span><h3>Wrap up, deliver, and get paid</h3></div>
+          <div class="feat-grid">
+            <article class="feat-card bg-coral"><div><h3>Time reports</h3><p>Summary and detailed reports, exported to PDF or CSV.</p></div><div class="feat-icon" style="--iw:245"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 245 96" width="245" height="96" data-icon="retro-notes"><defs><clipPath id="retro-notes-m9"><rect x="-136" y="-52.5" width="272" height="105" fill="#000" transform="translate(121.53 47.98) scale(0.9 0.91) translate(46.98 -117.47) translate(-46.5 117)"></rect></clipPath></defs><g clip-path="url(#retro-notes-m9)"><g data-l="Vector" data-i="8" data-x="48.06" data-y="48.27" data-r="0" data-sx="1" data-sy="1" transform="translate(48.06 48.27)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="7" data-x="97.46" data-y="48.27" data-r="0" data-sx="1" data-sy="1" transform="translate(97.46 48.27)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="6" data-x="146.85" data-y="48.27" data-r="0" data-sx="1" data-sy="1" transform="translate(146.85 48.27)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="5" data-x="196.77" data-y="48.8" data-r="0" data-sx="1" data-sy="1" transform="translate(196.77 48.8)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector 2" data-i="4" data-x="-59.94" data-y="-65.73" data-r="0" data-sx="1" data-sy="1" transform="translate(-59.94 -65.73)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector 3" data-i="3" data-x="-10.54" data-y="-65.73" data-r="0" data-sx="1" data-sy="1" transform="translate(-10.54 -65.73)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector 4" data-i="2" data-x="38.85" data-y="-65.73" data-r="0" data-sx="1" data-sy="1" transform="translate(38.85 -65.73)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g><g data-l="Vector 5" data-i="1" data-x="88.25" data-y="-65.73" data-r="0" data-sx="1" data-sy="1" transform="translate(88.25 -65.73)"><g transform="rotate(-45)"><path d="M0 54.21 C13.02 54.21 23.57 29.94 23.57 0 C23.57 -29.94 13.02 -54.21 0 -54.21 C-13.02 -54.21 -23.57 -29.94 -23.57 0 C-23.57 29.94 -13.02 54.21 0 54.21 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+            <article class="feat-card bg-steel"><div><h3>Invoices</h3><p>Invoices from tracked time, exported as PDF.</p></div><div class="feat-icon" style="--iw:151"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 151 149" width="151" height="149" data-icon="final-invoice"><g data-l="Vector" data-i="1" data-x="75.23" data-y="74.26" data-r="0" data-sx="1" data-sy="1" transform="translate(75.23 74.26)"><path d="M69.13 4.77 C70.73 7.54 72.06 10.39 73.15 13.29 C60.41 -2.25 40.6 -9.75 21.23 -7.21 C39.26 10.73 43.75 39.19 30.43 62.25 C28.83 65.03 27.03 67.6 25.06 70 C32.15 51.2 28.74 30.29 16.86 14.78 C10.33 39.37 -12.06 57.49 -38.7 57.49 C-41.9 57.49 -45.03 57.21 -48.09 56.71 C-28.26 53.45 -11.86 40.04 -4.37 21.99 C-28.92 28.63 -55.81 18.3 -69.13 -4.77 C-70.73 -7.54 -72.06 -10.39 -73.15 -13.29 C-60.42 2.25 -40.6 9.75 -21.24 7.21 C-39.26 -10.73 -43.75 -39.19 -30.44 -62.25 C-28.83 -65.03 -27.03 -67.6 -25.06 -70 C-32.15 -51.19 -28.75 -30.29 -16.86 -14.78 C-10.34 -39.37 12.06 -57.48 38.69 -57.48 C41.89 -57.48 45.03 -57.21 48.09 -56.71 C28.26 -53.44 11.86 -40.04 4.37 -21.99 C28.92 -28.63 55.81 -18.3 69.13 4.77 Z" fill="currentColor"></path></g></svg></div></article>
+            <article class="feat-card bg-sage"><div><h3>Deliverables page</h3><p class="hand note">Up next</p><p>Final files with versions, shared in the client portal.</p></div><div class="feat-icon" style="--iw:189"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 189 112" width="189" height="112" data-icon="deliverables"><g data-l="Layer 5 Outlines" data-i="1" data-x="93.96" data-y="56.36" data-r="0" data-sx="1" data-sy="1" transform="translate(93.96 56.36)"><g transform="translate(-161.99 -123.5)"><g transform="translate(161.99 123.5)" data-trim=""><path d="M0 0.23 C0 21.49 -17.23 38.5 -38.49 38.5 C-59.75 38.5 -76.99 21.26 -76.99 0 C-76.99 -21.26 -59.75 -38.5 -38.49 -38.5 C-17.37 -38.5 -0.22 -21.52 0 -0.46 L0 -0.18 L0 0.14 C0 21.4 17.23 38.5 38.49 38.5 C59.75 38.5 76.99 21.26 76.99 0 C76.99 -21.26 59.75 -38.5 38.49 -38.5 C17.37 -38.5 0.22 -21.58 -0.01 -0.51 L0 -0.14 L0 0.23 Z" fill="none" stroke="currentColor" stroke-width="34" stroke-linecap="butt" stroke-linejoin="miter"></path></g></g></g></svg></div></article>
+          </div>
+        </div>
+
+        <div class="feat-group">
+          <div class="feat-aside"><span class="phase">Planning</span><h3>Know what’s coming next</h3></div>
+          <div class="feat-grid">
+            <article class="feat-card bg-steel"><div><h3>Pre-meeting briefs</h3><p>A recap of past calls and open tasks before each meeting.</p></div><div class="feat-icon" style="--iw:142"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 142 142" width="142" height="142" data-icon="follow-ups"><g data-l="Vector" data-i="1" data-x="71" data-y="71" data-r="0" data-sx="1" data-sy="1" transform="translate(71 71)"><path d="M35 -8.86 C54.33 -8.86 70 -4.89 70 0 C70 4.89 54.33 8.86 35 8.86 C34.33 8.86 33.67 8.85 33.01 8.85 C33.59 9.17 34.16 9.49 34.74 9.83 C51.48 19.49 63.07 30.76 60.62 35 C58.17 39.24 42.62 34.84 25.88 25.17 C25.3 24.84 24.73 24.51 24.17 24.17 C24.51 24.73 24.84 25.3 25.17 25.88 C34.84 42.62 39.24 58.18 35 60.62 C30.76 63.07 19.49 51.48 9.83 34.74 C9.49 34.16 9.17 33.59 8.85 33.01 C8.85 33.67 8.86 34.33 8.86 35 C8.86 54.33 4.89 70 0 70 C-4.89 70 -8.86 54.33 -8.86 35 C-8.86 34.33 -8.85 33.67 -8.85 33.01 C-9.17 33.59 -9.49 34.16 -9.83 34.74 C-19.49 51.48 -30.76 63.07 -35 60.62 C-39.24 58.17 -34.84 42.62 -25.17 25.88 C-24.84 25.3 -24.51 24.73 -24.17 24.17 C-24.73 24.51 -25.3 24.84 -25.88 25.17 C-42.62 34.84 -58.18 39.24 -60.62 35 C-63.07 30.76 -51.48 19.49 -34.74 9.83 C-34.16 9.49 -33.59 9.17 -33.01 8.85 C-33.67 8.85 -34.33 8.86 -35 8.86 C-54.33 8.86 -70 4.89 -70 0 C-70 -4.89 -54.33 -8.86 -35 -8.86 C-34.33 -8.86 -33.67 -8.85 -33.01 -8.85 C-33.59 -9.17 -34.16 -9.49 -34.74 -9.83 C-51.48 -19.49 -63.07 -30.76 -60.62 -35 C-58.17 -39.24 -42.62 -34.84 -25.88 -25.17 C-25.3 -24.84 -24.73 -24.51 -24.17 -24.17 C-24.51 -24.73 -24.84 -25.3 -25.17 -25.88 C-34.84 -42.62 -39.24 -58.17 -35 -60.62 C-30.76 -63.07 -19.49 -51.48 -9.83 -34.74 C-9.49 -34.16 -9.17 -33.59 -8.85 -33.01 C-8.85 -33.67 -8.86 -34.33 -8.86 -35 C-8.86 -54.33 -4.89 -70 0 -70 C4.89 -70 8.86 -54.33 8.86 -35 C8.86 -34.33 8.85 -33.67 8.85 -33.01 C9.17 -33.59 9.49 -34.16 9.83 -34.74 C19.49 -51.48 30.76 -63.07 35 -60.62 C39.24 -58.17 34.84 -42.62 25.17 -25.88 C24.84 -25.3 24.51 -24.73 24.17 -24.17 C24.73 -24.51 25.3 -24.84 25.88 -25.17 C42.62 -34.84 58.18 -39.24 60.62 -35 C63.07 -30.76 51.48 -19.49 34.74 -9.83 C34.16 -9.49 33.59 -9.17 33.01 -8.85 C33.67 -8.85 34.33 -8.86 35 -8.86 Z" fill="currentColor"></path></g></svg></div></article>
+            <article class="feat-card bg-main"><div><h3>Pipeline</h3><p class="hand note">Up next</p><p>Deals by stage, with the odds of closing.</p></div><div class="feat-icon" style="--iw:152"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152 154" width="152" height="154" data-icon="pipeline"><g data-l="r bottom" data-i="4" data-x="135.5" data-y="137" data-r="0" data-sx="1" data-sy="1" transform="translate(135.5 137)"><g transform="translate(-140 -377)"><g data-l="Vector" data-i="2" data-x="107.21" data-y="344.22" data-r="0" data-sx="1" data-sy="1" transform="translate(107.21 344.22)"><g transform="rotate(-45)"><path d="M14.36 -20.85 L-14.36 -20.85 L-14.36 20.85 L14.36 20.85 L14.36 -20.85 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="1" data-x="115.74" data-y="352.74" data-r="0" data-sx="1" data-sy="1" transform="translate(115.74 352.74)"><path d="M24.26 24.26 L-24.26 24.26 L24.26 -24.26 L24.26 24.26 Z" fill="currentColor"></path></g></g></g><g data-l="l bottom" data-i="3" data-x="15.5" data-y="137" data-r="0" data-sx="1" data-sy="1" transform="translate(15.5 137)"><g transform="translate(-20 -377)"><g data-l="Vector" data-i="2" data-x="52.77" data-y="344.21" data-r="0" data-sx="1" data-sy="1" transform="translate(52.77 344.21)"><g transform="rotate(-45)"><path d="M20.85 -14.36 L-20.85 -14.36 L-20.85 14.36 L20.85 14.36 L20.85 -14.36 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="1" data-x="44.26" data-y="352.74" data-r="0" data-sx="1" data-sy="1" transform="translate(44.26 352.74)"><path d="M-24.26 24.26 L-24.26 -24.26 L24.26 24.26 L-24.26 24.26 Z" fill="currentColor"></path></g></g></g><g data-l="r top" data-i="2" data-x="135.5" data-y="17" data-r="0" data-sx="1" data-sy="1" transform="translate(135.5 17)"><g transform="translate(-140 -257)"><g data-l="Vector" data-i="2" data-x="107.21" data-y="289.78" data-r="0" data-sx="1" data-sy="1" transform="translate(107.21 289.78)"><g transform="rotate(-45)"><path d="M20.85 -14.36 L-20.85 -14.36 L-20.85 14.36 L20.85 14.36 L20.85 -14.36 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="1" data-x="115.74" data-y="281.26" data-r="0" data-sx="1" data-sy="1" transform="translate(115.74 281.26)"><path d="M24.26 -24.26 L24.26 24.26 L-24.26 -24.26 L24.26 -24.26 Z" fill="currentColor"></path></g></g></g><g data-l="l top" data-i="1" data-x="15.5" data-y="17" data-r="0" data-sx="1" data-sy="1" transform="translate(15.5 17)"><g transform="translate(-20 -257)"><g data-l="Vector" data-i="2" data-x="52.77" data-y="289.78" data-r="0" data-sx="1" data-sy="1" transform="translate(52.77 289.78)"><g transform="rotate(-45)"><path d="M14.36 -20.85 L-14.36 -20.85 L-14.36 20.85 L14.36 20.85 L14.36 -20.85 Z" fill="currentColor"></path></g></g><g data-l="Vector" data-i="1" data-x="44.26" data-y="281.26" data-r="0" data-sx="1" data-sy="1" transform="translate(44.26 281.26)"><path d="M-24.26 -24.26 L24.26 -24.26 L-24.26 24.26 L-24.26 -24.26 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+            <article class="feat-card bg-coral"><div><h3>Income goals</h3><p class="hand note">Up next</p><p>Paid, awaiting and pipeline income against a monthly goal.</p></div><div class="feat-icon" style="--iw:120"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" data-icon="earnings-forecast"><defs><clipPath id="earnings-forecast-m1"><path d="M-60 60 L-60 -60 L60 -60 L60 60 L-60 60 Z" fill="#000" transform="translate(60 60)"></path></clipPath></defs><g clip-path="url(#earnings-forecast-m1)"><g data-l="Null 11" data-i="2" data-x="60" data-y="-60.36" data-r="0" data-sx="1" data-sy="1" transform="translate(60 -60.36)"><g data-l="Vector" data-i="5" data-x="0" data-y="120.36" data-r="0" data-sx="1" data-sy="1" transform="translate(0 120.36)"><path d="M47.78 60 C47.78 33.61 26.39 12.22 0 12.22 C-26.39 12.22 -47.78 33.61 -47.78 60 L-60 60 L-60 -60 L-47.78 -60 C-47.78 -33.61 -26.39 -12.22 0 -12.22 C26.39 -12.22 47.78 -33.61 47.78 -60 L60 -60 L60 60 L47.78 60 Z" fill="currentColor"></path></g><g data-l="Vector 3" data-i="4" data-x="0" data-y="0" data-r="0" data-sx="1" data-sy="1"><path d="M47.78 60 C47.78 33.61 26.39 12.22 0 12.22 C-26.39 12.22 -47.78 33.61 -47.78 60 L-60 60 L-60 -60 L-47.78 -60 C-47.78 -33.61 -26.39 -12.22 0 -12.22 C26.39 -12.22 47.78 -33.61 47.78 -60 L60 -60 L60 60 L47.78 60 Z" fill="currentColor"></path></g><g data-l="Shape Layer 2" data-i="3" data-x="116.5" data-y="-57.41" data-r="0" data-sx="1" data-sy="1" transform="translate(116.5 -57.41)"><g transform="translate(-170.62 117.93)"><rect x="-5.93" y="-2.77" width="11.85" height="5.53" fill="currentColor"></rect></g><g transform="translate(-62.57 117.93)"><rect x="-5.93" y="-2.77" width="11.85" height="5.53" fill="currentColor"></rect></g></g></g></g></svg></div></article>
+            <article class="feat-card bg-sky"><div><h3>Capacity check</h3><p class="hand note">Up next</p><p>Hours booked against hours available, week by week.</p></div><div class="feat-icon" style="--iw:296"><svg aria-hidden="true" focusable="false" data-module="FeatureIcon" class="block h-auto w-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 296 90" width="296" height="90" data-icon="capacity-check"><defs><clipPath id="capacity-check-m1"><path d="M105.59 -45 L147.83 -45 L147.83 26.87 L147.83 42.56 L147.83 45 L-147.83 45 L-147.83 42.56 L-147.83 26.87 L-147.83 -45 L-105.59 -45 L-63.35 -45 L-21.12 -45 L21.12 -45 L63.36 -45 L105.59 -45 Z" fill="#000" transform="translate(147.83 45)"></path></clipPath></defs><g clip-path="url(#capacity-check-m1)"><g data-l="Null 10" data-i="2" data-x="0" data-y="0" data-r="0" data-sx="1" data-sy="1"><g data-l="Vector" data-i="4" data-x="-106.84" data-y="45" data-r="0" data-sx="1" data-sy="1" transform="translate(-106.84 45)"><path d="M105.59 5.75 L105.59 -45 L147.83 -45 L147.83 26.87 L147.83 42.56 L147.83 45 L-147.83 45 L-147.83 42.56 L-147.83 26.87 L-147.83 -45 L-105.59 -45 L-105.59 5.75 C-105.59 17.41 -96.14 26.87 -84.47 26.87 C-72.81 26.87 -63.35 17.41 -63.35 5.75 L-63.35 -45 L-21.12 -45 L-21.12 5.75 C-21.12 17.41 -11.66 26.87 0 26.87 C11.66 26.87 21.12 17.41 21.12 5.75 L21.12 -45 L63.36 -45 L63.36 5.75 C63.36 17.41 72.81 26.87 84.47 26.87 C96.14 26.87 105.59 17.41 105.59 5.75 Z" fill="currentColor"></path></g><g data-l="Vector 2" data-i="3" data-x="147.83" data-y="45" data-r="0" data-sx="1" data-sy="1" transform="translate(147.83 45)"><path d="M105.59 5.75 L105.59 -45 L147.83 -45 L147.83 26.87 L147.83 42.56 L147.83 45 L-147.83 45 L-147.83 42.56 L-147.83 26.87 L-147.83 -45 L-105.59 -45 L-105.59 5.75 C-105.59 17.41 -96.14 26.87 -84.47 26.87 C-72.81 26.87 -63.35 17.41 -63.35 5.75 L-63.35 -45 L-21.12 -45 L-21.12 5.75 C-21.12 17.41 -11.66 26.87 0 26.87 C11.66 26.87 21.12 17.41 21.12 5.75 L21.12 -45 L63.36 -45 L63.36 5.75 C63.36 17.41 72.81 26.87 84.47 26.87 C96.14 26.87 105.59 17.41 105.59 5.75 Z" fill="currentColor"></path></g></g></g></svg></div></article>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- TESTIMONIALS -->
+  <section class="testi" id="testimonials">
+    <div class="wrap"><h2>Heard from the early ones.</h2></div>
+    <div class="testi-stage">
+      <div class="testi-frame" aria-hidden="true"><i class="h top"></i><i class="h bottom"></i><i class="v l1"></i><i class="v l2"></i><i class="v r1"></i><i class="v r2"></i></div>
+      <div class="testi-track" id="testiTrack">
+        <article class="testi-slide" aria-label="1 of 5">
+          <div class="testi-card">
+            <div class="testi-photo"><img src="assets/testimonials/isabel.webp" alt="Isabel Moranta"></div>
+            <div class="testi-copy"><p class="testi-title">Organized and on track.</p><p class="testi-quote">As a creative working on multiple projects at once, Loopsii has been super helpful for keeping everything organized and on track. It’s intuitive, easy to use, and makes managing the day-to-day so much easier. Love having everything in one place. Definitely recommend giving it a try.</p></div>
+            <div class="testi-foot"><span class="testi-name">Isabel Moranta</span><span class="testi-role">Design director</span></div>
+          </div>
+        </article>
+        <article class="testi-slide" aria-label="2 of 5">
+          <div class="testi-card">
+            <div class="testi-photo"><img src="assets/testimonials/marina.webp" alt="Marina Matijaca"></div>
+            <div class="testi-copy"><p class="testi-title">For the money I’m paying… it’s a steal.</p><p class="testi-quote">I send clients a Loopsii recording instead of another call, and they leave comments right on it. I tell Claude to tell Loopsii what to do, my favorite kind of admin. All for less than one coffee in SF. I checked, mine was $12.75.</p></div>
+            <div class="testi-foot"><span class="testi-name">Marina Matijaca</span><span class="testi-role">Creative director</span></div>
+          </div>
+        </article>
+        <article class="testi-slide" aria-label="3 of 5">
+          <div class="testi-card">
+            <div class="testi-photo"><img src="assets/testimonials/andres.webp" alt="Andres Vlaeminck"></div>
+            <div class="testi-copy"><p class="testi-title">This one stays.</p><p class="testi-quote">I didn’t expect to get attached to a project tool. My hours turn into invoices, my tasks sit next to the code I write in Cursor, and admin now takes about 10 minutes a week. More time for actual work.</p></div>
+            <div class="testi-foot"><span class="testi-name">Andres Vlaeminck</span><span class="testi-role">AI developer</span></div>
+          </div>
+        </article>
+        <article class="testi-slide" aria-label="4 of 5">
+          <div class="testi-card">
+            <div class="testi-photo"><img src="assets/testimonials/nika.webp" alt="Nika Korobchuk"></div>
+            <div class="testi-copy"><p class="testi-title">No more 2-hour calls.</p><p class="testi-quote">Kudos to Loopsii for how easy it is to make an invoice. I send mine at the end of the month and it takes a couple of minutes. And screen recordings help so much with communication, so nobody has to sit through 2-hour calls.</p></div>
+            <div class="testi-foot"><span class="testi-name">Nika Korobchuk</span><span class="testi-role">Product designer</span></div>
+          </div>
+        </article>
+        <article class="testi-slide" aria-label="5 of 5">
+          <div class="testi-card">
+            <div class="testi-photo"><img src="assets/testimonials/anna.webp" alt="Anna Sakharnatska"></div>
+            <div class="testi-copy"><p class="testi-title">One tab instead of twenty.</p><p class="testi-quote">I work with several teams at once, each with its own workspace, task board and tools, so I used to juggle a million tabs. With Loopsii it’s all in one place. My favorite part is the meeting assistant. The notes are super accurate, and I can literally listen back to the moment a task came up in the call.</p></div>
+            <div class="testi-foot"><span class="testi-name">Anna Sakharnatska</span><span class="testi-role">Product manager</span></div>
+          </div>
+        </article>
+      </div>
+      <div class="testi-nav">
+        <button class="testi-arrow" type="button" data-dir="prev" aria-label="Previous testimonial">←</button>
+        <span class="testi-count"><span id="testiNum">01</span> / 05</span>
+        <button class="testi-arrow" type="button" data-dir="next" aria-label="Next testimonial">→</button>
+      </div>
+      <p class="sr-only" aria-live="polite" id="testiStatus">1 of 5</p>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="pricing" id="pricing">
+    <div class="wrap">
+      <h2>One Plan.<br>Everything included.</h2>
+      <div class="price-toggle">
+        <button type="button" class="price-option is-active" data-plan="monthly">Monthly</button>
+        <button type="button" class="price-switch" id="priceSwitch" role="switch" aria-checked="false" aria-label="Bill yearly"><span></span></button>
+        <button type="button" class="price-option" data-plan="yearly">Yearly</button>
+        <span class="hand price-save">Save 17%</span>
+      </div>
+      <div class="price-cards">
+        <div class="price-sheet" id="priceSheet">
+          <div class="price price-monthly"><p class="price-title">Monthly plan</p><p class="price-amount"><span>$12</span><small>/ month</small></p></div>
+          <div class="price price-yearly"><p class="price-title">Yearly plan</p><p class="price-amount"><span>$10</span><small>/ month</small></p><p class="price-note">billed $120 yearly</p></div>
+        </div>
+        <div class="price-panel">
+          <p class="price-title">What’s included</p>
+          <ul><li>Unlimited projects, clients &amp; time tracking</li><li>Meeting and screen recording with AI summaries</li><li>Dictation in any app on your Mac</li><li>Tasks, invoices &amp; client management</li><li>AI assistant to manage your workflow</li></ul>
+        </div>
+      </div>
+      <a class="price-cta" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener"><span>Try it free for 14 days</span><i>↗</i></a>
+    </div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section class="roadmap" id="roadmap">
+    <div class="roadmap-pin">
+      <div class="wrap roadmap-head">
+        <p class="hand">The roadmap</p>
+        <h2>No fake launch dates. Just<br>the actual plan.</h2>
+      </div>
+      <div class="roadmap-stage">
+        <div class="roadmap-wheel" id="roadmapWheel">
+          <article class="roadmap-card" style="--c:var(--steel)">
+            <div class="roadmap-top"><span class="roadmap-num">0<i>1</i></span><span class="roadmap-loop">LOOP</span><span class="roadmap-badge">Live</span></div>
+            <ul><li>Clients, projects and task boards.</li><li>Time tracking, timesheets and reports.</li><li>Call and screen recording on Mac. No bot.</li><li>AI notes, tasks and search across calls.</li></ul>
+          </article>
+          <article class="roadmap-card" style="--c:var(--apricot)">
+            <div class="roadmap-top"><span class="roadmap-num">0<i>2</i></span><span class="roadmap-loop">LOOP</span><span class="roadmap-badge">Up Next</span></div>
+            <ul><li>Income goals and deal pipeline.</li><li>Client portal for approvals and files.</li></ul>
+          </article>
+          <article class="roadmap-card" style="--c:var(--sage)">
+            <div class="roadmap-top"><span class="roadmap-num">0<i>3</i></span><span class="roadmap-loop">LOOP</span><span class="roadmap-badge">Up Next</span></div>
+            <ul><li>Capacity view across all projects.</li><li>Change requests and scope tracking.</li></ul>
+          </article>
+          <article class="roadmap-card" style="--c:var(--coral)">
+            <div class="roadmap-top"><span class="roadmap-num">0<i>4</i></span><span class="roadmap-loop">LOOP</span><span class="roadmap-badge">Up Next</span></div>
+            <ul><li>Desktop app for Windows.</li><li>Full web platform in both desktop apps.</li><li>Mobile app for iOS.</li></ul>
+          </article>
+        </div>
+        <svg class="roadmap-dashes" viewBox="0 0 1440 800" aria-hidden="true"><path d="M-40 560 C 300 660, 500 640, 720 640 S 1140 660, 1480 560" fill="none" stroke="#1c1c1a" stroke-width="1" stroke-dasharray="1 7"/></svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- WAITLIST -->
+  <section class="waitlist">
+    <div class="wrap wait-row">
+      <div class="wait-copy">
+        <h2>Ready for an easier<br>way to work?</h2>
+        <a class="btn" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener">
+          <span class="btn-arrow"><svg viewBox="0 0 11 11" aria-hidden="true"><path d="M6.82353 2.1L-0.00146866 8.946L1.57353 10.521L8.41953 3.654V9.24H10.5195V0H1.27953V2.1H6.82353Z" fill="currentColor"/></svg></span>
+          <span class="btn-label">Sign up for free</span>
+        </a>
+      </div>
+      <div class="wait-visual">
+        <div class="wait-count"><p class="counter" data-count="160">160</p><div><p class="wait-label">freelancers</p><p class="hand">already using Loopsii</p></div></div>
+        <div class="clock"><canvas id="clockCanvas" width="700" height="700" aria-hidden="true"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq" id="faq">
+    <div class="wrap faq-row">
+      <div class="faq-intro"><p class="hand">FAQ</p><h2>Good questions,<br>straight answers.</h2></div>
+      <div class="faq-list" id="faqList">
+        <div class="faq-item is-open"><button class="faq-q" aria-expanded="true"><span>Does Loopsii add a bot to my client calls?</span><i></i></button><div class="faq-a"><div><p>No. Loopsii for Mac records on your Mac, so your client sees just you. No mystery guest called “Notetaker” in the corner.</p></div></div></div>
+        <div class="faq-item"><button class="faq-q" aria-expanded="false"><span>Do I need a Mac to use Loopsii?</span><i></i></button><div class="faq-a"><div><p>Only for call and screen recordings, and for dictation in other apps. Loopsii for Mac works on Apple silicon with macOS 14.4 or later, and screencasts need macOS 15. Everything else runs in any browser. There’s no Windows or iOS app today. Both are Up next on the roadmap, with no dates.</p></div></div></div>
+        <div class="faq-item"><button class="faq-q" aria-expanded="false"><span>How much does Loopsii cost?</span><i></i></button><div class="faq-a"><div><p>$12 a month, or $120 a year to save 17%. One plan with everything in it, so there are no tiers to decode. Try Loopsii free for 14 days, no card needed.</p></div></div></div>
+        <div class="faq-item"><button class="faq-q" aria-expanded="false"><span>What happens to my call recordings and transcripts?</span><i></i></button><div class="faq-a"><div><p>Transcription runs on your Mac. The transcript syncs to your account, so Loopsii can write your notes. By default, the audio and a video of the call upload too. You can turn either off in the settings of Loopsii for Mac. Chat messages from Google Meet and Zoom calls are saved to the meeting in your account, even with both uploads off. Turn off “Save the in-call chat” to stop that. Your meeting content never trains third-party AI models.</p></div></div></div>
+        <div class="faq-item"><button class="faq-q" aria-expanded="false"><span>Can I use Loopsii with Claude or ChatGPT?</span><i></i></button><div class="faq-a"><div><p>Yes, and with Codex, Cursor or any other MCP client, through <a href="https://loopsii.com/connect" target="_blank" rel="noopener">the Loopsii connector</a>. Ask them what you agreed on last Tuesday’s call instead of scrolling through the transcript. They can read, add and edit your clients, projects, tasks and hours, but never delete anything.</p></div></div></div>
+        <div class="faq-item"><button class="faq-q" aria-expanded="false"><span>Can I dictate instead of typing?</span><i></i></button><div class="faq-a"><div><p>Yes. In Loopsii for Mac, hold fn, speak and let go. Clean, punctuated text lands wherever your cursor is, in any app, with filler words like “um” left out. Press fn twice to keep the mic open without holding the key.</p></div></div></div>
+        <div class="faq-item"><button class="faq-q" aria-expanded="false"><span>Can my studio use Loopsii?</span><i></i></button><div class="faq-a"><div><p>Not as a team yet. Loopsii is built for freelancers, one person today. Teams may come later. Until then, your studio of one is very welcome.</p></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OUTRO -->
+  <section class="outro">
+    <h2 class="sr-only">Shipped weekly, shaped by you</h2>
+    <div class="outro-title" aria-hidden="true" id="outroTitle">
+      <div class="outro-line"><span>Shipped</span><span class="wave1">weekly,</span><span class="wave2">shaped</span><span class="wave1">by</span><span>you</span></div>
+    </div>
+    <canvas class="outro-particles" id="outroParticles" aria-hidden="true"></canvas>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="site-footer" id="footer">
+    <video class="footer-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
+      <source src="assets/video/footer-dual.mp4" type="video/mp4">
+    </video>
+    <div class="footer-blue" aria-hidden="true"></div>
+    <div class="footer-inner">
+      <div class="footer-card">
+        <i class="fc-dot tl"></i><i class="fc-dot tr"></i><i class="fc-dot bl"></i><i class="fc-dot br"></i>
+        <div class="footer-center">
+          <h2>Start your loop here</h2>
+          <p class="hand">One account, all your clients, one simple workflow</p>
+          <a class="btn" href="https://app.loopsii.com/sign-up" target="_blank" rel="noopener">
+            <span class="btn-arrow"><svg viewBox="0 0 11 11" aria-hidden="true"><path d="M6.82353 2.1L-0.00146866 8.946L1.57353 10.521L8.41953 3.654V9.24H10.5195V0H1.27953V2.1H6.82353Z" fill="currentColor"/></svg></span>
+            <span class="btn-label">Sign up for free</span>
+          </a>
+        </div>
+      </div>
+      <div class="footer-meta">
+        <div class="footer-social"><a href="https://www.linkedin.com/company/loopsii/" target="_blank" rel="noopener">LinkedIn</a><a href="https://x.com/loopsiiapp" target="_blank" rel="noopener">X</a><a href="https://www.instagram.com/loopsii.app/" target="_blank" rel="noopener">Instagram</a></div>
+        <div class="footer-legal"><a href="https://loopsii.com/privacy" target="_blank" rel="noopener">Privacy Policy</a><a href="https://loopsii.com/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a></div>
+        <p class="footer-copy">© Loopsii 2026</p>
+      </div>
+      <p class="footer-disclaimer">Private study recreation. Design, copy and assets belong to Loopsii.</p>
+    </div>
+  </footer>
+
+</main>
+
+<div class="cookies" id="cookies" role="region" aria-label="Cookie notice">
+  <div class="cookies-card">
+    <p>We use cookies to keep the site working and to see how it’s used. <a href="https://loopsii.com/privacy" target="_blank" rel="noopener">Privacy Policy</a></p>
+    <button type="button" id="cookieOk">OK</button>
+  </div>
+</div>
+
+<script src="vendor/lenis.min.js"></script>
+<script src="vendor/lottie_light.min.js"></script>
+<script src="js/app.js"></script>
+<script src="js/motion.js"></script>
+</body>
+</html>

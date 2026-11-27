@@ -1,0 +1,106 @@
+{
+ "url": "https://pomegranate.health/",
+ "title": "Pomegranate",
+ "totalHeight": 7367,
+ "bands": [
+  {
+   "index": 0,
+   "tag": "body",
+   "label": "body",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 0,
+   "height": 80,
+   "textStart": ""
+  },
+  {
+   "index": 1,
+   "tag": "div",
+   "label": ".ui-card_gradient",
+   "background": "rgb(247, 239, 223)",
+   "offsetTop": 80,
+   "height": 1344,
+   "textStart": "Introducing PomegranateYour personal health intelligence pla"
+  },
+  {
+   "index": 2,
+   "tag": "body",
+   "label": "body",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 1424,
+   "height": 202,
+   "textStart": ""
+  },
+  {
+   "index": 3,
+   "tag": "body",
+   "label": "",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 1626,
+   "height": 578,
+   "textStart": ""
+  },
+  {
+   "index": 4,
+   "tag": "body",
+   "label": "",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 2204,
+   "height": 623,
+   "textStart": ""
+  },
+  {
+   "index": 5,
+   "tag": "body",
+   "label": "",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 2827,
+   "height": 767,
+   "textStart": ""
+  },
+  {
+   "index": 6,
+   "tag": "body",
+   "label": "",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 3594,
+   "height": 1222,
+   "textStart": ""
+  },
+  {
+   "index": 7,
+   "tag": "body",
+   "label": "",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 4816,
+   "height": 703,
+   "textStart": ""
+  },
+  {
+   "index": 8,
+   "tag": "body",
+   "label": "",
+   "background": "rgba(0, 0, 0, 0)",
+   "offsetTop": 5519,
+   "height": 441,
+   "textStart": ""
+  },
+  {
+   "index": 9,
+   "tag": "footer",
+   "label": ".part-footer",
+   "background": "rgb(234, 61, 91)",
+   "offsetTop": 5960,
+   "height": 1407,
+   "textStart": "Help us build intelligent healthcarePomegranate is being bui"
+  }
+ ],
+ "provenance": {
+  "schemaVersion": "awwwards-capture-provenance-v1",
+  "requestedUrlHash": "9f1cd4028efccbf267f4ed59b1e8b6a6b23653bd559f53d36b479191c473c59c",
+  "finalUrl": "https://pomegranate.health/",
+  "capturedAt": 1794848596831,
+  "viewport": "desktop",
+  "settlePolicy": "structure:load",
+  "extractorVersion": 1
+ }
+}

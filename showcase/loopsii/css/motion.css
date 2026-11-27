@@ -1,0 +1,233 @@
+/* Motion layer — scroll reveals, hero field, intro travel, stack/highlight/feature beats. */
+
+/* ---------- split word reveals ---------- */
+.split .w {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: top;
+  padding-bottom: .14em;
+  margin-bottom: -.14em;
+}
+.split .w > span {
+  display: inline-block;
+  transform: translateY(115%);
+  transition: transform .95s var(--ease);
+  transition-delay: calc(var(--i, 0) * 20ms);
+  will-change: transform;
+}
+.split.is-in .w > span { transform: translateY(0); }
+
+/* ---------- hero field ---------- */
+.hero-shapes { display: block; overflow: hidden; }
+.hero-cell,
+.hero-loop {
+  position: absolute;
+  inset: auto;
+  left: 0;
+  top: 0;
+  width: var(--cell, 10px);
+  height: var(--cell, 10px);
+  transform: translate(
+    calc((var(--col, 0) - 5) * var(--cell, 10px)),
+    calc(var(--field-y, 0px) + var(--row, 0) * var(--cell, 10px))
+  );
+  transition: transform .68s cubic-bezier(.65, 0, .35, 1);
+  will-change: transform;
+}
+.hero-cell { z-index: 1; }
+.hero-cell .shape { position: absolute; inset: 0; background: var(--c); transform-origin: 50% 50%; will-change: transform; }
+.hero-loop { z-index: 5; background: var(--coral); border-radius: 50%; display: grid; place-items: center; }
+.hero-loop .hero-mark-lottie { width: 36%; }
+
+/* ---------- intro logo + orbit ---------- */
+.intro-mark-lottie { width: 36%; aspect-ratio: 300 / 330; }
+.intro-logo.is-traveling { z-index: 0; pointer-events: none; }
+.intro-head { position: relative; z-index: 10; }
+.intro-stage { position: relative; z-index: 1; }
+.orbit-item {
+  --ox: 0px;
+  --oy: 0px;
+  --s: 0;
+  --o: 0;
+  transform: translate(var(--ox), var(--oy)) rotate(calc(var(--r, 0) * 1deg));
+  scale: var(--s);
+  opacity: var(--o);
+  transition: scale .8s var(--ease), opacity .65s ease-out;
+  transition-delay: calc(var(--i, 0) * 55ms);
+}
+.intro.is-in .orbit-item { --s: 1; --o: 1; }
+
+/* ---------- stack ---------- */
+.motion .stack-lines { clip-path: none; background-image: none; }
+.stack-vline, .stack-hline { position: absolute; background: rgba(0, 0, 0, .13); will-change: transform; transition: transform 1.15s var(--ease); }
+.stack-vline { top: 0; bottom: 0; width: 1px; transform: scaleY(.001); transform-origin: 50% 0; }
+.stack-hline { left: 0; right: 0; height: 1px; transform: scaleX(.001); transform-origin: 0 50%; }
+.stack-vline.is-in, .stack-hline.is-in { transform: none; }
+.motion .stack-app {
+  opacity: 0;
+  transform: translateY(34px) scale(.94);
+  transition: opacity .7s ease-out, transform .95s var(--ease);
+}
+.motion .stack-app.is-in { opacity: 1; transform: none; }
+.motion .stack-stat {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity .7s ease-out, transform .9s var(--ease);
+}
+.motion .stack-stat.is-in { opacity: 1; transform: none; }
+.motion .stack-side {
+  opacity: 0;
+  translate: 0 22px;
+  transition: opacity .6s ease-out, translate .8s var(--ease);
+  transition-delay: .2s;
+}
+.motion .stack-side.is-in { opacity: 1; translate: 0 0; }
+.motion .stack-mark {
+  scale: 0;
+  opacity: 0;
+  transition: scale 1.2s var(--ease), opacity .5s ease-out;
+}
+.motion .stack-loop.is-in .stack-mark { scale: 1; opacity: 1; }
+.motion .loop-ring {
+  scale: 0;
+  opacity: 0;
+  transition: scale 1.4s var(--ease), opacity .6s;
+}
+.motion .stack-loop.is-in .loop-ring { scale: 1; opacity: 1; }
+.motion .loop-hub {
+  scale: 0;
+  opacity: 0;
+  transition: scale .6s cubic-bezier(.34, 1.56, .64, 1) .5s, opacity .4s .5s;
+}
+.motion .stack-loop.is-in .loop-hub { scale: 1; opacity: 1; }
+.motion .loop-pill {
+  opacity: 0;
+  scale: .35;
+  transition: opacity .5s ease-out, scale .65s cubic-bezier(.34, 1.56, .64, 1);
+  transition-delay: calc(.75s + var(--i, 0) * 70ms);
+}
+.motion .stack-loop.is-in .loop-pill { opacity: 1; scale: 1; }
+.motion .stack-badge {
+  opacity: 0;
+  scale: .4;
+  rotate: -30deg;
+  transition: opacity .5s, scale .7s cubic-bezier(.34, 1.56, .64, 1) .7s, rotate .7s cubic-bezier(.34, 1.56, .64, 1) .7s;
+}
+.motion .stack-badge.is-in { opacity: 1; scale: 1; rotate: 0; }
+.motion .stack-stem {
+  scale: 1 0;
+  transform-origin: top;
+  transition: scale .5s var(--ease) .55s;
+}
+.motion .stack-stem.is-in { scale: 1 1; }
+.motion .stack-hubcard {
+  opacity: 0;
+  translate: 0 26px;
+  scale: .92;
+  transition: opacity .5s ease-out .85s, translate .7s var(--ease) .85s, scale .7s var(--ease) .85s;
+}
+.motion .stack-hubcard.is-in { opacity: 1; translate: 0 0; scale: 1; }
+
+/* ---------- highlights ---------- */
+.hl-card {
+  transform: scale(var(--hs, 1)) rotateX(var(--hr, 0deg));
+  transform-origin: 50% 0;
+  will-change: transform;
+}
+.motion .hl-card .board-card,
+.motion .hl-card .req,
+.motion .hl-card .agent-user,
+.motion .hl-card .agent-answer,
+.motion .hl-card .dictate-frame {
+  opacity: 0;
+  translate: 0 16px;
+  transition: opacity .55s ease-out, translate .75s var(--ease);
+}
+.motion .hl-card.is-in .board-card,
+.motion .hl-card.is-in .req,
+.motion .hl-card.is-in .agent-user,
+.motion .hl-card.is-in .agent-answer,
+.motion .hl-card.is-in .dictate-frame { opacity: 1; translate: 0 0; }
+.motion .hl-card.is-in .board-card:nth-child(2) { transition-delay: .08s; }
+.motion .hl-card.is-in .board-card:nth-child(3) { transition-delay: .16s; }
+.motion .hl-card.is-in .req:nth-child(2) { transition-delay: .1s; }
+.motion .hl-card.is-in .req:nth-child(3) { transition-delay: .2s; }
+.motion .hl-card.is-in .agent-answer { transition-delay: .3s; }
+.motion .hl-card.is-in .dictate-frame { transition-delay: .1s; }
+.motion .hl-card .board-drag {
+  opacity: 0;
+  translate: 24px 22px;
+  rotate: 10deg;
+  transition: opacity .5s, translate .8s var(--ease), rotate .8s var(--ease);
+  transition-delay: .25s;
+}
+.motion .hl-card.is-in .board-drag { opacity: 1; translate: 0 0; rotate: 3deg; }
+.motion .hl-card .cursor { opacity: 0; transition: opacity .45s ease-out .55s; }
+.motion .hl-card.is-in .cursor { opacity: 1; }
+.motion .hl-card .tl-bar { scale: 0 1; transform-origin: left; transition: scale .9s var(--ease); }
+.motion .hl-card.is-in .tl-bar { scale: 1 1; }
+.motion .hl-card.is-in .tl-bar:nth-of-type(4) { transition-delay: .12s; }
+.motion .hl-card.is-in .tl-bar:nth-of-type(5) { transition-delay: .24s; }
+.motion .hl-card.is-in .tl-bar:nth-of-type(6) { transition-delay: .36s; }
+.motion .hl-card .waveform i { animation: none; }
+.motion .hl-card.is-in .waveform i {
+  animation: wave 1.1s ease-in-out infinite alternate;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+@keyframes wave { from { scale: 1 .55; } to { scale: 1 1; } }
+
+/* ---------- features ---------- */
+.motion .feat-grid { perspective: 900px; }
+.motion .feat-card {
+  opacity: 0;
+  transform: rotateX(-65deg);
+  transform-origin: top center;
+  transition: opacity .9s ease-out, transform .9s cubic-bezier(.22, 1, .36, 1);
+  transition-delay: calc(var(--i, 0) * 45ms);
+}
+.motion .feat-card.is-in { opacity: 1; transform: rotateX(0); }
+@media (max-width: 1023px) {
+  .motion .feat-card { transform: translateY(24px); }
+  .motion .feat-card.is-in { transform: none; }
+}
+.feat-icon svg { width: 100%; max-width: 100%; height: auto; display: block; }
+.feat-card:hover .feat-icon svg { transform: none; }
+
+/* ---------- folders ---------- */
+.motion .folder {
+  opacity: 0;
+  translate: 0 38px;
+  transition: opacity .6s ease-out, translate .8s var(--ease);
+  transition-delay: calc(var(--i, 0) * 55ms);
+}
+.motion .folders.is-in .folder { opacity: 1; translate: 0 0; }
+.folders-tile:hover .folder { translate: 0 calc(var(--i, 0) * -2px); }
+.folders-tile:hover .folder:nth-child(odd) { rotate: -1.2deg; }
+.folders-tile:hover .folder:nth-child(even) { rotate: 1.2deg; }
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .split .w > span { transform: none; transition: none; }
+  .orbit-item { --s: 1; --o: 1; transition: none; }
+  .hl-card { transform: none !important; }
+  .motion .feat-card,
+  .motion .folder,
+  .motion .stack-app,
+  .motion .stack-stat,
+  .motion .stack-side,
+  .motion .loop-ring,
+  .motion .loop-hub,
+  .motion .loop-pill,
+  .motion .stack-badge,
+  .motion .stack-hubcard,
+  .motion .hl-card .board-card,
+  .motion .hl-card .req,
+  .motion .hl-card .agent-user,
+  .motion .hl-card .agent-answer,
+  .motion .hl-card .dictate-frame { opacity: 1; translate: 0 0; scale: 1; transition: none; }
+  .motion .stack-stem { scale: 1 1; }
+  .motion .stack-lines { clip-path: none; background-image: none; }
+  .motion .hl-card .tl-bar { scale: 1 1; }
+  .motion .hl-card .board-drag { opacity: 1; translate: 0 0; rotate: 3deg; }
+  .motion .hl-card .cursor { opacity: 1; }
+}

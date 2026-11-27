@@ -1159,7 +1159,7 @@ and content remain the property of Awwwards and the credited creators — don't
 bulk-scrape, redistribute, or republish them. If you use this commercially,
 review awwwards.com's terms yourself.
 
-## Built with awwwards-mcp: seven real sites
+## Built with awwwards-mcp: nine real sites
 
 Four complete sites were built through the full inspiration loop this MCP
 enables, using nothing but the server's tools plus the shipped
@@ -1167,7 +1167,7 @@ enables, using nothing but the server's tools plus the shipped
 loop — and every correction the loop caught on the way became doctrine in the
 skill.
 
-> **Built in one shot, by a model that can't watch video.** All three sites
+> **Built in one shot, by a model that can't watch video.** These sites
 > were built in a single prompt run on **GLM 5.3-flash** — which does not
 > support video input. The loop's motion study worked entirely from
 > frame-tiled filmstrips (ffmpeg, 1–2 fps per element) instead of watching
@@ -1284,6 +1284,34 @@ open `index.html` directly, no server or build step needed.
 **7. Two26 Studio study recreation** ([`showcase/two26/`](showcase/two26/index.html)) — a hand-authored recreation of two26.studio built with the 1.14 MCP. The site is an inner-scroller page (`body{position:fixed}` + `.page{overflow-y:auto}`): `analyze_page_structure` now reports `scrollRoot: div.page` and the full 13,103px band map; `capture_live_site` waits out the preloader, then returns `mode:"anchors"` — six ordered viewport shots down that inner scroller (JSON paths, no inline image). Built from eight component packs, scroll/hover censuses + motion DNA, with 13 GSAP triggers (2 scrubs, 1 pin), local fonts/media, QA at five viewports, and a 54-file provenance list in its README. Mandatory study-build disclaimer: **not for publication**; replace borrowed assets before any real use.
 
 ![Two26 Studio study recreation — hero](assets/two26-hero.png)
+
+**8. [Loopsii](showcase/loopsii/index.html)** ([source](showcase/loopsii/)) — a hand-built static study recreation of loopsii.com, kept as a private reference study and documented in [its own README](showcase/loopsii/README.md): preloader (lime sheet, crosshair, flying corner dots, `000 %` counter, Lottie mark handoff), a 3×21 hero shape field cropped to 11 columns with shapes shuffling between slots, the hero-to-intro coral logo travel and orbit, a pinned desktop app demo whose title shrinks as the dashboard rises, the ruled stack diagram and tool cards, stacking highlight cards with an income gauge, and 18 inline feature glyphs, each running its own looping timeline. Reduced-motion keeps all content visible and collapses the animated scenes. Reference/build frames, motion GIFs, the QA matrix and the Playwright capture scripts are in [`showcase/loopsii/evidence/`](showcase/loopsii/evidence/), and the README carries the full asset provenance plus the mandatory study-build notice. **Not for publication**: the design, copy, fonts, images, video and Lottie files belong to Loopsii and their creators; the borrowed assets and copy must be replaced and licensed before any real use.
+
+![Loopsii study recreation — desktop hero: "One app for your contracts" over the shape field](assets/loopsii-hero.png)
+
+![Loopsii hero motion — the headline cycling while shapes shuffle between slots](assets/loopsii-motion.gif)
+
+| Stack — ruled grid, tool cards and yearly total | Features — feature cards with inline SVG glyphs |
+|---|---|
+| ![Loopsii stack — six tool cards in a ruled grid with a $948 yearly total](assets/loopsii-stack.png) | ![Loopsii features — feature cards with inline SVG glyphs](assets/loopsii-features.png) |
+
+![Loopsii mobile 390×844 — compact hero with the shape field](assets/loopsii-mobile.png)
+
+**9. [Pomegranate](showcase/pomegranate/index.html)** ([source](showcase/pomegranate/)) - a hand-built static study recreation of [pomegranate.health](https://pomegranate.health/) (Awwwards Honorable Mention, 26 Jul 2025), reconstructed from live evidence - full-page captures, per-section HTML, computed CSS tokens and the network log - rather than from screenshots. The original Vue 3 + Vite page is reproduced as plain HTML/CSS/JS with hand-written CSS (same token values and class names, code not copied): anime.js v4.0.2 word-by-word elastic heading reveals, six Rive illustrations mounted through `@rive-app/canvas-lite` 2.27.2 with lazy intersection loading, the stacked gradient hero card, and phone media masked by the original SVG mask. The recorded QA run measured **7,415 px** against the reference's **7,367 px** (~0.7% height delta); QA passed at 1440 / 768 / 390 plus a reduced-motion run, with 0 console errors, 0 failed requests and all six Rive canvases mounted at every width. Ships with the mandatory study-build notice and a per-asset provenance table in its own README.
+
+> **Not for publication.** Borrowed fonts, copy, illustrations, video and imagery must be replaced and licensed before any real use - the typefaces (TTCPro, Gliker) and six `.riv` illustrations are the original's. See [`showcase/pomegranate/README.md`](showcase/pomegranate/README.md) for every borrowed asset.
+
+| Desktop hero - elastic headline and three rising phones over the cream card | A Rive feature band - "Always looking ahead" |
+|---|---|
+| ![Pomegranate study recreation - desktop hero with the elastic Gliker headline and three rising phone mockups over the cream card](assets/pomegranate-hero.png) | ![Pomegranate study recreation - "Always looking ahead" feature with the Rive pomegranate pie illustration and a network of patient cards bleeding off the right edge](assets/pomegranate-sections.png) |
+
+The page in motion - hero reveal, scroll-synced phones and the transition into the first Rive feature:
+
+![Pomegranate study recreation - motion capture: hero heading reveal, parallax phone rise and scroll into the first Rive feature](assets/pomegranate-motion.gif)
+
+| Mobile 390x844 | Menu sheet, 1440 |
+|---|---|
+| ![Pomegranate study recreation - mobile hero at 390x844 with the gradient band stack, five-line headline and fixed bottom controls](assets/pomegranate-mobile.png) | ![Pomegranate study recreation - open menu sheet with four-column feature cards on the pink background](assets/pomegranate-menu.png) |
 
 ## Skills used to build these
 

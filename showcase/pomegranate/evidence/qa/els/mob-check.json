@@ -1,0 +1,14 @@
+{
+  "h1TextAlign": "center",
+  "h1Width": 283,
+  "h1X": 54,
+  "contentTextAlign": "center",
+  "contentAlignItems": "center",
+  "header": {
+    "top": 752,
+    "bottom": 816,
+    "h": 64,
+    "pos": "fixed"
+  },
+  "vh": 844
+}

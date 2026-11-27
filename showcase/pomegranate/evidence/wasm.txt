@@ -1,0 +1,10 @@
+instantiateStreaming => 2
+WebAssembly => 9
+data:application/wasm => 0
+base64 => 1
+atob( => 0
+wasmBinary => 2
+locateFile => 3
+
+--- wasm ctx ---
+eFile?m.locateFile(ae,k):k+ae}function me(g){if(g==z&&_e)return new Uint8Array(_e);if(L)return L(g);throw"both async and sync fetching of the wasm failed"}function re(g){if(!_e&&(F||V)){if(typeof fetch=="function"&&!g.startsWith("file://"))return fetch(g,{credentials:"same-origin"}).then(p=>{if(!p.ok)throw"failed to load wasm binary file at '"+g+"'";return p.arrayBuffer()}).catch(()=>me(g));if(Y)return new Promise((p,y)=>{Y(g,w=>p(new Uint8Array(w)),y)})}return Promise.resolve().then(()=>me(g))}function v(g,p,y){return re(g).then(w=>WebAssembly.instantiate(w,p)).then(w=>w).then(y,w=>{ie("failed to asynchronously prepare wasm: "+w),U(w)})}function c(g,p){var y=z;return _e||typeof WebAssembly.instantiateStreaming!="function"||K(y)||y.startsWith("file://")||typeof fetch!="function"?v(y,g,p):fetch(y,{credentials:"same-origin"}).then(w=>WebAssembly.instantiateStreaming(w,g).then(p,function(M){return ie("wasm streaming compile failed: "+M),ie("falling back to ArrayBuffer instantiation"),v(y,g,p)}))}var d=g=>{for(;0<g.length;)g.shift()(m)};function b(g){if(g===void 0)return"_unknown";g=g.replace(/[^a-zA-Z0-9_]/g,"$");var p=g.charCodeAt(0);return 48<=p&&57>=p?`_${g}`:g}function x(g,p){retu
