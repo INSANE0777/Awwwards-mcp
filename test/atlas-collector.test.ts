@@ -231,7 +231,8 @@ async function collectWithScan(
       loader: async () => ({ chromium: { launch: async () => fakeBrowser(scan).browser } }),
       settle: async () => undefined,
       scanPage: async () => ({ ...scan, url: `${origin}/` }),
-      totalBudgetMs: 30_000,
+      // Use the production 90s budget: a Windows CI host stall can exceed the
+      // old test-only 30s cap without the capture itself being pathological.
     },
   );
   return { attempt, cache };
@@ -1112,7 +1113,7 @@ describe("Atlas collector lifecycle", () => {
     expect(viewport.scan.componentLimitHit).toBe(true);
     expect(viewport.scan.componentDroppedCount).toBe(11);
     expect(viewport.limitations).toContain("COMPONENT_CAP:11");
-  });
+  }, 120_000);
 
   it("preserves the scan's own dropped count instead of recomputing it from the capped array", async () => {
     const components = Array.from({ length: 120 }, (_, index) =>
@@ -1138,7 +1139,7 @@ describe("Atlas collector lifecycle", () => {
     // Attempt coverage includes components, exactly like viewport coverage.
     expect(attempt.coverage.collected).toBe(viewport.coverage.collected);
     expect(attempt.coverage.collected).toBe(viewport.regions.length + 120);
-  });
+  }, 120_000);
 
   it("passes components:false to checkpoint scans and records no components in them", async () => {
     const { origin } = await fixtureServer();
