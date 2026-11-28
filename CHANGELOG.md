@@ -3,6 +3,13 @@
 > **Versioning note:** every release through v1.6.0 was an **alpha**;
 > `v1.0.0-beta.1` was the beta. `v1.0.0` is the first **stable** release.
 
+## v1.22.1 - 2026-11-28
+
+### Requests identify as Awwwards MCP
+
+- Every outgoing request now sends `awwwards-mcp/<version> (+https://github.com/INSANE0777/Awwwards-mcp)` instead of the browser-masquerading User-Agent, and the version comes from the installed `package.json`. Awwwards answered HTTP 403 for the old header on the website listing and Annual Awards pages, so those requests failed on 1.22.0.
+- No tool names, schemas, inputs or outputs change; this is a request-identity hotfix only.
+
 ## v1.22.0 - 2026-11-23
 
 ### Reference shortlist
