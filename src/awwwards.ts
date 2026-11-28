@@ -1,10 +1,13 @@
+import { readFileSync } from "node:fs";
 import { posix } from "node:path";
 
 export const BASE_URL = "https://www.awwwards.com";
 export const ASSETS_URL = "https://assets.awwwards.com";
 
-export const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 awwwards-mcp/1.0";
+const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+  version: string;
+};
+export const USER_AGENT = `awwwards-mcp/${version} (+https://github.com/INSANE0777/Awwwards-mcp)`;
 
 export const AWARD_FILTERS = {
   sotd: "websites/sites_of_the_day",

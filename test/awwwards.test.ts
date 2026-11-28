@@ -218,10 +218,17 @@ describe("AwwwardsClient", () => {
       }),
     ) as unknown as typeof fetch;
 
-  it("fetches and parses a listing page through the rate limiter", async () => {
-    const client = new AwwwardsClient({ fetchFn: fakeFetch(listingHtml()) });
+  it("fetches a listing page while identifying the installed MCP version", async () => {
+    const { version } = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")) as {
+      version: string;
+    };
+    const fetchFn = vi.fn<typeof fetch>(async () => new Response(listingHtml()));
+    const client = new AwwwardsClient({ fetchFn });
     const html = await client.getHtml("/websites/");
     expect(html).toContain("card-site");
+    expect(new Headers(fetchFn.mock.calls[0]?.[1]?.headers).get("User-Agent")).toBe(
+      `awwwards-mcp/${version} (+https://github.com/INSANE0777/Awwwards-mcp)`,
+    );
   });
 
   it.each([403, 429])("throws BlockedError immediately on %i without retrying", async (status) => {
