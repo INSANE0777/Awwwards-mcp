@@ -1,0 +1,75 @@
+========== stateMachines
+
+--- @299950 ---
+===null?this.instance.advance(h):(this.instance.time=0,this.instance.advance(this.scrubTo),this.scrubTo=null
+)},f.prototype.apply=function(h){this.instance.apply(h)},f.prototype.cleanup=function(){this.instance.delete()},f}()},(o,a,l)=>{l.r(a),l.d(a,{BLANK_UR
+L:()=>f.BLANK_URL,registerTouchInteractions:()=>u.registerTouchInteractions,sanitizeUrl:()=>f.sanitizeUrl});var u=l(6),f=l(7)},(o,a,l)=>{l.r(a),l.d(a,
+{registerTouchInteractions:()=>h});var u=void 0,f=function(_,m){var T,R;return["touchstart","touchmove"].indexOf(_.type)>-1&&(!((T=_.touches)===null||
+T===void 0)&&T.length)?(m||_.preventDefault(),{clientX:_.touches[0].clientX,clientY:_.touches[0].clientY}):_.type==="touchend"&&(!((R=_.changedTouches
+)===null||R===void 0)&&R.length)?{clientX:_.changedTouches[0].clientX,clientY:_.changedTouches[0].clientY}:{clientX:_.clientX,clientY:_.clientY}},h=fu
+nction(_){var m=_.canvas,T=_.artboard,R=_.stateMachines,B=R===void 0?[]:R,I=_.renderer,A=_.rive,E=_.fit,O=_.alignment,P=_.isTouchScrollEnabled,$=P===v
+oid 0?!1:P,H=_.layoutScaleFactor,F=H===void 0?1:H;if(!m||!B.length||!I||!A||!T||typeof window>"u")return null;var V=null,k=!1,Y=function(te){if(k&&te 
+instanceof MouseEvent){te.type=="mouseup"&&(k=!1);return}k=$&&te.type==="touchend"&&V==="touchstart",V=te.type;var ie=te.currentTarget.getBoundingClie
+ntRect(),_e=f(te,$),X=_e.clientX,le=_e.clientY;if(!(!X&&!le)){var ce=X-ie.left,ue=le-ie.top,Oe=A.computeAlignment(E,O,{minX:0,minY:0,maxX:ie.width,max
+Y:ie.height},T.bounds,F),ke=new A.Mat2D;Oe.invert(ke);var Ze=new A.Vec2D(ce,ue),Fe=A.mapXY(ke,Ze),Ie=Fe.x(),Le=Fe.y();switch(Fe.delete(),ke.delete(),Z
+e.delete(),Oe.delete(),te.type){case"mouseout":for(var Ne=0,W=B;Ne<W.length;Ne++){var ge=W[Ne];ge.pointerMove(Ie,Le)}break;case"touchmove":case"mouseo
+ver":case"mousemove":{for(var fe=0,ye=B;fe<ye.length;fe++){var ge=ye[fe];ge.pointerMove(Ie,Le)}break}case"touchstart":case"mousedown":{for(var Me=0,Be
+=B;Me<Be.length;Me++){var ge=Be[Me];ge.pointerDown(Ie,Le)}break}case"touchend":case"mouseup":{for(var S=0,C=B;S<C.length;S++){var ge=C[S];ge.pointerUp
+(Ie,Le)}break}}}},L=Y.bind(u);return m.add
+
+--- @312564 ---
+reportedEventCount()},v.prototype.reportedEventAt=function(c){return this.instance.reporte
+dEventAt(c)},v.prototype.initInputs=function(c){for(var d=0;d<this.instance.inputCount();d++){var b=this.instance.input(d);this.inputs.push(this.mapRu
+ntimeInput(b,c))}},v.prototype.mapRuntimeInput=function(c,d){if(c.type===d.SMIInput.bool)return new $(P.Boolean,c.asBool());if(c.type===d.SMIInput.num
+ber)return new $(P.Number,c.asNumber());if(c.type===d.SMIInput.trigger)return new $(P.Trigger,c.asTrigger())},v.prototype.cleanup=function(){this.inpu
+ts.forEach(function(c){c.delete()}),this.inputs.length=0,this.instance.delete()},v.prototype.bindViewModelInstance=function(c){c.runtimeInstance!=null
+&&this.instance.bindViewModelInstance(c.runtimeInstance)},v}(),V=function(){function v(c,d,b,x,j){x===void 0&&(x=[]),j===void 0&&(j=[]),this.runtime=c
+,this.artboard=d,this.eventManager=b,this.animations=x,this.stateMachines=j}return v.prototype.add=function(c,d,b){if(b===void 0&&(b=!0),c=K(c),c.leng
+th===0)this.animations.forEach(function(Qe){return Qe.playing=d}),this.stateMachines.forEach(function(Qe){return Qe.playing=d});else for(var x=this.an
+imations.map(function(Qe){return Qe.name}),j=this.stateMachines.map(function(Qe){return Qe.name}),q=0;q<c.length;q++){var oe=x.indexOf(c[q]),ne=j.inde
+xOf(c[q]);if(oe>=0||ne>=0)oe>=0?this.animations[oe].playing=d:this.stateMachines[ne].playing=d;else{var de=this.artboard.animationByName(c[q]);if(de){
+var Ae=new l.Animation(de,this.artboard,this.runtime,d);Ae.advance(0),Ae.apply(1),this.animations.push(Ae)}else{var Ge=this.artboard.stateMachineByNam
+e(c[q]);if(Ge){var st=new F(Ge,this.runtime,d,this.artboard);this.stateMachines.push(st)}}}}return b&&(d?this.eventManager.fire({type:k.Play,data:this
+.playing}):this.eventManager.fire({type:k.Pause,data:this.paused})),d?this.playing:this.paused},v.prototype.initLinearAnimations=function(c,d){for(var
+ b=this.animations.map(function(ne){return ne.name}),x=0;x<c.length;x++){var j=b.indexOf(c[x]);if(j>=0)this.animations[j].playing=d;else{var q=this.ar
+tboard.animationByName(c[x]);if(q){var oe=new l.Animation(q,
+
+--- @312725 ---
+ance.inputCount();d++){var b=this.instance.input(d);this.inputs.push(thi
+s.mapRuntimeInput(b,c))}},v.prototype.mapRuntimeInput=function(c,d){if(c.type===d.SMIInput.bool)return new $(P.Boolean,c.asBool());if(c.type===d.SMIIn
+put.number)return new $(P.Number,c.asNumber());if(c.type===d.SMIInput.trigger)return new $(P.Trigger,c.asTrigger())},v.prototype.cleanup=function(){th
+is.inputs.forEach(function(c){c.delete()}),this.inputs.length=0,this.instance.delete()},v.prototype.bindViewModelInstance=function(c){c.runtimeInstanc
+e!=null&&this.instance.bindViewModelInstance(c.runtimeInstance)},v}(),V=function(){function v(c,d,b,x,j){x===void 0&&(x=[]),j===void 0&&(j=[]),this.ru
+ntime=c,this.artboard=d,this.eventManager=b,this.animations=x,this.stateMachines=j}return v.prototype.add=function(c,d,b){if(b===void 0&&(b=!0),c=K(c)
+,c.length===0)this.animations.forEach(function(Qe){return Qe.playing=d}),this.stateMachines.forEach(function(Qe){return Qe.playing=d});else for(var x=
+this.animations.map(function(Qe){return Qe.name}),j=this.stateMachines.map(function(Qe){return Qe.name}),q=0;q<c.length;q++){var oe=x.indexOf(c[q]),ne
+=j.indexOf(c[q]);if(oe>=0||ne>=0)oe>=0?this.animations[oe].playing=d:this.stateMachines[ne].playing=d;else{var de=this.artboard.animationByName(c[q]);
+if(de){var Ae=new l.Animation(de,this.artboard,this.runtime,d);Ae.advance(0),Ae.apply(1),this.animations.push(Ae)}else{var Ge=this.artboard.stateMachi
+neByName(c[q]);if(Ge){var st=new F(Ge,this.runtime,d,this.artboard);this.stateMachines.push(st)}}}}return b&&(d?this.eventManager.fire({type:k.Play,da
+ta:this.playing}):this.eventManager.fire({type:k.Pause,data:this.paused})),d?this.playing:this.paused},v.prototype.initLinearAnimations=function(c,d){
+for(var b=this.animations.map(function(ne){return ne.name}),x=0;x<c.length;x++){var j=b.indexOf(c[x]);if(j>=0)this.animations[j].playing=d;else{var q=
+this.artboard.animationByName(c[x]);if(q){var oe=new l.Animation(q,this.artboard,this.runtime,d);oe.advance(0),oe.apply(1),this.animations.push(oe)}el
+se console.error("Animation with name ".concat(c[x]," not found."))}}},v.proto
+
+--- @312854 ---
+ction(c,d){if(c.type===d.SMIInput.bool)return new $(P.
+Boolean,c.asBool());if(c.type===d.SMIInput.number)return new $(P.Number,c.asNumber());if(c.type===d.SMIInput.trigger)return new $(P.Trigger,c.asTrigge
+r())},v.prototype.cleanup=function(){this.inputs.forEach(function(c){c.delete()}),this.inputs.length=0,this.instance.delete()},v.prototype.bindViewMod
+elInstance=function(c){c.runtimeInstance!=null&&this.instance.bindViewModelInstance(c.runtimeInstance)},v}(),V=function(){function v(c,d,b,x,j){x===vo
+id 0&&(x=[]),j===void 0&&(j=[]),this.runtime=c,this.artboard=d,this.eventManager=b,this.animations=x,this.stateMachines=j}return v.prototype.add=funct
+ion(c,d,b){if(b===void 0&&(b=!0),c=K(c),c.length===0)this.animations.forEach(function(Qe){return Qe.playing=d}),this.stateMachines.forEach(function(Qe
+){return Qe.playing=d});else for(var x=this.animations.map(function(Qe){return Qe.name}),j=this.stateMachines.map(function(Qe){return Qe.name}),q=0;q<
+c.length;q++){var oe=x.indexOf(c[q]),ne=j.indexOf(c[q]);if(oe>=0||ne>=0)oe>=0?this.animations[oe].playing=d:this.stateMachines[ne].playing=d;else{var 
+de=this.artboard.animationByName(c[q]);if(de){var Ae=new l.Animation(de,this.artboard,this.runtime,d);Ae.advance(0),Ae.apply(1),this.animations.push(A
+e)}else{var Ge=this.artboard.stateMachineByName(c[q]);if(Ge){var st=new F(Ge,this.runtime,d,this.artboard);this.stateMachines.push(st)}}}}return b&&(d
+?this.eventManager.fire({type:k.Play,data:this.playing}):this.eventManager.fire({type:k.Pause,data:this.paused})),d?this.playing:this.paused},v.protot
+ype.initLinearAnimations=function(c,d){for(var b=this.animations.map(function(ne){return ne.name}),x=0;x<c.length;x++){var j=b.indexOf(c[x]);if(j>=0)t
+his.animations[j].playing=d;else{var q=this.artboard.animationByName(c[x]);if(q){var oe=new l.Animation(q,this.artboard,this.runtime,d);oe.advance(0),
+oe.apply(1),this.animations.push(oe)}else console.error("Animation with name ".concat(c[x]," not found."))}}},v.prototype.initStateMachines=function(c
+,d){for(var b=this.stateMachines.map(function(ne){return ne.name}),x=0;x<c.length;x++){var j=b.i
+
+--- @313021 ---
+ger)return new $(P.Trigger,c.asTrigg
+er())},v.prototype.cleanup=function(){this.inputs.forEach(function(c){c.delete()}),this.inputs.length=0,this.instance.delete()},v.prototype.bindViewMo
+delInstance=function(c){c.runtimeInstance!=null&&this.instance.bindViewModelInstance(c.runtimeInstance)},v}(),V=function(){function v(c,d,b,x,j){x===v
+oid 0&&(x=[]),j===void 0&&(j=[]),this.runtime=c,this.artboard=d,this.eventManager=b,this.animations=x,this.stateMachines=j}return v.prototype.add=func

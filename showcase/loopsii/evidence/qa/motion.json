@@ -1,0 +1,67 @@
+{
+ "title": {
+  "4300": {
+   "font": "124.8px",
+   "top": 414,
+   "text": "That's why Loopsii exists"
+  },
+  "4800": {
+   "font": "83.913px",
+   "top": 395,
+   "text": "That's why Loopsii exists"
+  },
+  "5300": {
+   "font": "55.5px",
+   "top": 144,
+   "text": "That's why Loopsii exists"
+  }
+ },
+ "stack": {
+  "top": -365,
+  "gridTop": -55,
+  "linesIn": 4,
+  "linesTotal": 16,
+  "cardsIn": 6,
+  "mark": {
+   "x": 585,
+   "y": 709.75,
+   "width": 270,
+   "height": 270,
+   "top": 709.75,
+   "right": 855,
+   "bottom": 979.75,
+   "left": 585
+  },
+  "ring": {
+   "x": 541.5,
+   "y": 666.25,
+   "width": 357,
+   "height": 357,
+   "top": 666.25,
+   "right": 898.5,
+   "bottom": 1023.25,
+   "left": 541.5
+  },
+  "hub": "$ 120 /yr"
+ },
+ "features": {
+  "icon0": {
+   "transform": "translate(398.77062775049353 -81.5) rotate(0) scale(1 1)",
+   "cardsIn": 11
+  },
+  "icon1": {
+   "transform": "translate(396.22187023769675 -81.5) rotate(0) scale(1 1)",
+   "cardsIn": 11
+  },
+  "moved": true
+ },
+ "overflow": 0,
+ "errors": [],
+ "reduced": {
+  "motionClass": "",
+  "cardsOpacity": "1",
+  "cardTransform": "none",
+  "featureArt": "translate(294.65 -81.5) rotate(0) scale(1 1)",
+  "overflow": 0
+ }
+}

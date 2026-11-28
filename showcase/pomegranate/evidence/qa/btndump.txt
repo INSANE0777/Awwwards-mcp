@@ -1,0 +1,65 @@
+{
+  "left": {
+    "box": [
+      207,
+      83
+    ],
+    "spanBox": [
+      207,
+      83
+    ],
+    "iconBox": [
+      21,
+      21
+    ],
+    "btnFont": "32.2381px",
+    "spanFont": "12.8952px",
+    "spanWidth": "207.438px",
+    "spanWhiteSpace": "pre-wrap",
+    "btnDisplay": "inline-flex",
+    "spanDisplay": "flex",
+    "spanFlexDir": "row",
+    "spanText": "Learn more",
+    "spanTextAlign": "center"
+  },
+  "right": {
+    "box": [
+      222,
+      44
+    ],
+    "spanBox": [
+      222,
+      44
+    ],
+    "iconBox": null,
+    "btnFont": "32.2381px",
+    "spanFont": "12.8952px",
+    "spanWidth": "221.562px",
+    "spanWhiteSpace": "pre-wrap",
+    "btnDisplay": "inline-flex",
+    "spanDisplay": "flex",
+    "spanFlexDir": "row",
+    "spanText": "Register your interest",
+    "spanTextAlign": "start"
+  },
+  "heroCTA": {
+    "box": [
+      279,
+      64
+    ],
+    "spanBox": [
+      279,
+      64
+    ],
+    "iconBox": null,
+    "btnFont": "32.2381px",
+    "spanFont": "16.119px",
+    "spanWidth": "279.141px",
+    "spanWhiteSpace": "pre-wrap",
+    "btnDisplay": "flex",
+    "spanDisplay": "flex",
+    "spanFlexDir": "row",
+    "spanText": "Register your interest",
+    "spanTextAlign": "start"
+  }
+}

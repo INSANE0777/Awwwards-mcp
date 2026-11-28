@@ -1,0 +1,10 @@
+{
+ "id": "stack-fingerprint-v1",
+ "framework": "static",
+ "frameworkMarkers": [],
+ "frameworkConfidence": "low",
+ "css": "custom",
+ "cssMarkers": [],
+ "cssConfidence": "low",
+ "libs": []
+}

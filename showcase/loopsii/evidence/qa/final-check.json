@@ -1,0 +1,31 @@
+{
+ "desktop": {
+  "height": 23246,
+  "overflow": 0,
+  "errors": [],
+  "font": "Saans, \"Helvetica Neue\", Arial, sans-serif",
+  "heroBg": "url(\"http://localhost:5173/assets/img/cover.DgwvykuR.webp\")",
+  "externalLinksOk": true
+ },
+ "mobile": {
+  "height": 20631,
+  "overflow": 0,
+  "errors": [],
+  "font": "Saans, \"Helvetica Neue\", Arial, sans-serif",
+  "heroBg": "url(\"http://localhost:5173/assets/img/cover.DgwvykuR.webp\")"
+ },
+ "tablet": {
+  "height": 21247,
+  "overflow": 0,
+  "errors": [],
+  "font": "Saans, \"Helvetica Neue\", Arial, sans-serif",
+  "heroBg": "url(\"http://localhost:5173/assets/img/cover.DgwvykuR.webp\")"
+ },
+ "wide": {
+  "height": 27894,
+  "overflow": 0,
+  "errors": [],
+  "font": "Saans, \"Helvetica Neue\", Arial, sans-serif",
+  "heroBg": "url(\"http://localhost:5173/assets/img/cover.DgwvykuR.webp\")"
+ }
+}

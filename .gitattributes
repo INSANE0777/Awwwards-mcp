@@ -1,2 +1,6 @@
 * text=auto eol=lf
 test/fixtures/*.html -text
+
+# Copied study-build evidence and vendored libraries keep their source bytes.
+showcase/**/evidence/** whitespace=-blank-at-eol,-blank-at-eof
+showcase/**/vendor/** whitespace=-blank-at-eol,-blank-at-eof

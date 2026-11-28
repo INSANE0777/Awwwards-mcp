@@ -1,0 +1,2 @@
+wasm: [ 'https://unpkg.com/@rive-app/canvas-lite@2.27.2/rive.wasm' ]
+total 50

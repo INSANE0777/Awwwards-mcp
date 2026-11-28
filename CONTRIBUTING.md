@@ -1,8 +1,8 @@
 # Contributing to awwwards-mcp
 
 Free, open-source MCP server giving AI agents design inspiration from
-[Awwwards](https://www.awwwards.com/). PRs are welcome — this guide covers
-everything you need, from fork to merged PR.
+[Awwwards](https://www.awwwards.com/). This guide explains which contributions
+we accept and how to submit them.
 
 ## Ways to contribute
 
@@ -13,8 +13,20 @@ everything you need, from fork to merged PR.
   [issue](https://github.com/INSANE0777/Awwwards-mcp/issues/new?template=feature_request.md)
   first so we can agree on the shape before you code it.
 - **Code** — bug fixes, parser updates, new tools. Follow the PR flow below.
-- **Docs** — setup guides for more coding agents, clearer README sections,
-  examples. Docs PRs skip most gates (see below).
+- **Docs** — correct inaccurate setup instructions or document a supported
+  workflow. See the pull request policy below.
+
+## Pull request policy
+
+We accept focused PRs that solve a concrete problem for users or maintainers.
+
+- Fix a reproducible bug or update a parser after live markup changes.
+- Add an agreed-on feature or a test that covers a specific regression.
+- Correct documentation that prevents users from completing a supported setup
+  or workflow.
+
+We close README-only PRs. Include README updates in a substantive PR when they
+document the change it delivers.
 
 ## Development setup
 
@@ -121,7 +133,7 @@ Hard constraints the codebase enforces (keep them in new code):
    ```
    fix: strip soft-404 markup from parseDetail body-copy anchor
    feat: add technology filter to search_sites
-   docs: add Codex setup to README
+   docs: correct Windows Chromium setup instructions
    ```
 
    Conventional-ish prefixes (`fix`/`feat`/`docs`/`chore`/`test`) + one-line
@@ -137,19 +149,10 @@ Hard constraints the codebase enforces (keep them in new code):
    a few days; expect comments on parser PRs - fixtures drive everything here,
    so reviews verify fixtures against live markup.
 
-### What gets PRs merged fast
+### Verify documentation changes
 
-- A failing parser + fresh fixture proving the new markup (this is the
-  highest-value contribution the project accepts — awwwards.com drifts).
-- Docs fixes and new agent setup guides (setup shapes verified against the
-  agent's official docs, like the existing README section).
-- Tests tightening floors on volatile values.
-
-### Docs-only PRs
-
-Docs PRs skip the test gates when no `src/`/`test/` file changed — CI still
-runs, it just won't find anything to break. Keep code blocks in README valid
-(embedded JSON is validated in review).
+Run the affected commands or check the instructions against the relevant
+official documentation. Include that verification in the PR description.
 
 ## Reporting security issues
 

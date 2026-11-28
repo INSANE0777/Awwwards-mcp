@@ -1,0 +1,3 @@
+page.goto: Timeout 45000ms exceeded.
+Call log:
+[2m  - navigating to "https://pomegranate.health/", waiting until "load"[22m

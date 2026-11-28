@@ -1,0 +1,10 @@
+ok phones-de22cf24.js 820
+ok phones-3f42a49d.css 812
+ok footer-d5065cc1.js 2594
+ok footer-729e3c66.css 1945
+ok pomegranate-logo-a7584a2f.js 16639
+ok pomegranate-logo-b4f056ee.css 237
+FONT-FACES:
+@font-face{font-family:TTCPro;src:url(/assets/TTCPro-ed9ac02e.woff2) format("woff2"),url(/assets/TTCPro-beb251fb.woff) format("woff"),url(/assets/TTCPro-fff80c5f.ttf) format("truetype");font-weight:0 900;font-display:swap;font-style:normal}
+@font-face{font-family:Gliker;src:url(/assets/Gliker-RegularSemiCondensed-315ea8e4.woff2) format("woff2"),url(/assets/Gliker-RegularSemiCondensed-8cddbb48.woff) format("woff"),url(/assets/Gliker-RegularSemiCondensed-933d8f3c.ttf) format("truetype");font-weight:400;font-style:normal}
+@font-face{font-family:Gliker;src:url(/assets/Gliker-SemiBoldSemiCondensed-d695c20d.woff2) format("woff2"),url(/assets/Gliker-SemiBoldSemiCondensed-eb6fff60.woff) format("woff"),url(/assets/Gliker-SemiBoldSemiCondensed-725d56c6.ttf) format("truetype");font-weight:600;font-style:normal}

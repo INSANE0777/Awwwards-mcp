@@ -1,0 +1,16 @@
+SplitText: 0
+splitText: 0
+onScroll: 1
+stagger: 1
+createTimeline: 1
+utils: 1
+
+head: /**
+ * anime.js - IIFE
+ * @version v4.0.2
+ * @author Julian Garnier
+ * @license MIT
+ * @copyright (c) 2025 Julian Garnier
+ * @see https://animejs.com
+ */
+var anime=function(t){"use strict";const e="undefined"!=typeof window,s=e?window:null,i=e?document:null,r={replace:0,none:1,blend:2},n=Symbol(),o=
