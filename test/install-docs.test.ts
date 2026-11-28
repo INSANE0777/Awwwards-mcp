@@ -34,9 +34,9 @@ const normalize = (text: string) =>
 
 // Isolates the current notes (Unreleased during development, the package
 // version at release time): pins must not be satisfied by an older section.
-const unreleasedSection = (text: string): string => {
+const unreleasedSection = (text: string, version = PKG.version): string => {
   const lines = text.split(/\r?\n/);
-  const heading = `## v${PKG.version}`;
+  const heading = `## v${version}`;
   const start = lines.findIndex((line) => {
     const value = line.trim();
     return value === "## Unreleased" || value === heading || value.startsWith(`${heading} `);
@@ -239,8 +239,9 @@ describe("install documentation", () => {
     expect(text).not.toContain("predates `shortlist_references`");
   });
 
-  it("CHANGELOG current section pins the reference-shortlist claims", () => {
-    const section = unreleasedSection(CHANGELOG);
+  it("CHANGELOG 1.22.0 notes pin the reference-shortlist claims", () => {
+    // A patch release (1.22.1+) need not restate the 1.22.0 feature claims.
+    const section = unreleasedSection(CHANGELOG, "1.22.0");
     expect(section).toContain("### Reference shortlist");
     expect(section).not.toContain("## v1.21.1");
 
